@@ -62,13 +62,39 @@ storage), `ml` (requires the optional ML extra).
 | `test_storage_and_api.py::test_api_healthz_and_recent` | API up, dashboard endpoints respond. |
 | `test_storage_and_api.py::test_api_process_one_and_lookup` | API `/process-one` end-to-end. |
 
+## Group E — /ui aggregation + legacy preservation
+
+| File | Coverage |
+|---|---|
+| `test_ui_endpoints.py::test_root_serves_html_or_fallback` | `GET /` returns SPA shell or the friendly placeholder. |
+| `test_ui_endpoints.py::test_legacy_dashboard_still_served` | `/legacy` and `/legacy-dashboard` still serve the vanilla page. |
+| `test_ui_endpoints.py::test_ui_summary_shape` | `/ui/summary` returns the documented payload keys. |
+| `test_ui_endpoints.py::test_ui_facets_returns_paired_arrays` | Facet entries are `[label, count]` tuples. |
+| `test_ui_endpoints.py::test_ui_timeline_buckets_have_total_and_relevant` | Timeline series shape. |
+| `test_ui_endpoints.py::test_ui_top_symbols_and_reasons` | Leaderboards expose `symbol`/`reason` + `count`. |
+| `test_ui_endpoints.py::test_ui_matrix` | Asset×reason matrix is square. |
+| `test_ui_endpoints.py::test_ui_guards_reflects_real_state` | Live guard snapshot intact (gate=false, quarantine). |
+| `test_ui_endpoints.py::test_ui_benchmark_latest` | Golden-set runs and reports relevance F1. |
+| `test_ui_endpoints.py::test_ui_benchmark_history_is_safe_when_missing` | No history file ⇒ empty list, not 500. |
+| `test_ui_endpoints.py::test_ui_symbol_aggregation` | `/ui/symbol/{sym}` returns the aggregated shape. |
+| `test_ui_endpoints.py::test_diagnostic_flag_in_summary_when_research_mode` | Research mode reports `diagnostic_allowed=true`. |
+| `test_ui_endpoints.py::test_production_safe_summary_refuses_diagnostic` | Even with env flag on, prod-safe reports `diagnostic_allowed=false`. |
+
+## Group F — frontend Vitest
+
+| File | Coverage |
+|---|---|
+| `frontend/src/tests/safeHref.test.ts` | `safeHref` accepts http/https only, rejects `javascript:` / `file:` / null. |
+| `frontend/src/tests/StatusBanner.test.tsx` | Banner shows quarantine + release_gate, warns in diagnostic mode, reds out on guard error. |
+
 ## Running
 
 ```bash
-make test           # everything
-make test-fast      # skip ml + smoke + integration
-make test-guards    # guard only (red here = stop the world)
-make test-smoke     # end-to-end shell
+make test               # all Python tests (86 + 1 skip)
+make test-fast          # skip ml + smoke + integration
+make test-guards        # guard only (red here = stop the world)
+make test-smoke         # end-to-end shell
+(cd frontend && npm test)   # Vitest UI tests (7 tests)
 ```
 
 The `ml` marker is opt-in and runs only when `pip install -e ".[ml]"` has been

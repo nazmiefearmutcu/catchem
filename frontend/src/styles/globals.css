@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark (default) tokens. Overridden in :root.light below. */
+    --bg: #0e1014;
+    --bg-elev: #161922;
+    --bg-elev2: #1f2531;
+    --border: #232838;
+    --border-subtle: #1a1f2a;
+    --fg: #e7ebf0;
+    --fg-dim: #9aa3b2;
+    --fg-muted: #6b7385;
+    --accent: #5fb3ff;
+    color-scheme: dark;
+  }
+  :root:not(.dark) {
+    --bg: #fafbfc;
+    --bg-elev: #ffffff;
+    --bg-elev2: #f1f3f5;
+    --border: #e3e6eb;
+    --border-subtle: #ecedf0;
+    --fg: #0e1014;
+    --fg-dim: #525968;
+    --fg-muted: #7e8696;
+    color-scheme: light;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+  }
+  ::selection {
+    background: rgba(95, 179, 255, 0.3);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border bg-[color:var(--bg-elev)] border-[color:var(--border)] p-3;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2.5 py-0.5 text-xs;
+  }
+  .chip-active {
+    @apply !bg-accent !text-[#0b1018] !border-accent;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-xs hover:bg-[color:var(--bg-elev2)] transition-colors;
+  }
+  .btn-accent {
+    @apply !bg-accent !text-[#0b1018] !border-accent hover:opacity-90;
+  }
+  .input {
+    @apply rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-accent;
+  }
+  .label {
+    @apply text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)];
+  }
+  .kbd {
+    @apply rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-1.5 py-0.5 text-[10px] font-mono;
+  }
+}
+
+@layer utilities {
+  /* Force focus ring visibility for accessibility. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  /* Respect reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

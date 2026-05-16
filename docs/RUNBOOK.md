@@ -12,9 +12,14 @@ This is idempotent. You can re-run it any time. The script:
 - creates `.venv` via `uv` (or falls back to `venv`)
 - installs `fusion_stack[dev]` and `awareness` editable (if available)
 - runs the guard verifier — aborts if the NewsImpact release gate has flipped
+- installs frontend `npm` deps and builds the SPA into `src/fusion_stack/static/app`
 - creates `data/{results,cache,db,logs,vector_index,golden,kaggle,replay}`
 - runs one replay pass over Awareness JSONL
 - starts the API on `127.0.0.1:8087` in the background
+- opens **<http://127.0.0.1:8087/>** for the premium UI; `/legacy` for the old dashboard
+
+Re-runs are cheap. To skip the npm build when you haven't changed `frontend/`:
+`bash scripts/fusion_bootstrap_and_run.sh --skip-frontend-build`.
 
 After bootstrap, you can use the CLI directly:
 
@@ -106,14 +111,34 @@ bootstrap continues.
 
 ```bash
 curl -s http://127.0.0.1:8087/healthz
-curl -s http://127.0.0.1:8087/metrics       | python -m json.tool
-curl -s http://127.0.0.1:8087/dashboard     | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/summary    | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/guards     | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/benchmark/latest | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/matrix     | python -m json.tool
 curl -s http://127.0.0.1:8087/recent?limit=20
 curl -s http://127.0.0.1:8087/records/by-asset-class/rates
 curl -s "http://127.0.0.1:8087/records/by-symbol/AAPL"
 curl -s -X POST -H 'content-type: application/json' \
     -d '{"max_records": 100}' http://127.0.0.1:8087/replay
+curl -s -N --max-time 4 -H 'Accept: text/event-stream' http://127.0.0.1:8087/ui/stream
 ```
+
+## UI dev mode
+
+For hot reload on the React app while iterating:
+
+```bash
+# Terminal 1
+fusion-stack serve
+
+# Terminal 2
+cd frontend && npm install && npm run dev
+# → open http://localhost:5173 (Vite proxies /ui/* to the API on :8087)
+```
+
+The bundle in `src/fusion_stack/static/app` is **only** rebuilt by
+`npm run build` (or the bootstrap script). The Python serving path always
+looks at that directory, never at the Vite dev server.
 
 ## Stopping the API
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fusion_stack one-command bootstrap.
+# fusion_stack one-command bootstrap (v2 — builds the premium UI).
 #
 # This script is idempotent. Re-running is safe.
 #
@@ -12,22 +12,25 @@
 #   6. verify NewsImpact governance guard
 #   7. (optional) warm HF model cache
 #   8. (optional) attempt Kaggle dataset downloads
-#   9. initialize fusion_stack storage
-#  10. run the chosen mode (default: replay_existing)
-#  11. start the FastAPI server in the background
-#  12. print a summary of where outputs/logs/results live
+#   9. install frontend npm deps if needed and build the SPA into src/fusion_stack/static/app
+#  10. initialize fusion_stack storage
+#  11. run the chosen mode (default: replay_existing)
+#  12. start the FastAPI server in the background (serves the premium UI at /)
+#  13. print a summary of where outputs/logs/results live
 
 set -euo pipefail
 
 FUSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$FUSION_ROOT"
 
-# ── parse flags ───────────────────────────────────────────────────────────────
+# ── flags ────────────────────────────────────────────────────────────────────
 MODE="${FUSION_MODE:-replay_existing}"
 WITH_ML="${FUSION_WITH_ML:-0}"
 NO_API="${FUSION_NO_API:-0}"
 MAX_RECORDS="${FUSION_MAX_RECORDS:-50}"
 SKIP_BOOTSTRAP_RUN="${FUSION_SKIP_RUN:-0}"
+SKIP_FRONTEND_BUILD="${FUSION_SKIP_FRONTEND_BUILD:-0}"
+DEV_UI="${FUSION_DEV_UI:-0}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -36,15 +39,27 @@ for arg in "$@"; do
     --mode=*) MODE="${arg#*=}" ;;
     --max=*) MAX_RECORDS="${arg#*=}" ;;
     --skip-run) SKIP_BOOTSTRAP_RUN=1 ;;
+    --skip-frontend-build) SKIP_FRONTEND_BUILD=1 ;;
+    --dev-ui) DEV_UI=1 ;;
     --help|-h)
       cat <<EOF
-fusion_stack bootstrap
+fusion_stack bootstrap (v2)
 
-Usage: bash scripts/fusion_bootstrap_and_run.sh [--mode=replay_existing] [--with-ml]
-                                                [--no-api] [--max=50] [--skip-run]
+Usage: bash scripts/fusion_bootstrap_and_run.sh [flags]
+
+Flags:
+  --mode=replay_existing|production_safe|live_tail|research_diagnostic
+  --max=N                Record cap for the replay pass (default 50)
+  --with-ml              Install the optional torch/transformers stack
+  --no-api               Do not start the FastAPI server
+  --skip-run             Setup only; do not run replay
+  --skip-frontend-build  Reuse existing built bundle (faster restarts)
+  --dev-ui               Print the Vite dev-server command and exit
+                         (use this for hot-reload UI work alongside the API)
 
 Env overrides:
-  FUSION_MODE, FUSION_WITH_ML, FUSION_NO_API, FUSION_MAX_RECORDS, FUSION_SKIP_RUN,
+  FUSION_MODE, FUSION_WITH_ML, FUSION_NO_API, FUSION_MAX_RECORDS,
+  FUSION_SKIP_RUN, FUSION_SKIP_FRONTEND_BUILD, FUSION_DEV_UI,
   AWARENESS_REPO_PATH, NEWSIMPACT_REPO_PATH
 EOF
       exit 0
@@ -56,7 +71,7 @@ log() { printf "\033[36m[bootstrap]\033[0m %s\n" "$*"; }
 warn() { printf "\033[33m[bootstrap]\033[0m %s\n" "$*" >&2; }
 fail() { printf "\033[31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 
-# ── 1+2+3 venv + installs ────────────────────────────────────────────────────
+# ── 1+2+3 venv + python installs ─────────────────────────────────────────────
 if ! command -v uv >/dev/null 2>&1; then
   warn "uv not found on PATH. Falling back to python3 -m venv + pip."
   USE_UV=0
@@ -127,22 +142,53 @@ fi
 log "checking for Kaggle credentials (optional)"
 bash "$FUSION_ROOT/scripts/download_optional_kaggle_assets.sh" || true
 
-# ── 9. init storage and verify ───────────────────────────────────────────────
+# ── 9. frontend ──────────────────────────────────────────────────────────────
+if [ "$DEV_UI" = "1" ]; then
+  log "dev-ui flag set — start the Vite dev server manually:"
+  echo "    (cd frontend && npm install && npm run dev)"
+  echo "It will proxy /ui/* to the FastAPI server on 127.0.0.1:8087."
+fi
+
+BUNDLE_INDEX="$FUSION_ROOT/src/fusion_stack/static/app/index.html"
+NEED_BUILD=1
+if [ "$SKIP_FRONTEND_BUILD" = "1" ] && [ -f "$BUNDLE_INDEX" ]; then
+  log "skipping frontend build (--skip-frontend-build, bundle exists)"
+  NEED_BUILD=0
+fi
+
+if [ "$NEED_BUILD" = "1" ]; then
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    if [ ! -d "$FUSION_ROOT/frontend/node_modules" ]; then
+      log "installing frontend npm dependencies (one-time, ~30s)"
+      (cd "$FUSION_ROOT/frontend" && npm install --silent --no-audit --no-fund) || warn "npm install failed; UI will fall back to placeholder page"
+    fi
+    log "building premium UI bundle into src/fusion_stack/static/app"
+    if (cd "$FUSION_ROOT/frontend" && npm run build 2>&1 | tail -10); then
+      log "UI bundle ready ($(du -sh "$FUSION_ROOT/src/fusion_stack/static/app" | cut -f1))"
+    else
+      warn "UI build failed — / will serve the placeholder page; /legacy is still available"
+    fi
+  else
+    warn "Node/npm not on PATH — premium UI not built. Install Node 20+ and re-run."
+    warn "Meanwhile, the API is fully functional and /legacy serves the vanilla dashboard."
+  fi
+fi
+
+# ── 10. init storage and verify ──────────────────────────────────────────────
 log "initializing fusion_stack storage + sanity checks"
 export FUSION_MODE="$MODE"
-# Force stubs for the bootstrap run unless ML extras are present
 if [ "$WITH_ML" != "1" ]; then
   export FUSION_MODELS__USE_ML_STUBS=true
 fi
 python -m fusion_stack.cli bootstrap-init --skip-warm
 
-# ── 10. optionally run the pipeline ─────────────────────────────────────────
+# ── 11. optionally run the pipeline ─────────────────────────────────────────
 if [ "$SKIP_BOOTSTRAP_RUN" != "1" ] && [ "$MODE" != "live_tail" ]; then
   log "running fusion-stack in mode=$MODE (max=$MAX_RECORDS)"
   python -m fusion_stack.cli run --mode "$MODE" --max-records "$MAX_RECORDS" || warn "run returned non-zero"
 fi
 
-# ── 11. background API server ────────────────────────────────────────────────
+# ── 12. background API server ────────────────────────────────────────────────
 PID_FILE="$FUSION_ROOT/data/logs/api.pid"
 mkdir -p "$FUSION_ROOT/data/logs"
 if [ "$NO_API" != "1" ]; then
@@ -167,7 +213,7 @@ if [ "$NO_API" != "1" ]; then
   fi
 fi
 
-# ── 12. summary ──────────────────────────────────────────────────────────────
+# ── 13. summary ──────────────────────────────────────────────────────────────
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
@@ -180,12 +226,19 @@ fusion_stack bootstrap complete
   logs:               $FUSION_ROOT/data/logs/
   api log:            $FUSION_ROOT/data/logs/api.out
   awareness data:     $AWARENESS_REPO_PATH/data/jsonl
+  ui bundle:          $FUSION_ROOT/src/fusion_stack/static/app
   guard:              OK (NewsImpact still quarantined)
+
+Open:
+  http://127.0.0.1:8087/             ← premium analyst UI
+  http://127.0.0.1:8087/legacy       ← vanilla dashboard (kept for fallback)
+  http://127.0.0.1:8087/docs         ← OpenAPI
+  http://127.0.0.1:8087/ui/summary   ← landing JSON
 
 Try:
   curl -s http://127.0.0.1:8087/healthz
-  curl -s http://127.0.0.1:8087/metrics  | python -m json.tool
-  curl -s http://127.0.0.1:8087/dashboard| python -m json.tool
+  curl -s http://127.0.0.1:8087/ui/summary | python -m json.tool | head -30
+  curl -s http://127.0.0.1:8087/ui/benchmark/latest | python -m json.tool | head -20
 
 ────────────────────────────────────────────────────────────────────────────
 EOF

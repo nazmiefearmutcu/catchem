@@ -1,0 +1,156 @@
+# Multi-label finance taxonomy. The zero-shot classifier and rule-based fallbacks
+# both consult this file. Edit here, never hardcode labels in source.
+
+asset_classes:
+  - id: equities
+    aliases: ["stocks", "shares", "equity"]
+    hypothesis: "This text is about company stocks or equity markets."
+  - id: indices
+    aliases: ["index", "benchmark", "S&P 500", "FTSE", "Nikkei", "DAX"]
+    hypothesis: "This text is about stock market indices."
+  - id: fx
+    aliases: ["forex", "foreign exchange", "currency", "EUR/USD", "JPY"]
+    hypothesis: "This text is about foreign exchange or currency markets."
+  - id: rates
+    aliases: ["interest rates", "yields", "Treasuries", "bonds", "Bunds", "Gilts"]
+    hypothesis: "This text is about interest rates or government bond markets."
+  - id: credit
+    aliases: ["credit spreads", "corporate bonds", "HY", "IG", "CDS"]
+    hypothesis: "This text is about corporate credit or credit markets."
+  - id: commodities
+    aliases: ["oil", "gas", "gold", "silver", "copper", "wheat"]
+    hypothesis: "This text is about commodity markets."
+  - id: crypto
+    aliases: ["bitcoin", "ethereum", "BTC", "ETH", "altcoin", "stablecoin"]
+    hypothesis: "This text is about cryptocurrencies or digital assets."
+  - id: macro
+    aliases: ["GDP", "inflation", "CPI", "PMI", "employment", "trade balance"]
+    hypothesis: "This text is about the macroeconomy."
+
+impact_reason_codes:
+  - id: earnings
+    aliases: ["earnings", "EPS", "revenue", "profit", "beat", "missed", "quarterly results", "Q1", "Q2", "Q3", "Q4"]
+    hypothesis: "This text reports company earnings or financial results."
+  - id: guidance
+    aliases: ["guidance", "outlook", "forecast", "raises guidance", "cut guidance", "full-year"]
+    hypothesis: "This text covers corporate guidance, outlook, or forward-looking statements."
+  - id: m_and_a
+    aliases: ["merger", "acquisition", "takeover", "deal", "buyout", "M&A"]
+    hypothesis: "This text is about mergers, acquisitions, or takeovers."
+  - id: regulation
+    aliases: ["regulation", "regulatory", "SEC", "FTC", "antitrust", "compliance", "FDA"]
+    hypothesis: "This text is about new regulation, regulatory actions, or compliance changes."
+  - id: litigation
+    aliases: ["lawsuit", "litigation", "court", "ruling", "settlement", "verdict", "judge"]
+    hypothesis: "This text is about lawsuits, court rulings, or legal disputes."
+  - id: central_bank
+    aliases: ["Fed", "Federal Reserve", "FOMC", "ECB", "BoJ", "BoE", "PBoC", "RBA", "rate hike", "rate cut", "interest rate", "interest rates", "monetary policy", "hawkish", "dovish", "Powell", "Lagarde", "Bailey"]
+    hypothesis: "This text is about a central bank decision, rate move, or monetary policy."
+  - id: inflation
+    aliases: ["inflation", "CPI", "PPI", "deflation", "disinflation", "core CPI", "sticky inflation"]
+    hypothesis: "This text is about inflation, CPI, PPI, or price pressures."
+  - id: employment
+    aliases: ["jobs", "payrolls", "unemployment", "labor market", "NFP", "jobless", "wage growth"]
+    hypothesis: "This text is about jobs, unemployment, or labor markets."
+  - id: growth_recession
+    aliases: ["GDP", "recession", "growth", "slowdown", "expansion", "contraction"]
+    hypothesis: "This text is about economic growth, GDP, or recession risk."
+  - id: funding_liquidity
+    aliases: ["funding", "liquidity", "repo", "money market", "credit crunch", "discount window"]
+    hypothesis: "This text is about funding markets, liquidity stress, or repo conditions."
+  - id: supply_chain
+    aliases: ["supply chain", "logistics", "shipping", "shortage", "bottleneck", "port"]
+    hypothesis: "This text is about supply chain disruption or logistics."
+  - id: geopolitics
+    aliases: ["geopolitical", "conflict", "war", "invasion", "diplomatic"]
+    hypothesis: "This text is about geopolitical conflict or international relations affecting markets."
+  - id: sanctions_trade
+    aliases: ["sanctions", "tariff", "tariffs", "trade war", "export ban", "embargo"]
+    hypothesis: "This text is about sanctions, tariffs, or trade restrictions."
+  - id: energy
+    aliases: ["oil", "Brent", "WTI", "OPEC", "natural gas", "crude", "barrel", "refinery"]
+    hypothesis: "This text is about energy markets, OPEC, or oil and gas supply."
+  - id: metals
+    aliases: ["gold", "silver", "copper", "platinum", "palladium", "iron ore"]
+    hypothesis: "This text is about industrial or precious metals."
+  - id: cyber_outage
+    aliases: ["cyber attack", "ransomware", "breach", "outage", "downtime", "data leak"]
+    hypothesis: "This text is about a cyber attack, security breach, or technology outage."
+  - id: product_launch
+    aliases: ["launches", "unveils", "release", "new product", "rollout", "debuts"]
+    hypothesis: "This text is about a new product launch or major release."
+  - id: fraud_governance
+    aliases: ["fraud", "accounting", "restatement", "governance", "scandal", "whistleblower"]
+    hypothesis: "This text is about fraud, accounting irregularities, or corporate governance failures."
+  - id: esg_reputation
+    aliases: ["ESG", "sustainability", "emissions", "boycott", "climate", "controversy"]
+    hypothesis: "This text is about ESG concerns, sustainability, or reputational issues."
+  - id: natural_disaster
+    aliases: ["earthquake", "hurricane", "flood", "wildfire", "tsunami", "typhoon"]
+    hypothesis: "This text is about a natural disaster or extreme weather event with economic impact."
+
+# Negative class: when these dominate the zero-shot output, the item is non-finance.
+negative_class:
+  - id: sports
+    hypothesis: "This text is primarily about sports or athletic competition."
+  - id: celebrity
+    hypothesis: "This text is primarily about celebrities, entertainment gossip, or personalities."
+  - id: lifestyle
+    hypothesis: "This text is primarily about lifestyle, fashion, or recipes."
+  - id: entertainment
+    hypothesis: "This text is primarily about movies, music, TV, or video games."
+  - id: general_human_interest
+    hypothesis: "This text is a human-interest story with no financial market relevance."
+  - id: irrelevant_local
+    hypothesis: "This text is a local news item with no broader financial relevance."
+
+horizons:
+  - id: intraday
+    description: "Effect plays out within hours."
+  - id: one_day
+    description: "Effect plays out within one trading day."
+  - id: one_week
+    description: "Effect plays out across roughly a week."
+  - id: structural
+    description: "Multi-quarter or regime-shifting effect."
+
+# Per-label probability thresholds. The default applies when a label is missing.
+thresholds:
+  default: 0.30
+  asset_class_min: 0.25
+  reason_code_min: 0.25
+  negative_class_block: 0.65   # if any negative_class label scores above this, mark not relevant
+  finance_relevance_floor: 0.35
+
+# Lightweight prior weighting by source domain (rule-based stage A). 0–1 scale.
+# Unknown domains receive `default`.
+domain_priors:
+  default: 0.45
+  "bloomberg.com": 0.95
+  "reuters.com": 0.95
+  "ft.com": 0.92
+  "wsj.com": 0.92
+  "cnbc.com": 0.85
+  "marketwatch.com": 0.82
+  "coindesk.com": 0.80
+  "coinmarketcap.com": 0.75
+  "investing.com": 0.75
+  "finviz.com": 0.80
+  "seekingalpha.com": 0.75
+  "yahoo.com": 0.55
+  "bbc.com": 0.55
+  "theguardian.com": 0.50
+  "espn.com": 0.05
+  "tmz.com": 0.05
+
+# Source-type priors (mapped to Awareness SourceKind enum values).
+source_type_priors:
+  default: 0.40
+  rss: 0.55
+  atom: 0.55
+  sitemap: 0.50
+  gdelt: 0.65
+  tail_recrawl: 0.55
+  common_crawl_wet: 0.30
+  fineweb: 0.30
+  local_fixture: 0.50

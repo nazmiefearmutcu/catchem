@@ -1,0 +1,74 @@
+"""Integration: end-to-end replay against synthetic JSONL."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from fusion_stack.schemas import AwarenessCaptureView
+from fusion_stack.settings import load_settings
+from fusion_stack.supervisor import Supervisor
+
+
+@pytest.mark.integration
+def test_replay_produces_records(tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch) -> None:
+    cap_fed = synth_capture(capture_id="c-fed", doc_id="d-fed",
+                            title="Federal Reserve raises interest rates",
+                            text="The Fed hiked rates 25bps citing sticky inflation.")
+    cap_aapl = synth_capture(capture_id="c-aapl", doc_id="d-aapl", domain="reuters.com",
+                             title="Apple beats earnings, raises guidance",
+                             text="Apple Inc beat consensus EPS and raised full-year guidance. $AAPL rose 4%.")
+    cap_sports = synth_capture(capture_id="c-sport", doc_id="d-sport", domain="espn.com",
+                                title="Local team wins championship",
+                                text="Scoreboard tells the story; last-minute goal seals the trophy.")
+    rows = [json.loads(c.model_dump_json()) for c in (cap_fed, cap_aapl, cap_sports)]
+    # write_jsonl puts the file at tmp_path/jsonl/captures/2026/05/16/captures.jsonl
+    write_jsonl(rows)
+    # Awareness data dir is tmp_path; discover_awareness_jsonl_root walks tmp_path/jsonl.
+    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+
+    from fusion_stack.settings import reload_settings
+    reload_settings()
+    s = load_settings()
+    sup = Supervisor(s)
+    try:
+        counts = sup.run_replay()
+        assert counts["processed"] == 3, counts
+
+        # Fed news → relevant; sports → not relevant
+        fed = sup.storage.get_record("c-fed")
+        assert fed is not None and fed["is_finance_relevant"] is True
+        assert "rates" in fed["asset_classes"] or "macro" in fed["asset_classes"]
+        assert "central_bank" in fed["impact_reason_codes"]
+        assert fed["evidence_sentences"], "missing evidence"
+        assert fed["component_scores"]["asset_class_max"] > 0
+        assert fed["model_versions"]["zero_shot"].startswith("stub-")
+
+        aapl = sup.storage.get_record("c-aapl")
+        assert aapl is not None and aapl["is_finance_relevant"] is True
+        assert "AAPL" in aapl["candidate_symbols"]
+
+        sports = sup.storage.get_record("c-sport")
+        assert sports is not None
+        assert sports["is_finance_relevant"] is False
+    finally:
+        sup.close()
+
+
+@pytest.mark.integration
+def test_replay_idempotent(tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch) -> None:
+    cap = synth_capture()
+    write_jsonl([json.loads(cap.model_dump_json())])
+    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    from fusion_stack.settings import reload_settings
+    reload_settings()
+    sup = Supervisor(load_settings())
+    try:
+        c1 = sup.run_replay()
+        c2 = sup.run_replay()
+        assert c1["processed"] == 1
+        assert c2["processed"] == 0
+    finally:
+        sup.close()

@@ -1,0 +1,65 @@
+# Machine-readable companion to docs/SOURCE_OF_TRUTH.md.
+# The bootstrap script and tests read this file to enforce invariants.
+# DO NOT loosen rules here. Tightening is allowed.
+
+version: 1
+last_reviewed_utc: "2026-05-16T00:00:00Z"
+
+awareness:
+  role: "stable_upstream_system_of_record"
+  consumption_strategy: "post_commit_jsonl"
+  contract_files:
+    - "src/awareness/schemas/doc.py"
+    - "src/awareness/storage/jsonl.py"
+  durable_artifact_glob: "data/jsonl/captures/**/*.jsonl"
+  rules:
+    - "consume_only_after_durable_commit"
+    - "do_not_mutate_doccapture_schema"
+    - "do_not_inject_finance_logic_into_worker_engine"
+    - "do_not_break_state_or_task_semantics"
+
+newsimpact:
+  role: "blocked_release_candidate_research_diagnostic_only"
+  release_gate_passed: false
+  safe_to_publish: false
+  safe_to_promote: false
+  expected_governance_state: "QUARANTINED_REGRESSIVE_MULTIMODAL"
+  expected_fusion_verdict: "FUSION_REGRESSIVE"
+  governance_index_path: "models/governance_index/governance_index.json"
+  protected_artifacts:
+    - "final_best.pt"
+    - "models/release_candidates/**"
+    - "models/manifests/**"
+    - "models/governance_index/**"
+    - "governance/**"
+  forbidden_operations:
+    - "training"
+    - "promotion"
+    - "benchmark"
+    - "export"
+  diagnostic_operations:
+    - "eval"
+    - "diagnostic"
+  rules:
+    - "default_disabled_in_production_safe"
+    - "lazy_load_only"
+    - "read_only_artifact_access"
+    - "no_training_invocation"
+    - "no_release_gate_relaxation"
+    - "no_external_publication"
+    - "diagnostic_output_must_be_clearly_labeled"
+    - "diagnostic_must_not_override_finance_relevance_in_production_safe"
+
+mode_invariants:
+  production_safe:
+    enable_newsimpact_diagnostic: false
+    allow_writes_to_newsimpact_repo: false
+  replay_existing:
+    enable_newsimpact_diagnostic: false
+    allow_writes_to_newsimpact_repo: false
+  live_tail:
+    enable_newsimpact_diagnostic: false
+    allow_writes_to_newsimpact_repo: false
+  research_diagnostic:
+    enable_newsimpact_diagnostic: true
+    allow_writes_to_newsimpact_repo: false

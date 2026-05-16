@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual env
+.venv/
+venv/
+
+# Runtime data
+data/db/
+data/results/
+data/vector_index/
+data/cache/
+data/logs/
+data/kaggle/
+data/replay/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/node_modules/
+.vite/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local env
+.env
+.env.local
+
+# Generated bundle (built into src for runtime serving)
+src/fusion_stack/static/app/
+!src/fusion_stack/static/app/.gitkeep

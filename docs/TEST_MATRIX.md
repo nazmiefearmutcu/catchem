@@ -86,15 +86,31 @@ storage), `ml` (requires the optional ML extra).
 |---|---|
 | `frontend/src/tests/safeHref.test.ts` | `safeHref` accepts http/https only, rejects `javascript:` / `file:` / null. |
 | `frontend/src/tests/StatusBanner.test.tsx` | Banner shows quarantine + release_gate, warns in diagnostic mode, reds out on guard error. |
+| `frontend/src/tests/feedMerge.test.ts` | `mergeByCaptureId` dedupes + sorts; `newCaptureIds` diff; `isIncompleteRecord`; fallback to `created_at` when `published_ts` is missing; empty-input tolerance. |
+
+## Group G — UI hardening / bug-hunt remediation (Python)
+
+| File | Coverage |
+|---|---|
+| `test_static_dashboard_packaged_install.py` | importlib.resources lookup; FUSION_STATIC_DIR override + traversal rejection; wheel canary that builds the wheel and opens its ZIP to confirm `fusion_stack/static/dashboard.html` is packaged. |
+| `test_settings_live_env_override.py` | env > YAML > defaults for nested fields (`live.poll_seconds`, `live.tail_max_per_tick`, `replay.batch_size`, `mode`, `use_ml_stubs`); invalid values reject; unknown keys ignored. |
+| `test_guard_redaction_in_production.py` | `diagnostic_multimodal_*` scrubbed on every list/detail/summary endpoint; `/ui/guards` never leaks filesystem paths; `/metrics` diagnostic pinned False; diagnostic adapter never constructed in production_safe (mock-verified). |
+| `test_records_by_asset_class_contract.py` | List routes return COMPACT summary shape; `text_excerpt`/`evidence_sentences`/`component_scores`/`model_versions`/`processing_mode`/`diagnostic_multimodal_result` forbidden in summaries. |
+| `test_record_detail_contract.py` | Detail routes return full rich shape including `component_scores`, `evidence_sentences`, `model_versions`, `processing_mode`. |
+| `test_dashboard_xss_fixture.py` | Security headers (CSP, XCTO, Referrer-Policy, XFO) present; legacy dashboard avoids unsafe DOM sinks; `safeHref` helper present; every `target=_blank` carries `rel=noopener`; API returns JSON not HTML. |
+| `test_golden_schema_and_history.py` | `validate_golden_row` rejects malformed rows loudly; `load_extended` strict-mode raises, lax-mode skips; `BenchmarkReport.to_dict()` carries `schema_version`, `generated_at`, `dataset_name`; hard-negative golden items remain pinned. |
+| `test_metrics_contract.py` | Stable JSON contract for `/metrics` and `/ui/summary` — required keys, ISO timestamps, prod-safe diagnostic pin. |
+| `test_duplicate_and_incomplete_records.py` | `insert_record` dedupes by `capture_id`; label inverted index rebuilds on overwrite; JSONL reader skips garbage; DLQ records failures. |
+| `test_timestamp_handling.py` | Naive datetimes coerced to UTC; ISO strings round-trip; missing `published_ts` allowed; storage serializes as ISO 8601. |
 
 ## Running
 
 ```bash
-make test               # all Python tests (86 + 1 skip)
+make test               # full Python suite (163 tests)
 make test-fast          # skip ml + smoke + integration
 make test-guards        # guard only (red here = stop the world)
 make test-smoke         # end-to-end shell
-(cd frontend && npm test)   # Vitest UI tests (7 tests)
+(cd frontend && npm test)   # Vitest UI tests (13 tests)
 ```
 
 The `ml` marker is opt-in and runs only when `pip install -e ".[ml]"` has been

@@ -23,16 +23,42 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from .contracts import (
+    FinancialImpactDetail,
+    FinancialImpactSummary,
+    GuardSummary,
+    MetricsSummary,
+    RecordListResponse,
+)
 from .dashboard_data import overview
 from .logging import get_logger
 from .newsimpact_guarded_adapter import snapshot_guard_state, NewsImpactGuardError
+from .redaction import redact_record_for_mode, redact_records_for_mode, safe_guard_view
 from .schemas import AwarenessCaptureView
 from .settings import Settings, load_settings
+from .static_assets import get_static_path, open_static_bytes, static_dir
 from .supervisor import Supervisor
 
 
-_STATIC_DIR = Path(__file__).resolve().parent / "static"
-_APP_BUNDLE_DIR = _STATIC_DIR / "app"
+def _is_production_safe() -> bool:
+    s = _SETTINGS if _SETTINGS is not None else load_settings()
+    return s.is_production_safe()
+
+
+def _to_summary_list(items: list[dict[str, Any]], production_safe: bool) -> list[FinancialImpactSummary]:
+    """Redact diagnostics first, then project to the compact summary contract."""
+    redacted = redact_records_for_mode(items, production_safe=production_safe)
+    return [FinancialImpactSummary.from_record_dict(r) for r in redacted]
+
+
+def _normalize_detail_payload(r: dict[str, Any]) -> dict[str, Any]:
+    """Coerce a storage row dict to FinancialImpactDetail input shape."""
+    out = dict(r)
+    for k in ("created_at", "published_ts"):
+        v = out.get(k)
+        if v is not None and not isinstance(v, str):
+            out[k] = str(v)
+    return out
 
 
 logger = get_logger("fusion.api")
@@ -75,21 +101,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
 
+    # ── Conservative security headers ─────────────────────────────────────
+    # Applied to every response. The CSP allows 'unsafe-inline' for both
+    # style and script because:
+    #   * the React shell injects a tiny inline script to set the theme class
+    #     before paint (prevents FOUC),
+    #   * the legacy dashboard ships its UI as an inline <script>.
+    # Both inline scripts are author-controlled, version-pinned, and render
+    # user-controlled data ONLY via textContent / React's text channel — never
+    # via innerHTML-like APIs. The actual XSS protection lives in
+    # `dashboard.html`'s `el()` helper and React's JSX escaping, not in CSP.
+    # If you ever switch to nonce-based CSP, drop the 'unsafe-inline' tokens.
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self' data:; "
+            "connect-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        return response
+
     # ── Legacy vanilla dashboard (kept until the premium app fully replaces it)
     @app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/legacy-dashboard", response_class=HTMLResponse, include_in_schema=False)
     def legacy() -> HTMLResponse:
-        path = _STATIC_DIR / "dashboard.html"
-        if not path.exists():
-            return HTMLResponse("<h1>dashboard template missing</h1>", status_code=500)
-        return HTMLResponse(path.read_text(encoding="utf-8"))
+        body = open_static_bytes("dashboard.html")
+        if body is None:
+            return HTMLResponse("<h1>dashboard template missing</h1>", status_code=404)
+        return HTMLResponse(body.decode("utf-8"))
 
     # ── Premium SPA bundle served at /
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def root() -> HTMLResponse:
-        index = _APP_BUNDLE_DIR / "index.html"
-        if index.exists():
-            return HTMLResponse(index.read_text(encoding="utf-8"))
+        body = open_static_bytes("app/index.html")
+        if body is not None:
+            return HTMLResponse(body.decode("utf-8"))
         # Friendly fallback when the bundle hasn't been built yet
         msg = (
             "<!doctype html><meta charset=utf-8><title>fusion_stack</title>"
@@ -104,14 +161,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return HTMLResponse(msg, status_code=200)
 
-    # Mount the built bundle's static assets if they exist
-    if _APP_BUNDLE_DIR.exists() and (_APP_BUNDLE_DIR / "assets").exists():
-        app.mount("/assets", StaticFiles(directory=str(_APP_BUNDLE_DIR / "assets")), name="assets")
+    # Mount the built bundle's static assets if they exist.
+    # We resolve via the same package-resource helper so wheel installs work.
+    _assets_root = get_static_path("app/index.html")
+    if _assets_root is not None:
+        _assets_dir = _assets_root.parent / "assets"
+        if _assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
-        ico = _APP_BUNDLE_DIR / "favicon.ico"
-        if ico.exists():
+        ico = get_static_path("app/favicon.ico")
+        if ico is not None and ico.exists():
             return FileResponse(ico)
         return Response(status_code=204)
 
@@ -133,52 +194,70 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/metrics")
     def metrics() -> dict[str, Any]:
         sup = _get_supervisor()
-        return sup.status()
+        status = sup.status()
+        # In production_safe mode diagnostic must read False even if a future
+        # bug flipped supervisor state mid-flight.
+        if _is_production_safe():
+            status["diagnostic_enabled"] = False
+        # Surface a stable contract for downstream consumers.
+        status.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
+        return status
 
-    @app.get("/recent")
-    def recent(limit: int = Query(50, ge=1, le=500), relevant_only: bool = True) -> dict[str, Any]:
+    @app.get("/recent", response_model=RecordListResponse)
+    def recent(limit: int = Query(50, ge=1, le=500), relevant_only: bool = True) -> RecordListResponse:
         sup = _get_supervisor()
-        return {"items": sup.storage.recent_records(limit=limit, relevant_only=relevant_only)}
+        items = sup.storage.recent_records(limit=limit, relevant_only=relevant_only)
+        return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
 
     @app.get("/dashboard")
     def dashboard(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
         sup = _get_supervisor()
-        return overview(sup.storage, limit=limit)
+        out = overview(sup.storage, limit=limit)
+        if _is_production_safe():
+            out["recent"] = redact_records_for_mode(out.get("recent", []), production_safe=True)
+            out["diagnostic_count"] = 0
+        return out
 
-    @app.get("/record/{capture_id}")
-    def record(capture_id: str) -> dict[str, Any]:
+    @app.get("/record/{capture_id}", response_model=FinancialImpactDetail)
+    def record(capture_id: str) -> FinancialImpactDetail:
         sup = _get_supervisor()
         rec = sup.storage.get_record(capture_id)
         if rec is None:
             raise HTTPException(status_code=404, detail="capture_not_found")
-        return rec
+        redacted = redact_record_for_mode(rec, production_safe=_is_production_safe()) or {}
+        return FinancialImpactDetail(**_normalize_detail_payload(redacted))
 
-    @app.get("/records/by-symbol/{symbol}")
-    def by_symbol(symbol: str, limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+    @app.get("/records/by-symbol/{symbol}", response_model=RecordListResponse)
+    def by_symbol(symbol: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
         sup = _get_supervisor()
-        return {"items": sup.storage.by_label("symbol", symbol, limit=limit)}
+        items = sup.storage.by_label("symbol", symbol, limit=limit)
+        return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
 
-    @app.get("/records/by-asset-class/{asset_class}")
-    def by_asset_class(asset_class: str, limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+    @app.get("/records/by-asset-class/{asset_class}", response_model=RecordListResponse)
+    def by_asset_class(asset_class: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
         sup = _get_supervisor()
-        return {"items": sup.storage.by_label("asset_class", asset_class, limit=limit)}
+        items = sup.storage.by_label("asset_class", asset_class, limit=limit)
+        return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
 
-    @app.get("/records/by-reason/{reason_code}")
-    def by_reason(reason_code: str, limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+    @app.get("/records/by-reason/{reason_code}", response_model=RecordListResponse)
+    def by_reason(reason_code: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
         sup = _get_supervisor()
-        return {"items": sup.storage.by_label("reason_code", reason_code, limit=limit)}
+        items = sup.storage.by_label("reason_code", reason_code, limit=limit)
+        return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
 
     @app.post("/replay")
     def replay(max_records: int = Body(50, embed=True)) -> dict[str, Any]:
         sup = _get_supervisor()
         return sup.run_replay(max_records=max_records)
 
-    @app.post("/process-one")
-    def process_one(capture: dict = Body(...)) -> dict[str, Any]:
+    @app.post("/process-one", response_model=FinancialImpactDetail)
+    def process_one(capture: dict = Body(...)) -> FinancialImpactDetail:
         sup = _get_supervisor()
         cap = AwarenessCaptureView.model_validate(capture)
         rec = sup.process_capture(cap)
-        return rec.model_dump(mode="json")
+        payload = rec.model_dump(mode="json")
+        redacted = redact_record_for_mode(payload, production_safe=_is_production_safe()) or payload
+        return FinancialImpactDetail(**_normalize_detail_payload(redacted))
 
     # ────────────────────────────────────────────────────────────────────────
     # /ui/* — aggregation endpoints for the premium frontend.
@@ -193,20 +272,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dash = overview(sup.storage, limit=50)
         s = _SETTINGS or load_settings()
         guards = _guard_snapshot(s)
+        prod_safe = s.is_production_safe()
+        recent_top = dash["recent"][:6]
         return {
             "mode": s.mode.value,
-            "is_production_safe": s.is_production_safe(),
+            "is_production_safe": prod_safe,
             "diagnostic_allowed": s.diagnostic_allowed(),
             "use_ml_stubs": s.models_.use_ml_stubs,
             "totals": dash["totals"],
-            "diagnostic_count": dash["diagnostic_count"],
+            "diagnostic_count": 0 if prod_safe else dash["diagnostic_count"],
             "asset_class_distribution": dash["asset_class_distribution"],
             "reason_code_distribution": dash["reason_code_distribution"],
             "sentiment_distribution": dash["sentiment_distribution"],
-            "recent_top": dash["recent"][:6],
+            "recent_top": redact_records_for_mode(recent_top, production_safe=prod_safe),
             "dlq": sup.storage.dlq_count(),
             "model_versions": dict(sup.service.model_versions),
-            "guards": guards,
+            "guards": safe_guard_view(guards),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -330,7 +411,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ui/guards")
     def ui_guards() -> dict[str, Any]:
         s = _SETTINGS or load_settings()
-        return _guard_snapshot(s)
+        return safe_guard_view(_guard_snapshot(s))
 
     @app.get("/ui/benchmark/latest")
     def ui_benchmark_latest() -> dict[str, Any]:
@@ -374,7 +455,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "count": len(items),
             "reason_distribution": dict(rc),
             "sentiment_distribution": dict(sent),
-            "items": items,
+            "items": redact_records_for_mode(items, production_safe=_is_production_safe()),
         }
 
     @app.get("/ui/stream")

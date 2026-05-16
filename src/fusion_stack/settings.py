@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -170,6 +170,18 @@ class Settings(BaseSettings):
     kaggle: KaggleConfig = Field(default_factory=KaggleConfig)
 
     use_ml_stubs: bool | None = None  # convenience flat env override
+
+    @model_validator(mode="after")
+    def _propagate_flat_overrides(self) -> "Settings":
+        """Wire the documented flat env vars into the nested sub-configs.
+
+        `FUSION_USE_ML_STUBS=false` MUST flip `models_.use_ml_stubs` to False,
+        even though the field formally lives on the nested `ModelConfig`. This
+        keeps `.env.example` and the docs honest.
+        """
+        if self.use_ml_stubs is not None:
+            self.models_.use_ml_stubs = self.use_ml_stubs
+        return self
 
     # ── derived paths ────────────────────────────────────────────────────────
     def output_path(self, *parts: str) -> Path:

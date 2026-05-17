@@ -105,15 +105,29 @@ DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
     # ── Press wires (high volume — many per hour)
     FeedSpec("prnewswire-all", "https://www.prnewswire.com/rss/all-news-releases-list.rss", "prnewswire.com"),
     FeedSpec("prnewswire-financial", "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss", "prnewswire.com"),
+    FeedSpec("ap-business", "https://feedx.net/rss/ap.xml", "apnews.com"),
+    # ── Bloomberg
+    FeedSpec("bloomberg-markets", "https://feeds.bloomberg.com/markets/news.rss", "bloomberg.com"),
+    FeedSpec("bloomberg-tech", "https://feeds.bloomberg.com/technology/news.rss", "bloomberg.com"),
+    # ── WSJ + Barron's + Forbes + FT (paywall-marked but RSS is open)
+    FeedSpec("wsj-markets", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", "wsj.com"),
+    FeedSpec("wsj-business", "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml", "wsj.com"),
+    FeedSpec("barrons-recent", "https://feeds.content.dowjones.io/public/rss/RSSWSJD", "barrons.com"),
+    FeedSpec("forbes-business", "https://www.forbes.com/business/feed/", "forbes.com"),
+    FeedSpec("financial-times", "https://www.ft.com/rss/home", "ft.com"),
+    FeedSpec("aljazeera", "https://www.aljazeera.com/xml/rss/all.xml", "aljazeera.com"),
     # ── Regulators / central banks
     FeedSpec("fed-press-all", "https://www.federalreserve.gov/feeds/press_all.xml", "federalreserve.gov"),
     FeedSpec("sec-edgar-current", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&output=atom", "sec.gov"),
+    FeedSpec("sec-8k", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom", "sec.gov"),
+    FeedSpec("sec-10q", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=10-Q&output=atom", "sec.gov"),
     FeedSpec("ecb-press", "https://www.ecb.europa.eu/rss/press.html", "ecb.europa.eu"),
     # ── Crypto
     FeedSpec("coindesk-business", "https://www.coindesk.com/arc/outboundfeeds/rss?outputType=xml", "coindesk.com"),
     FeedSpec("decrypt-crypto", "https://decrypt.co/feed", "decrypt.co"),
     FeedSpec("theblock", "https://www.theblock.co/rss.xml", "theblockcrypto.com"),
     FeedSpec("cointelegraph", "https://cointelegraph.com/rss", "cointelegraph.com"),
+    FeedSpec("bitcoinmagazine", "https://bitcoinmagazine.com/feed", "bitcoinmagazine.com"),
     # ── Tech-adjacent (HN regularly covers fintech, regulation, market moves)
     FeedSpec("hackernews", "https://news.ycombinator.com/rss", "news.ycombinator.com"),
 )
@@ -288,7 +302,7 @@ class NewsPoller:
         supervisor: Supervisor,
         settings: Settings,
         feeds: Iterable[FeedSpec] | None = None,
-        interval_seconds: float = 20.0,
+        interval_seconds: float = 15.0,
         startup_grace_seconds: float = 3.0,
     ) -> None:
         self._sup = supervisor
@@ -309,6 +323,14 @@ class NewsPoller:
         self.last_error: str | None = None
         self.is_polling: bool = False
         self.next_run_at: datetime | None = None
+        # When did we last ingest at least one NEW item? Distinct from
+        # last_run_at (which ticks every poll, including zero-result polls).
+        # Lets the UI show "last new arrival: 12m ago" so the analyst sees
+        # the system is healthy even when the publisher side is quiet.
+        self.last_new_at: datetime | None = None
+        # Consecutive ticks with no new items. Helps the UI distinguish
+        # "actively flowing" from "alive but quiet".
+        self.empty_ticks: int = 0
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -351,7 +373,13 @@ class NewsPoller:
             n = await self._poll_once(client)
             self.last_ingested = n
             self.total_ingested += n
-            self.last_run_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            self.last_run_at = now
+            if n > 0:
+                self.last_new_at = now
+                self.empty_ticks = 0
+            else:
+                self.empty_ticks += 1
             self.last_error = None
             return n
         except Exception as exc:

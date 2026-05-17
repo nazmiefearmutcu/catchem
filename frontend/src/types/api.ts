@@ -186,6 +186,10 @@ export interface NewsStatus {
   total_ingested: number;
   last_error: string | null;
   is_polling: boolean;
+  /** When did the poller most recently ingest at least one NEW item? */
+  last_new_at: string | null;
+  /** Consecutive ticks where last_ingested was 0. >0 means "publishers quiet". */
+  empty_ticks: number;
 }
 
 export interface NewsPollNowResponse {

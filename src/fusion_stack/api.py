@@ -664,6 +664,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "total_ingested": 0,
                 "last_error": None,
                 "is_polling": False,
+                "last_new_at": None,
+                "empty_ticks": 0,
             }
         return {
             "enabled": True,
@@ -675,6 +677,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "total_ingested": _NEWS_POLLER.total_ingested,
             "last_error": _NEWS_POLLER.last_error,
             "is_polling": _NEWS_POLLER.is_polling,
+            # Distinguishes "actively flowing" from "alive but quiet" —
+            # the UI uses these to show "last new arrival: X min ago" when
+            # last_ingested has been 0 for several ticks. Reassures the
+            # analyst the poller is healthy even when publishers are idle.
+            "last_new_at": _NEWS_POLLER.last_new_at.isoformat() if _NEWS_POLLER.last_new_at else None,
+            "empty_ticks": _NEWS_POLLER.empty_ticks,
         }
 
     @app.post("/ui/news-poll-now")

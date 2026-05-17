@@ -209,3 +209,7 @@ def test_news_poller_status_fields_start_zeroed() -> None:
     assert poller.last_ingested == 0
     assert poller.total_ingested == 0
     assert poller.last_error is None
+    # New "healthy-but-quiet" tracking fields. The UI uses these to show
+    # the user that the poller is alive even when publishers are idle.
+    assert poller.last_new_at is None
+    assert poller.empty_ticks == 0

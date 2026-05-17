@@ -181,7 +181,14 @@ export interface NewsStatus {
   feeds: number;
   interval_seconds: number | null;
   last_run_at: string | null;
+  next_run_at: string | null;
   last_ingested: number;
   total_ingested: number;
   last_error: string | null;
+  is_polling: boolean;
+}
+
+export interface NewsPollNowResponse {
+  ingested: number;
+  total_ingested: number;
 }

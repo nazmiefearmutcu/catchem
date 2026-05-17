@@ -24,7 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot,
-  DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus,
+  DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
 } from "@/types/api";
 
 export const api = {
@@ -73,6 +73,8 @@ export const api = {
   sidecarStatus: () => request<SidecarStatus>("/ui/sidecar-status"),
   logTail: (lines = 200) => request<LogTail>(`/ui/log-tail?lines=${lines}`),
   newsStatus: () => request<NewsStatus>("/ui/news-status"),
+  newsPollNow: () =>
+    request<NewsPollNowResponse>("/ui/news-poll-now", { method: "POST" }),
 };
 
 // Safe URL filter for outbound links. Blocks javascript:/data:/file: schemes.

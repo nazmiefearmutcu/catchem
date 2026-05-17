@@ -80,28 +80,41 @@ class FeedSpec:
 #     fetch_feed, FeedSpec; ..."
 # before checking in.
 DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
-    # Mainstream business
-    FeedSpec("bbc-business", "http://feeds.bbci.co.uk/news/business/rss.xml", "bbc.com"),
+    # ── Mainstream business (5-15 items/hr each)
+    FeedSpec("bbc-business", "https://feeds.bbci.co.uk/news/business/rss.xml", "bbc.com"),
     FeedSpec("bbc-tech", "https://feeds.bbci.co.uk/news/technology/rss.xml", "bbc.com"),
     FeedSpec("reuters-business", "https://feeds.feedburner.com/reuters/businessNews", "reuters.com"),
     FeedSpec("reuters-tech", "https://feeds.feedburner.com/reuters/technologyNews", "reuters.com"),
     FeedSpec("guardian-business", "https://www.theguardian.com/uk/business/rss", "theguardian.com"),
     FeedSpec("nytimes-business", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "nytimes.com"),
-    # Financial press
+    # ── Financial press
     FeedSpec("cnbc-top", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "cnbc.com"),
     FeedSpec("cnbc-business", "https://www.cnbc.com/id/10001147/device/rss/rss.html", "cnbc.com"),
     FeedSpec("cnbc-economy", "https://www.cnbc.com/id/20910258/device/rss/rss.html", "cnbc.com"),
-    FeedSpec("marketwatch-top", "http://feeds.marketwatch.com/marketwatch/topstories/", "marketwatch.com"),
+    FeedSpec("cnbc-finance", "https://www.cnbc.com/id/15839069/device/rss/rss.html", "cnbc.com"),
+    FeedSpec("cnbc-markets", "https://www.cnbc.com/id/15839135/device/rss/rss.html", "cnbc.com"),
+    FeedSpec("marketwatch-top", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "marketwatch.com"),
+    FeedSpec("marketwatch-marketpulse", "https://feeds.content.dowjones.io/public/rss/mw_marketpulse", "marketwatch.com"),
+    FeedSpec("marketwatch-bulletins", "https://feeds.content.dowjones.io/public/rss/mw_bulletins", "marketwatch.com"),
+    FeedSpec("marketwatch-realtime", "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines", "marketwatch.com"),
     FeedSpec("yahoo-finance", "https://finance.yahoo.com/news/rssindex", "finance.yahoo.com"),
-    # Regulators / central banks
+    FeedSpec("seekingalpha", "https://seekingalpha.com/feed.xml", "seekingalpha.com"),
+    FeedSpec("benzinga-news", "https://www.benzinga.com/news/feed", "benzinga.com"),
+    FeedSpec("investing-news", "https://www.investing.com/rss/news.rss", "investing.com"),
+    FeedSpec("zerohedge", "https://feeds.feedburner.com/zerohedge/feed", "zerohedge.com"),
+    # ── Press wires (high volume — many per hour)
+    FeedSpec("prnewswire-all", "https://www.prnewswire.com/rss/all-news-releases-list.rss", "prnewswire.com"),
+    FeedSpec("prnewswire-financial", "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss", "prnewswire.com"),
+    # ── Regulators / central banks
     FeedSpec("fed-press-all", "https://www.federalreserve.gov/feeds/press_all.xml", "federalreserve.gov"),
     FeedSpec("sec-edgar-current", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&output=atom", "sec.gov"),
     FeedSpec("ecb-press", "https://www.ecb.europa.eu/rss/press.html", "ecb.europa.eu"),
-    # Crypto
-    FeedSpec("coindesk-business", "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml", "coindesk.com"),
+    # ── Crypto
+    FeedSpec("coindesk-business", "https://www.coindesk.com/arc/outboundfeeds/rss?outputType=xml", "coindesk.com"),
     FeedSpec("decrypt-crypto", "https://decrypt.co/feed", "decrypt.co"),
-    FeedSpec("theblock", "https://www.theblockcrypto.com/rss.xml", "theblockcrypto.com"),
-    # Tech-adjacent (HN regularly covers fintech, regulation, market moves)
+    FeedSpec("theblock", "https://www.theblock.co/rss.xml", "theblockcrypto.com"),
+    FeedSpec("cointelegraph", "https://cointelegraph.com/rss", "cointelegraph.com"),
+    # ── Tech-adjacent (HN regularly covers fintech, regulation, market moves)
     FeedSpec("hackernews", "https://news.ycombinator.com/rss", "news.ycombinator.com"),
 )
 
@@ -275,13 +288,13 @@ class NewsPoller:
         supervisor: Supervisor,
         settings: Settings,
         feeds: Iterable[FeedSpec] | None = None,
-        interval_seconds: float = 30.0,
+        interval_seconds: float = 20.0,
         startup_grace_seconds: float = 3.0,
     ) -> None:
         self._sup = supervisor
         self._settings = settings
         self._feeds: tuple[FeedSpec, ...] = tuple(feeds) if feeds is not None else DEFAULT_FEEDS
-        self._interval = max(15.0, float(interval_seconds))  # floor to keep us friendly
+        self._interval = max(10.0, float(interval_seconds))  # floor to keep us friendly
         self._grace = max(0.0, float(startup_grace_seconds))
         self._seen = _SeenCache()
         self._task: asyncio.Task[None] | None = None

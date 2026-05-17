@@ -281,6 +281,17 @@ export function FeedPage() {
                 last new <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_new_at) || "—"}</span>
               </span>
             )}
+            {news.data.last_median_publisher_lag_seconds != null && news.data.last_median_publisher_lag_seconds > 0 && (
+              <span
+                title={`Median time between when each item was published by its source and when Catchem ingested it, over the last poll. Pipeline cost is ~4 ms/item in stub mode — anything above that is publisher-side RSS lag, not Catchem. Mean: ${Math.round(news.data.last_avg_publisher_lag_seconds ?? 0)}s.`}
+              >
+                pub→ingest <span className={news.data.last_median_publisher_lag_seconds > 600 ? "text-warn" : "text-[color:var(--fg)]"}>
+                  ~{news.data.last_median_publisher_lag_seconds < 60
+                    ? `${Math.round(news.data.last_median_publisher_lag_seconds)}s`
+                    : `${Math.round(news.data.last_median_publisher_lag_seconds / 60)}m`}
+                </span>
+              </span>
+            )}
             {news.data.next_run_at && !news.data.is_polling && (
               <span>next {fmtRel(news.data.next_run_at) || "soon"}</span>
             )}

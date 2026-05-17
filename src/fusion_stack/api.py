@@ -666,6 +666,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "is_polling": False,
                 "last_new_at": None,
                 "empty_ticks": 0,
+                "last_avg_publisher_lag_seconds": None,
+                "last_median_publisher_lag_seconds": None,
             }
         return {
             "enabled": True,
@@ -683,6 +685,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # analyst the poller is healthy even when publishers are idle.
             "last_new_at": _NEWS_POLLER.last_new_at.isoformat() if _NEWS_POLLER.last_new_at else None,
             "empty_ticks": _NEWS_POLLER.empty_ticks,
+            # Average/median seconds between item.published_ts and ingest
+            # time, over the most recent poll. Lets the UI explicitly show
+            # the analyst how much of the visible lag is publisher-side
+            # vs our pipeline (our pipeline is ~4ms/item in stub mode).
+            "last_avg_publisher_lag_seconds": _NEWS_POLLER.last_avg_publisher_lag_seconds,
+            "last_median_publisher_lag_seconds": _NEWS_POLLER.last_median_publisher_lag_seconds,
         }
 
     @app.post("/ui/news-poll-now")

@@ -190,6 +190,10 @@ export interface NewsStatus {
   last_new_at: string | null;
   /** Consecutive ticks where last_ingested was 0. >0 means "publishers quiet". */
   empty_ticks: number;
+  /** Avg seconds between item.published_ts and ingest time, over the last poll. */
+  last_avg_publisher_lag_seconds: number | null;
+  /** Median seconds. More honest than the avg when a few backfill items skew it. */
+  last_median_publisher_lag_seconds: number | null;
 }
 
 export interface NewsPollNowResponse {

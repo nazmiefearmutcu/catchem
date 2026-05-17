@@ -71,13 +71,38 @@ class FeedSpec:
 # Curated default set — public, no-auth, stable over years. Each one is a
 # clean RSS/Atom endpoint with a sensible Title + Description + Link triple.
 # Operators can override via FUSION_NEWS__FEEDS but the defaults Just Work.
+#
+# Coverage strategy: broad enough that *every* poll has a non-trivial chance
+# of surfacing a new URL (mainstream + financial + tech + crypto + regulator).
+# Each candidate was live-tested 2026-05-17; sources known to 404 or 403 the
+# common UA are intentionally absent. If you add new sources, run
+#   python -c "import asyncio, httpx; from fusion_stack.news_poller import \
+#     fetch_feed, FeedSpec; ..."
+# before checking in.
 DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
+    # Mainstream business
     FeedSpec("bbc-business", "http://feeds.bbci.co.uk/news/business/rss.xml", "bbc.com"),
-    FeedSpec("reuters-via-feedburner", "https://feeds.feedburner.com/reuters/businessNews", "reuters.com"),
+    FeedSpec("bbc-tech", "https://feeds.bbci.co.uk/news/technology/rss.xml", "bbc.com"),
+    FeedSpec("reuters-business", "https://feeds.feedburner.com/reuters/businessNews", "reuters.com"),
+    FeedSpec("reuters-tech", "https://feeds.feedburner.com/reuters/technologyNews", "reuters.com"),
+    FeedSpec("guardian-business", "https://www.theguardian.com/uk/business/rss", "theguardian.com"),
+    FeedSpec("nytimes-business", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "nytimes.com"),
+    # Financial press
+    FeedSpec("cnbc-top", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "cnbc.com"),
+    FeedSpec("cnbc-business", "https://www.cnbc.com/id/10001147/device/rss/rss.html", "cnbc.com"),
+    FeedSpec("cnbc-economy", "https://www.cnbc.com/id/20910258/device/rss/rss.html", "cnbc.com"),
+    FeedSpec("marketwatch-top", "http://feeds.marketwatch.com/marketwatch/topstories/", "marketwatch.com"),
+    FeedSpec("yahoo-finance", "https://finance.yahoo.com/news/rssindex", "finance.yahoo.com"),
+    # Regulators / central banks
     FeedSpec("fed-press-all", "https://www.federalreserve.gov/feeds/press_all.xml", "federalreserve.gov"),
     FeedSpec("sec-edgar-current", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&output=atom", "sec.gov"),
-    FeedSpec("cnbc-top", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "cnbc.com"),
+    FeedSpec("ecb-press", "https://www.ecb.europa.eu/rss/press.html", "ecb.europa.eu"),
+    # Crypto
     FeedSpec("coindesk-business", "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml", "coindesk.com"),
+    FeedSpec("decrypt-crypto", "https://decrypt.co/feed", "decrypt.co"),
+    FeedSpec("theblock", "https://www.theblockcrypto.com/rss.xml", "theblockcrypto.com"),
+    # Tech-adjacent (HN regularly covers fintech, regulation, market moves)
+    FeedSpec("hackernews", "https://news.ycombinator.com/rss", "news.ycombinator.com"),
 )
 
 
@@ -250,7 +275,7 @@ class NewsPoller:
         supervisor: Supervisor,
         settings: Settings,
         feeds: Iterable[FeedSpec] | None = None,
-        interval_seconds: float = 60.0,
+        interval_seconds: float = 30.0,
         startup_grace_seconds: float = 3.0,
     ) -> None:
         self._sup = supervisor
@@ -261,11 +286,16 @@ class NewsPoller:
         self._seen = _SeenCache()
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._poke = asyncio.Event()      # signals "skip the sleep, poll now"
+        self._lock = asyncio.Lock()       # serializes concurrent poll_now calls
+        self._client: httpx.AsyncClient | None = None
         # Persistent diagnostics for /ui/news-status.
         self.last_run_at: datetime | None = None
         self.last_ingested: int = 0
         self.total_ingested: int = 0
         self.last_error: str | None = None
+        self.is_polling: bool = False
+        self.next_run_at: datetime | None = None
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -285,6 +315,39 @@ class NewsPoller:
         self._task = None
         logger.info("news_poller_stopped")
 
+    async def poll_now(self) -> int:
+        """Trigger an immediate poll, bypassing the scheduled sleep.
+
+        Used by `POST /ui/news-poll-now` so the UI's "Poll now" button can
+        force activity on demand. Returns the number of items ingested.
+        Safe to call concurrently — the internal lock serializes runs.
+        """
+        if self._client is None:
+            # Poller hasn't entered its main loop yet; create an ephemeral
+            # client so the manual trigger still works during startup grace.
+            async with httpx.AsyncClient() as client:
+                return await self._run_one_tick(client)
+        self._poke.set()
+        async with self._lock:
+            return await self._run_one_tick(self._client)
+
+    async def _run_one_tick(self, client: httpx.AsyncClient) -> int:
+        """One observable poll cycle: flip is_polling, count, record stats."""
+        self.is_polling = True
+        try:
+            n = await self._poll_once(client)
+            self.last_ingested = n
+            self.total_ingested += n
+            self.last_run_at = datetime.now(timezone.utc)
+            self.last_error = None
+            return n
+        except Exception as exc:
+            self.last_error = repr(exc)
+            logger.warning("news_poller_tick_failed error=%s", exc, exc_info=False)
+            return 0
+        finally:
+            self.is_polling = False
+
     async def _run(self) -> None:
         # Brief grace so the first tick doesn't race the rest of startup.
         try:
@@ -294,23 +357,33 @@ class NewsPoller:
             pass
 
         async with httpx.AsyncClient() as client:
-            while not self._stop.is_set():
-                try:
-                    n = await self._poll_once(client)
-                    self.last_ingested = n
-                    self.total_ingested += n
-                    self.last_run_at = datetime.now(timezone.utc)
-                    self.last_error = None
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    self.last_error = repr(exc)
-                    logger.warning("news_poller_tick_failed error=%s", exc, exc_info=False)
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
-                    break  # stop was set
-                except asyncio.TimeoutError:
-                    continue
+            self._client = client
+            try:
+                while not self._stop.is_set():
+                    async with self._lock:
+                        await self._run_one_tick(client)
+                    if self._stop.is_set():
+                        break
+                    # Compute the next-scheduled time so the UI can show
+                    # a "next poll in Xs" countdown.
+                    from datetime import timedelta
+                    self.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=self._interval)
+                    # Sleep for the interval, but wake early on stop OR poke.
+                    waiters = [
+                        asyncio.create_task(self._stop.wait()),
+                        asyncio.create_task(self._poke.wait()),
+                    ]
+                    done, pending = await asyncio.wait(
+                        waiters,
+                        timeout=self._interval,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for t in pending:
+                        t.cancel()
+                    # Reset the poke event so the next manual call wakes us.
+                    self._poke.clear()
+            finally:
+                self._client = None
 
     async def _poll_once(self, client: httpx.AsyncClient) -> int:
         """One pass over all feeds. Returns number of NEW records ingested."""
@@ -339,12 +412,19 @@ class NewsPoller:
         return ingested
 
     def _ingest_one(self, item: ParsedItem) -> None:
-        """Replay one item synchronously through the existing pipeline.
+        """Process one item through the *shared* supervisor — fast path.
 
-        We use the same path as demo.py: build_capture → write_jsonl →
-        supervisor.run_replay(max_records=1). This guarantees the record
-        lands in storage with the same shape as a paste-demo or a real
-        Awareness JSONL ingest.
+        The previous implementation spawned a brand-new Supervisor per
+        item (re-init storage, re-init service, re-load symbol mapper —
+        roughly 1-2s of CPU each). On a first poll of 195 items that
+        meant ~5 minutes of serial work blocking the asyncio loop, which
+        in turn meant the next 60s tick was always way overdue and the
+        feed felt frozen.
+
+        `process_capture` reuses the already-warm service + storage
+        handle from `__init__`. A persisted JSONL copy is still written
+        to `live-news/` so a future replay can re-process the same
+        stream offline, but it's no longer on the hot path.
         """
         cap = build_capture(
             title=item.title,
@@ -354,32 +434,17 @@ class NewsPoller:
             published_ts=item.published_ts,
             source_type="rss",
         )
-        # Demo-input subdir under fusion_output so we never touch any real
-        # Awareness data dir.
-        demo_root = self._settings.paths.fusion_output_dir / "live-news"
-        demo_root.mkdir(parents=True, exist_ok=True)
-        write_jsonl(cap, demo_root)
-        # Point the supervisor at our live-news folder via env, just like
-        # demo.run_demo does. Done synchronously so per-item failures are
-        # isolated.
-        import os
-        prev = os.environ.get("FUSION_PATHS__AWARENESS_DATA_DIR")
-        os.environ["FUSION_PATHS__AWARENESS_DATA_DIR"] = str(demo_root)
+        # Persist a JSONL copy so the stream is replayable later. Best-effort;
+        # failure here must not block the ingest.
         try:
-            from .settings import load_settings, reload_settings
-            reload_settings()
-            sup = Supervisor(load_settings())
-            try:
-                sup.run_replay(max_records=2)
-            finally:
-                sup.close()
-        finally:
-            if prev is None:
-                os.environ.pop("FUSION_PATHS__AWARENESS_DATA_DIR", None)
-            else:
-                os.environ["FUSION_PATHS__AWARENESS_DATA_DIR"] = prev
-            from .settings import reload_settings as _rs
-            _rs()
+            archive_root = self._settings.paths.fusion_output_dir / "live-news"
+            archive_root.mkdir(parents=True, exist_ok=True)
+            write_jsonl(cap, archive_root)
+        except OSError as exc:
+            logger.info("news_archive_failed url=%s error=%s", item.url, exc)
+        # Hot path: warm supervisor → service → storage. The capture_id is
+        # deterministic so insert_record is upsert-safe (PRIMARY KEY).
+        self._sup.process_capture(cap)
 
 
 __all__ = [

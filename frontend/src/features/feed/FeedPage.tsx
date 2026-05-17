@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, fmtRel, fmtScore, safeHref } from "@/lib/api";
 import { mergeByCaptureId, newCaptureIds } from "@/lib/feedMerge";
@@ -14,12 +14,25 @@ export function FeedPage() {
   const { captureId } = useParams();
   const nav = useNavigate();
 
+  const qc = useQueryClient();
   const facets = useQuery({ queryKey: ["facets"], queryFn: () => api.facets(500), staleTime: 10_000 });
   const news = useQuery({
     queryKey: ["news-status"],
     queryFn: api.newsStatus,
-    refetchInterval: 10_000,
-    staleTime: 5_000,
+    // Poll more often than the backend ticks so the "fetching now" badge
+    // and the next-poll countdown stay visibly fresh.
+    refetchInterval: 2_000,
+    staleTime: 1_000,
+  });
+  const pollNow = useMutation({
+    mutationFn: api.newsPollNow,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["news-status"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({
+        predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "feed-list",
+      });
+    },
   });
 
   const list = useQuery<{ items: FinancialRecord[] }>({
@@ -171,11 +184,18 @@ export function FeedPage() {
             aria-live="polite"
           >
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-good animate-pulse-dot" aria-hidden="true" />
-              <span className="uppercase tracking-wider">live</span>
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full animate-pulse-dot ${
+                  news.data.is_polling ? "bg-accent" : "bg-good"
+                }`}
+                aria-hidden="true"
+              />
+              <span className="uppercase tracking-wider">
+                {news.data.is_polling ? "fetching" : "live"}
+              </span>
             </span>
             <span>
-              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"}, polls every {Math.round((news.data.interval_seconds ?? 60))}s
+              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 30))}s
             </span>
             <span>
               last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>
@@ -183,8 +203,20 @@ export function FeedPage() {
                 <span className="text-good"> · +{news.data.last_ingested}</span>
               )}
             </span>
-            <span className="ml-auto">
-              {news.data.total_ingested.toLocaleString()} ingested this session
+            {news.data.next_run_at && !news.data.is_polling && (
+              <span>next {fmtRel(news.data.next_run_at) || "soon"}</span>
+            )}
+            <span className="ml-auto inline-flex items-center gap-3">
+              <span>{news.data.total_ingested.toLocaleString()} ingested this session</span>
+              <button
+                type="button"
+                className="chip text-[11px]"
+                onClick={() => pollNow.mutate()}
+                disabled={pollNow.isPending || news.data.is_polling}
+                title="Trigger an immediate poll across all sources"
+              >
+                {pollNow.isPending || news.data.is_polling ? "polling…" : "poll now"}
+              </button>
             </span>
             {news.data.last_error && (
               <span className="text-warn" title={news.data.last_error}>· error</span>

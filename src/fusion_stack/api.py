@@ -659,19 +659,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "feeds": 0,
                 "interval_seconds": None,
                 "last_run_at": None,
+                "next_run_at": None,
                 "last_ingested": 0,
                 "total_ingested": 0,
                 "last_error": None,
+                "is_polling": False,
             }
         return {
             "enabled": True,
             "feeds": len(_NEWS_POLLER._feeds),  # type: ignore[attr-defined]
             "interval_seconds": _NEWS_POLLER._interval,  # type: ignore[attr-defined]
             "last_run_at": _NEWS_POLLER.last_run_at.isoformat() if _NEWS_POLLER.last_run_at else None,
+            "next_run_at": _NEWS_POLLER.next_run_at.isoformat() if _NEWS_POLLER.next_run_at else None,
             "last_ingested": _NEWS_POLLER.last_ingested,
             "total_ingested": _NEWS_POLLER.total_ingested,
             "last_error": _NEWS_POLLER.last_error,
+            "is_polling": _NEWS_POLLER.is_polling,
         }
+
+    @app.post("/ui/news-poll-now")
+    async def news_poll_now() -> dict[str, Any]:
+        """Force an immediate news-poll tick. Powers the UI 'Poll now' button.
+
+        Idempotent under concurrent calls — the poller's internal lock
+        serializes runs, so two clicks become one ingest + one no-op.
+        """
+        if _NEWS_POLLER is None:
+            raise HTTPException(status_code=503, detail="news_poller_disabled")
+        ingested = await _NEWS_POLLER.poll_now()
+        return {"ingested": ingested, "total_ingested": _NEWS_POLLER.total_ingested}
 
     @app.get("/ui/stream")
     async def ui_stream(request: Request) -> EventSourceResponse:

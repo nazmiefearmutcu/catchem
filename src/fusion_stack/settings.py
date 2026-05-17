@@ -153,9 +153,14 @@ class Settings(BaseSettings):
         dotenv_settings,
         file_secret_settings,
     ):
-        # Flip the default order: env beats init-kwargs so YAML (which we pass
-        # as init kwargs) is the LOWEST priority instead of the highest.
-        return dotenv_settings, env_settings, init_settings, file_secret_settings
+        # Precedence (lowest → highest):
+        #   defaults  <  configs/fusion.yaml (init kwargs)  <  .env file  <  process env
+        #
+        # Process env must beat .env so:
+        #   (a) explicit shell overrides win (operator intent),
+        #   (b) pytest's monkeypatch.setenv works as expected (test ergonomics),
+        #   (c) CI's job env beats any committed .env (deployment determinism).
+        return env_settings, dotenv_settings, init_settings, file_secret_settings
 
     mode: FusionMode = FusionMode.PRODUCTION_SAFE
     paths: PathConfig = Field(default_factory=PathConfig)

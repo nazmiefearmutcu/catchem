@@ -137,6 +137,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Install + serve background
+        env:
+          FUSION_PATHS__FUSION_OUTPUT_DIR: "${{ runner.temp }}/fusion-data"
         run: |
           pip install --upgrade pip
           pip install -e ".[dev]"

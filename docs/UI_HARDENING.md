@@ -46,7 +46,11 @@ priority order to `(dotenv, env, init, secrets)`. We added:
   invalid value rejection, unknown-key tolerance.
 
 **Documented precedence (lowest → highest):**
-`defaults < configs/fusion.yaml (init kwargs) < env vars < .env file`
+`defaults < configs/fusion.yaml (init kwargs) < .env file < process env`
+
+> Process env beats `.env` so that explicit shell overrides win, pytest's
+> `monkeypatch.setenv` works as expected, and CI job env beats any committed
+> `.env`. See `settings_customise_sources` in `src/fusion_stack/settings.py`.
 
 ## P0 · Guard redaction in production_safe
 

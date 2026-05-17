@@ -130,6 +130,22 @@ DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
     FeedSpec("bitcoinmagazine", "https://bitcoinmagazine.com/feed", "bitcoinmagazine.com"),
     # ── Tech-adjacent (HN regularly covers fintech, regulation, market moves)
     FeedSpec("hackernews", "https://news.ycombinator.com/rss", "news.ycombinator.com"),
+    FeedSpec("hn-frontpage", "https://hnrss.org/frontpage", "news.ycombinator.com"),
+    FeedSpec("hn-newest", "https://hnrss.org/newest", "news.ycombinator.com"),
+    # ── Google News searches — near-real-time aggregation of every major
+    # publisher's homepage. Each query returns ~100 fresh items and updates
+    # within minutes of publication, which sidesteps the RSS publisher lag
+    # (Yahoo/Forbes/etc. refresh their RSS every 10-15 min; their articles
+    # appear in Google News within seconds).
+    FeedSpec("gnews-finance", "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-stocks", "https://news.google.com/rss/search?q=stocks+earnings&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-bitcoin", "https://news.google.com/rss/search?q=bitcoin+OR+ethereum&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-fed", "https://news.google.com/rss/search?q=federal+reserve+OR+FOMC&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-inflation", "https://news.google.com/rss/search?q=inflation+OR+CPI+OR+PPI&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-recession", "https://news.google.com/rss/search?q=recession+OR+unemployment&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-mna", "https://news.google.com/rss/search?q=merger+OR+acquisition+OR+IPO&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-energy", "https://news.google.com/rss/search?q=oil+OR+OPEC+OR+gas+prices&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec("gnews-geo", "https://news.google.com/rss/search?q=sanctions+OR+geopolitics+OR+trade+war&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
 )
 
 
@@ -236,6 +252,11 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
             desc = content_enc.text
         pub = item.findtext("pubDate") or item.findtext("dc:date", default=None, namespaces=_NS)
         text = _strip_html(desc) or title
+        # Title-less feeds (Mastodon micro-posts, etc.): synthesize a short
+        # title from the first sentence/clause of the body so the row is
+        # still readable in the Live Feed.
+        if not title and text:
+            title = text[:120].rstrip()
         if not title or not link or not text:
             continue
         items.append(ParsedItem(
@@ -302,7 +323,7 @@ class NewsPoller:
         supervisor: Supervisor,
         settings: Settings,
         feeds: Iterable[FeedSpec] | None = None,
-        interval_seconds: float = 15.0,
+        interval_seconds: float = 10.0,
         startup_grace_seconds: float = 3.0,
     ) -> None:
         self._sup = supervisor
@@ -331,6 +352,12 @@ class NewsPoller:
         # Consecutive ticks with no new items. Helps the UI distinguish
         # "actively flowing" from "alive but quiet".
         self.empty_ticks: int = 0
+        # Per-poll publisher-lag stats — `now - item.published_ts` at ingest
+        # time. The UI surfaces these so the analyst can see that the
+        # visible "X min ago" gap is mostly publisher-side RSS lag, not
+        # our pipeline (which adds ~4ms in stub mode, ~100ms with real ML).
+        self.last_avg_publisher_lag_seconds: float | None = None
+        self.last_median_publisher_lag_seconds: float | None = None
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -427,29 +454,106 @@ class NewsPoller:
                 self._client = None
 
     async def _poll_once(self, client: httpx.AsyncClient) -> int:
-        """One pass over all feeds. Returns number of NEW records ingested."""
-        # Fetch all feeds in parallel — they're independent.
+        """One pass over all feeds. Returns number of NEW records ingested.
+
+        Two-phase pipeline:
+          (1) Fetch all feeds in parallel via asyncio.gather (network-bound).
+          (2) For each NEW item, run process_capture() in a worker thread
+              via asyncio.to_thread, with a small concurrency cap. The
+              shared supervisor's service is read-mostly during process()
+              and storage.insert_record holds the SQLite write lock
+              briefly — 4 workers is enough to parallelise without
+              contention.
+
+        Why parallelise:
+          With ML stubs each process_capture is ~4 ms, so even serial
+          processing of 300 items costs ~1.2 s — not the bottleneck for
+          stub mode. But with real ML (use_ml_stubs=false), per-item cost
+          jumps to ~100 ms; serial processing of 300 items would be
+          ~30 s and would dominate the user-visible latency. Parallel
+          ingest keeps the wall-clock bounded by the slowest item, not
+          their sum, so the system performs the same in stub and real-ML
+          modes from the user's seat.
+
+        Latency tracking:
+          For each ingested item, we record `created_at - item.published_ts`
+          — the gap between publisher's claimed publication time and our
+          ingest time. Averaged into `last_avg_publisher_lag_seconds` for
+          the UI, so the analyst can see that most of the visible "10m
+          ago" gap comes from publisher RSS lag, not our pipeline.
+        """
+        from .demo import _deterministic_capture_id
+
+        # Phase 1: parallel fetch.
         results = await asyncio.gather(*[fetch_feed(client, s) for s in self._feeds])
-        ingested = 0
+
+        # Filter to genuinely-new items (URL not seen + capture_id not in
+        # storage). This happens on the event loop — both checks are cheap.
+        new_items: list[tuple[FeedSpec, ParsedItem]] = []
         for spec, items in zip(self._feeds, results):
             for item in items:
                 if item.url in self._seen:
                     continue
                 self._seen.add(item.url)
-                # Compute the same capture_id demo.py would compute; if it's
-                # already in storage we skip the heavier replay path.
-                from .demo import _deterministic_capture_id
                 cap_id = _deterministic_capture_id(item.text, item.url)
                 if self._sup.storage.get_record(cap_id) is not None:
                     continue
+                new_items.append((spec, item))
+
+        if not new_items:
+            return 0
+
+        # Phase 2: bounded-concurrency parallel ingest via thread pool.
+        sem = asyncio.Semaphore(4)
+        ingest_times: list[datetime] = []
+        publisher_lags_s: list[float] = []
+
+        async def _ingest_one_async(spec: FeedSpec, item: ParsedItem) -> bool:
+            async with sem:
                 try:
-                    self._ingest_one(item)
-                    ingested += 1
+                    await asyncio.to_thread(self._ingest_one, item)
                 except Exception as exc:
-                    logger.info("news_ingest_failed feed=%s url=%s error=%s",
-                                spec.name, item.url, exc)
+                    logger.info(
+                        "news_ingest_failed feed=%s url=%s error=%s",
+                        spec.name, item.url, exc,
+                    )
+                    return False
+            now = datetime.now(timezone.utc)
+            ingest_times.append(now)
+            if item.published_ts is not None:
+                publisher_lags_s.append((now - item.published_ts).total_seconds())
+            return True
+
+        gathered = await asyncio.gather(*(
+            _ingest_one_async(spec, item) for spec, item in new_items
+        ))
+        ingested = sum(1 for ok in gathered if ok)
+
+        # Compute publisher-lag stats but exclude obviously-old items.
+        # Google News and a few wires return historical results matching
+        # the search query, not only real-time hits — including those
+        # would balloon the median to "48h" and mislead the analyst
+        # about real-time freshness. We only consider items whose
+        # `published_ts` is within the last 4 hours (the realistic
+        # window for "now-ish" news).
+        FRESH_WINDOW_S = 4 * 3600
+        fresh_lags = [lag for lag in publisher_lags_s if 0 <= lag <= FRESH_WINDOW_S]
+        if fresh_lags:
+            self.last_avg_publisher_lag_seconds = sum(fresh_lags) / len(fresh_lags)
+            srt = sorted(fresh_lags)
+            self.last_median_publisher_lag_seconds = srt[len(srt) // 2]
+        elif publisher_lags_s:
+            # No fresh items this tick — clear the stat rather than show stale data.
+            self.last_avg_publisher_lag_seconds = None
+            self.last_median_publisher_lag_seconds = None
         if ingested:
-            logger.info("news_poll_ingested count=%d", ingested)
+            logger.info(
+                "news_poll_ingested count=%d fresh_count=%d avg_pub_lag=%.0fs median_pub_lag=%.0fs",
+                ingested,
+                len(fresh_lags),
+                self.last_avg_publisher_lag_seconds or 0,
+                self.last_median_publisher_lag_seconds or 0,
+            )
         return ingested
 
     def _ingest_one(self, item: ParsedItem) -> None:

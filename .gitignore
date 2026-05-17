@@ -20,6 +20,8 @@ data/cache/
 data/logs/
 data/kaggle/
 data/replay/
+data/demo-input/
+data/golden/extended.jsonl
 
 # Node / frontend
 node_modules/

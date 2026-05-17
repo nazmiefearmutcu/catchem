@@ -11,11 +11,14 @@ import { CommandPalette } from "@/components/CommandPalette";
 const NAV = [
   { label: "Overview", path: "/" },
   { label: "Live Feed", path: "/feed" },
-  { label: "Market Map", path: "/map" },
+  { label: "Replay/Upload", path: "/replay" },
+  { label: "Analysis", path: "/map" },
   { label: "Symbols", path: "/symbols" },
   { label: "Benchmark", path: "/benchmark" },
+  { label: "Model Controls", path: "/model-controls" },
   { label: "Ops", path: "/ops" },
   { label: "Settings", path: "/settings" },
+  { label: "Help", path: "/help" },
 ];
 
 export function Shell() {
@@ -46,10 +49,13 @@ export function Shell() {
       const k = e.key.toLowerCase();
       if (k === "o") nav("/");
       else if (k === "f") nav("/feed");
-      else if (k === "m") nav("/map");
+      else if (k === "r") nav("/replay");
+      else if (k === "a" || k === "m") nav("/map");
       else if (k === "s") nav("/symbols");
       else if (k === "b") nav("/benchmark");
+      else if (k === "c") nav("/model-controls");
       else if (k === "x") nav("/ops");
+      else if (k === "h") nav("/help");
       else if (k === ",") nav("/settings");
     };
     document.addEventListener("keydown", onKey);

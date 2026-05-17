@@ -24,6 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot,
+  DemoRunResponse, AppInfo, SidecarStatus, LogTail,
 } from "@/types/api";
 
 export const api = {
@@ -52,6 +53,25 @@ export const api = {
     request<{ items: FinancialRecord[] }>(`/records/by-asset-class/${encodeURIComponent(ac)}?limit=${limit}`),
   byReason: (rc: string, limit = 50) =>
     request<{ items: FinancialRecord[] }>(`/records/by-reason/${encodeURIComponent(rc)}?limit=${limit}`),
+
+  // ── Catchem desktop endpoints ──────────────────────────────────────────
+  demoPaste: (payload: { title: string; text: string; domain?: string; url?: string }) =>
+    request<DemoRunResponse>("/ui/demo/paste", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  demoUpload: (file: File, opts: { title?: string; domain?: string; url?: string } = {}) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.title) form.append("title", opts.title);
+    form.append("domain", opts.domain ?? "demo.local");
+    if (opts.url) form.append("url", opts.url);
+    return request<DemoRunResponse>("/ui/demo/upload", { method: "POST", body: form });
+  },
+  appInfo: () => request<AppInfo>("/ui/app-info"),
+  sidecarStatus: () => request<SidecarStatus>("/ui/sidecar-status"),
+  logTail: (lines = 200) => request<LogTail>(`/ui/log-tail?lines=${lines}`),
 };
 
 // Safe URL filter for outbound links. Blocks javascript:/data:/file: schemes.

@@ -135,3 +135,43 @@ export interface UIMetrics {
   dlq: number;
   model_versions: Record<string, string>;
 }
+
+// ── Catchem desktop additions ──────────────────────────────────────────────
+
+export interface DemoRunResponse {
+  capture_id: string;
+  jsonl_basename: string;
+  processed: number;
+  skipped: number;
+  record: FinancialRecord;
+}
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  commit_sha: string | null;
+  branch: string | null;
+  mode: Mode;
+  use_ml_stubs: boolean;
+  diagnostic_allowed: boolean;
+  static_bundle_present: boolean;
+  model_versions: Record<string, string>;
+  generated_at: string;
+}
+
+export interface SidecarStatus {
+  healthy: boolean;
+  api_host: string;
+  api_port: number;
+  pid: number;
+  uptime_seconds: number;
+  records: Totals;
+  dlq: number;
+  diagnostic_enabled: boolean;
+  generated_at: string;
+}
+
+export interface LogTail {
+  lines: string[];
+  truncated: boolean;
+}

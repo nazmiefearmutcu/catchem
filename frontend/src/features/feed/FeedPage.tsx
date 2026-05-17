@@ -246,16 +246,24 @@ export function FeedPage() {
             <span className="inline-flex items-center gap-1.5">
               <span
                 className={`inline-block h-1.5 w-1.5 rounded-full animate-pulse-dot ${
-                  news.data.is_polling ? "bg-accent" : "bg-good"
+                  news.data.is_polling
+                    ? "bg-accent"
+                    : news.data.empty_ticks >= 5
+                      ? "bg-warn"
+                      : "bg-good"
                 }`}
                 aria-hidden="true"
               />
               <span className="uppercase tracking-wider">
-                {news.data.is_polling ? "fetching" : "live"}
+                {news.data.is_polling
+                  ? "fetching"
+                  : news.data.empty_ticks >= 5
+                    ? "quiet"
+                    : "live"}
               </span>
             </span>
             <span>
-              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 30))}s
+              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 15))}s
             </span>
             <span>
               last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>
@@ -266,6 +274,13 @@ export function FeedPage() {
                 > · +{news.data.last_ingested}</span>
               )}
             </span>
+            {news.data.last_new_at && (
+              <span
+                title="The poller's last successful ingest of a NEW article. When this is recent, you're getting fresh news; when it's far back, publishers are quiet (this is normal — RSS doesn't publish on a fixed schedule)."
+              >
+                last new <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_new_at) || "—"}</span>
+              </span>
+            )}
             {news.data.next_run_at && !news.data.is_polling && (
               <span>next {fmtRel(news.data.next_run_at) || "soon"}</span>
             )}

@@ -17,19 +17,32 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+import os as _os_for_pid
+import subprocess as _subproc
+from datetime import datetime as _dt
+
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+_PROCESS_STARTED_AT = _dt.now(timezone.utc)
+
 from .contracts import (
+    AppInfoResponse,
+    DemoRunResponse,
     FinancialImpactDetail,
     FinancialImpactSummary,
     GuardSummary,
+    LogTailResponse,
     MetricsSummary,
     RecordListResponse,
+    SidecarStatusResponse,
 )
+from .demo import DemoResult as _DemoResult
+from .demo import build_capture as _build_capture, run_demo as _run_demo
+from .text_extract import ALLOWED_SUFFIXES, MAX_UPLOAD_BYTES, extract_text
 from .dashboard_data import overview
 from .logging import get_logger
 from .newsimpact_guarded_adapter import snapshot_guard_state, NewsImpactGuardError
@@ -59,6 +72,38 @@ def _normalize_detail_payload(r: dict[str, Any]) -> dict[str, Any]:
         if v is not None and not isinstance(v, str):
             out[k] = str(v)
     return out
+
+
+def _git_sha_safe() -> str | None:
+    """Resolve the current commit SHA without crashing if git is unavailable.
+
+    Used by /ui/app-info; never blocks the response and never raises.
+    """
+    try:
+        repo = Path(__file__).resolve().parents[2]
+        res = _subproc.run(
+            ["git", "-C", str(repo), "rev-parse", "--short=12", "HEAD"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _git_branch_safe() -> str | None:
+    try:
+        repo = Path(__file__).resolve().parents[2]
+        res = _subproc.run(
+            ["git", "-C", str(repo), "branch", "--show-current"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return None
 
 
 logger = get_logger("fusion.api")
@@ -258,6 +303,122 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payload = rec.model_dump(mode="json")
         redacted = redact_record_for_mode(payload, production_safe=_is_production_safe()) or payload
         return FinancialImpactDetail(**_normalize_detail_payload(redacted))
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Catchem desktop endpoints — typed wrappers around demo.py + safe upload.
+    # All preserve the production-safe redaction guarantees.
+    # ────────────────────────────────────────────────────────────────────────
+
+    def _demo_to_response(result: "_DemoResult") -> DemoRunResponse:
+        prod_safe = _is_production_safe()
+        rec = redact_record_for_mode(result.record, production_safe=prod_safe) or {}
+        if not rec:
+            # No record materialized — surface a stub-shaped detail so the
+            # response_model still validates, but mark it inert.
+            rec = {
+                "capture_id": result.capture_id,
+                "doc_id": f"demo-{result.capture_id}",
+                "is_finance_relevant": False,
+                "finance_relevance_score": 0.0,
+                "processing_mode": "production_safe" if prod_safe else "research_diagnostic",
+                "created_at": _dt.now(timezone.utc).isoformat(),
+                "title": None,
+            }
+        return DemoRunResponse(
+            capture_id=result.capture_id,
+            jsonl_basename=Path(str(result.jsonl_path)).name,
+            processed=result.processed,
+            skipped=result.skipped,
+            record=FinancialImpactDetail(**_normalize_detail_payload(rec)),
+        )
+
+    @app.post("/ui/demo/paste", response_model=DemoRunResponse)
+    def ui_demo_paste(body: dict = Body(...)) -> DemoRunResponse:
+        """Paste a news article → demo pipeline → typed record."""
+        title = str(body.get("title") or "").strip()
+        text = str(body.get("text") or "").strip()
+        domain = str(body.get("domain") or "demo.local").strip() or "demo.local"
+        url = body.get("url") or None
+        if not title or not text:
+            raise HTTPException(status_code=422, detail="title and text are required")
+        if len(text) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="text exceeds size cap")
+        result = _run_demo(title=title, text=text, domain=domain, url=url)
+        return _demo_to_response(result)
+
+    @app.post("/ui/demo/upload", response_model=DemoRunResponse)
+    async def ui_demo_upload(
+        file: UploadFile = File(...),
+        title: str | None = Form(None),
+        domain: str = Form("demo.local"),
+        url: str | None = Form(None),
+    ) -> DemoRunResponse:
+        """Upload .txt/.md/.html/.jsonl/.json → safe text extract → demo pipeline."""
+        body = await file.read()
+        try:
+            title_hint, body_text = extract_text(file.filename or "upload", body)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        effective_title = (title or title_hint or "(untitled upload)").strip()
+        result = _run_demo(title=effective_title, text=body_text, domain=domain or "demo.local", url=url)
+        return _demo_to_response(result)
+
+    @app.get("/ui/app-info", response_model=AppInfoResponse)
+    def ui_app_info() -> AppInfoResponse:
+        from . import __version__ as _ver
+        s = _SETTINGS or load_settings()
+        sup = _get_supervisor()
+        commit = _git_sha_safe()
+        branch = _git_branch_safe()
+        bundle = get_static_path("app/index.html")
+        return AppInfoResponse(
+            version=_ver,
+            commit_sha=commit,
+            branch=branch,
+            mode=s.mode.value,
+            use_ml_stubs=s.models_.use_ml_stubs,
+            diagnostic_allowed=s.diagnostic_allowed(),
+            static_bundle_present=bundle is not None,
+            model_versions=dict(sup.service.model_versions),
+            generated_at=_dt.now(timezone.utc).isoformat(),
+        )
+
+    @app.get("/ui/sidecar-status", response_model=SidecarStatusResponse)
+    def ui_sidecar_status() -> SidecarStatusResponse:
+        sup = _get_supervisor()
+        s = _SETTINGS or load_settings()
+        counts = sup.storage.count_records()
+        uptime = (_dt.now(timezone.utc) - _PROCESS_STARTED_AT).total_seconds()
+        return SidecarStatusResponse(
+            healthy=True,
+            api_host=s.api.host,
+            api_port=s.api.port,
+            pid=_os_for_pid.getpid(),
+            uptime_seconds=uptime,
+            records=counts,
+            dlq=sup.storage.dlq_count(),
+            diagnostic_enabled=False if _is_production_safe() else s.diagnostic_allowed(),
+            generated_at=_dt.now(timezone.utc).isoformat(),
+        )
+
+    @app.get("/ui/log-tail", response_model=LogTailResponse)
+    def ui_log_tail(lines: int = Query(120, ge=1, le=2000)) -> LogTailResponse:
+        s = _SETTINGS or load_settings()
+        log_rel = s.logging_.file
+        # `file` is relative like "data/logs/fusion_stack.log"; resolve under output dir
+        if log_rel.startswith("data/"):
+            log_path = s.paths.fusion_output_dir / Path(log_rel).relative_to("data")
+        else:
+            log_path = Path(log_rel)
+        if not log_path.exists():
+            return LogTailResponse(lines=[], truncated=False)
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return LogTailResponse(lines=[], truncated=False)
+        all_lines = text.splitlines()
+        tail = all_lines[-lines:]
+        return LogTailResponse(lines=tail, truncated=len(all_lines) > len(tail))
 
     # ────────────────────────────────────────────────────────────────────────
     # /ui/* — aggregation endpoints for the premium frontend.
@@ -488,6 +649,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await asyncio.sleep(3.0)
 
         return EventSourceResponse(gen())
+
+    # ── SPA history-mode fallback ─────────────────────────────────────────
+    # React Router uses history-mode URLs (/replay, /model-controls, /help).
+    # When the browser asks the server directly for one of those (bookmark,
+    # refresh, deep-link), FastAPI must serve the bundle shell so the SPA
+    # can boot and route client-side. We only fall back for GET requests
+    # that don't already match an API/assets route, and we never shadow the
+    # /assets mount or /docs (OpenAPI).
+    _RESERVED_PATH_PREFIXES = (
+        "assets/", "docs", "openapi.json", "redoc",
+        "healthz", "config", "metrics", "recent", "record",
+        "records/", "process-one", "dashboard",
+        "legacy", "ui/", "favicon",
+        # NB: "replay" deliberately not reserved — both the SPA route
+        # (handled by replay_spa) and the POST API live on /replay.
+    )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str) -> HTMLResponse:
+        # Reserved API/asset paths must NOT fall back to HTML — those that
+        # don't match a real handler should return their natural 404/405.
+        for prefix in _RESERVED_PATH_PREFIXES:
+            if full_path == prefix.rstrip("/") or full_path.startswith(prefix):
+                raise HTTPException(status_code=404, detail="not_found")
+        body = open_static_bytes("app/index.html")
+        if body is not None:
+            return HTMLResponse(body.decode("utf-8"))
+        raise HTTPException(status_code=404, detail="bundle_not_built")
+
+    # The Catchem nav routes /replay → ReplayUploadPage. The existing
+    # POST /replay endpoint stays for API consumers, but a bookmarked GET
+    # to /replay must serve the SPA shell. Explicit handler avoids the
+    # 405-before-fallback case.
+    @app.get("/replay", response_class=HTMLResponse, include_in_schema=False)
+    def replay_spa() -> HTMLResponse:
+        body = open_static_bytes("app/index.html")
+        if body is not None:
+            return HTMLResponse(body.decode("utf-8"))
+        raise HTTPException(status_code=404, detail="bundle_not_built")
 
     return app
 

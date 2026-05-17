@@ -131,10 +131,63 @@ class RecordListResponse(_CompactBase):
     items: list[FinancialImpactSummary]
 
 
+# ── Catchem desktop additions ──────────────────────────────────────────────
+
+class DemoRunResponse(_CompactBase):
+    """Return shape for /ui/demo/paste and /ui/demo/upload.
+
+    `jsonl_path` is exposed as a basename only (no absolute path leakage to UI).
+    """
+
+    capture_id: str
+    jsonl_basename: str
+    processed: int
+    skipped: int
+    record: FinancialImpactDetail
+
+
+class AppInfoResponse(_CompactBase):
+    """Catchem app banner / status surface."""
+
+    name: str = "fusion_stack"
+    version: str
+    commit_sha: str | None = None
+    branch: str | None = None
+    mode: str
+    use_ml_stubs: bool
+    diagnostic_allowed: bool
+    static_bundle_present: bool
+    model_versions: dict[str, str] = {}
+    generated_at: str
+
+
+class SidecarStatusResponse(_CompactBase):
+    """Process self-report. The Tauri shell asks for this on every poll."""
+
+    healthy: bool
+    api_host: str
+    api_port: int
+    pid: int
+    uptime_seconds: float
+    records: dict[str, int]
+    dlq: int
+    diagnostic_enabled: bool
+    generated_at: str
+
+
+class LogTailResponse(_CompactBase):
+    lines: list[str]
+    truncated: bool
+
+
 __all__ = [
     "FinancialImpactSummary",
     "FinancialImpactDetail",
     "MetricsSummary",
     "GuardSummary",
     "RecordListResponse",
+    "DemoRunResponse",
+    "AppInfoResponse",
+    "SidecarStatusResponse",
+    "LogTailResponse",
 ]

@@ -6,32 +6,16 @@
   "build": {
     "frontendDist": "../web/dist",
     "devUrl": "http://localhost:1421",
-    "beforeDevCommand": "npm --prefix ../web run dev",
-    "beforeBuildCommand": "npm --prefix ../web run build"
+    "beforeDevCommand": "npm --prefix web run dev",
+    "beforeBuildCommand": "npm --prefix web run build"
   },
   "app": {
     "withGlobalTauri": true,
     "macOSPrivateApi": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "Catchem",
-        "width": 1280,
-        "height": 820,
-        "minWidth": 980,
-        "minHeight": 640,
-        "fullscreen": false,
-        "resizable": true,
-        "decorations": true,
-        "titleBarStyle": "Visible",
-        "transparent": false,
-        "alwaysOnTop": false,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": "default-src 'self' http://127.0.0.1:8087; script-src 'self' 'unsafe-inline' http://127.0.0.1:8087; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:8087 ws://127.0.0.1:8087; img-src 'self' data: http://127.0.0.1:8087; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'",
-      "freezePrototype": true
+      "csp": null,
+      "dangerousDisableAssetCspModification": true
     }
   },
   "bundle": {
@@ -57,10 +41,6 @@
     "externalBin": []
   },
   "plugins": {
-    "shell": { "open": "^https?://" },
-    "notification": { "all": true },
-    "dialog": { "open": true, "save": true },
-    "fs": { "scope": ["$APPDATA/*", "$DOCUMENT/*", "$DOWNLOAD/*"] },
-    "opener": {}
+    "shell": { "open": "^https?://" }
   }
 }

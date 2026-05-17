@@ -3,8 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy"
-          content="default-src 'self' http://127.0.0.1:8087; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:8087; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
     <title>Catchem</title>
     <style>
       :root { color-scheme: dark; }
@@ -31,8 +29,6 @@
     </main>
     <script type="module">
       // Wait for the sidecar /healthz, then redirect to the React UI.
-      // No untrusted strings are ever inserted as HTML — we use textContent
-      // and createElement throughout.
       const endpoint = "http://127.0.0.1:8087";
       const statusEl = document.getElementById("status");
       const dotEl = document.getElementById("dot");
@@ -43,8 +39,7 @@
         dotEl.style.boxShadow = "0 0 0 4px rgba(248, 113, 113, 0.18)";
         const err = document.createElement("div");
         err.className = "err";
-        err.textContent = "Sidecar didn't respond on " + endpoint + "/healthz within 30 seconds. " +
-          "Open Model Controls (or check Help) to retry, or check data/logs/api.out.";
+        err.textContent = "Sidecar didn't respond on " + endpoint + "/healthz within 30 seconds.";
         statusEl.appendChild(err);
         const btn = document.createElement("button");
         btn.className = "btn";
@@ -65,9 +60,7 @@
               window.location.replace(endpoint + "/");
               return;
             }
-          } catch (_e) {
-            /* sidecar not up yet — keep polling */
-          }
+          } catch (_e) { /* keep polling */ }
           await new Promise((r) => setTimeout(r, 400));
         }
         showTimeout();

@@ -5,10 +5,14 @@
 //! Tauri command layer.
 
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use crate::paths;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidecarConfig {
@@ -61,13 +65,45 @@ impl SidecarState {
         cmd.env("FUSION_API_PORT", cfg.port.to_string());
         // Stub default — the user can opt into HF via a separate setup script.
         cmd.env("FUSION_USE_ML_STUBS", "true");
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+        // Force unbuffered Python output so errors surface immediately.
+        cmd.env("PYTHONUNBUFFERED", "1");
+
+        // Redirect stdout+stderr to a log file we can tail. Piped+undrained
+        // streams will deadlock the child once the pipe buffer fills, which
+        // silently breaks "sidecar isn't binding" debugging.
+        let log_path = paths::sidecar_log_path();
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map_err(|e| format!("open sidecar log {}: {e}", log_path.display()))?;
+        let log_file_err = log_file
+            .try_clone()
+            .map_err(|e| format!("clone sidecar log fd: {e}"))?;
+        // Marker so successive launches are easy to separate in the file.
+        {
+            let mut banner = log_file
+                .try_clone()
+                .map_err(|e| format!("clone sidecar log fd: {e}"))?;
+            let _ = writeln!(
+                banner,
+                "\n=== catchem sidecar start {} python={} cwd={} ===",
+                chrono_like_now(),
+                cfg.python.display(),
+                cfg.cwd.display()
+            );
+        }
+        cmd.stdout(Stdio::from(log_file));
+        cmd.stderr(Stdio::from(log_file_err));
 
         let child = cmd
             .spawn()
             .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
-        log::info!("sidecar spawned pid={}", child.id());
+        log::info!(
+            "sidecar spawned pid={} log={}",
+            child.id(),
+            log_path.display()
+        );
         *guard = Some(child);
         Ok(())
     }
@@ -98,6 +134,39 @@ pub struct WaitForHealthOutcome {
     pub elapsed_ms: u128,
     pub last_status: Option<u16>,
     pub last_error: Option<String>,
+}
+
+/// ISO-ish timestamp using only stdlib — avoids pulling chrono just for a
+/// log banner. Format: `1970-01-01T00:00:00Z` style at second resolution.
+fn chrono_like_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Quick Y/M/D/H/M/S split using the standard "days since epoch" trick.
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+    let s = rem % 60;
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, m, s)
+}
+
+/// Civil-date conversion from days since 1970-01-01. Algorithm by Howard
+/// Hinnant (date.h), public domain. Avoids chrono.
+fn days_to_ymd(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
 }
 
 /// Poll `/healthz` until 200 or timeout.

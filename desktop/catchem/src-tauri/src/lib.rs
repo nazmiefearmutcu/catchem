@@ -71,21 +71,47 @@ pub fn run() {
 
             let state = AppState::new(cfg.clone());
 
-            // Start the sidecar; ignore errors so the window still appears
-            // (the user can retry from Model Controls).
+            // Start the sidecar BEFORE creating the window so the webview
+            // can navigate straight to the FastAPI UI.
             if let Err(e) = state.sidecar.start(&cfg, false) {
                 log::error!("sidecar start failed: {e}");
             }
 
-            // Build the main window pointing at the sidecar URL.
-            let url = format!("{}/", cfg.endpoint())
+            // Block briefly for sidecar readiness — production-safe stack
+            // boots in ~500-1500ms. Cap at 30s; if it fails, the window opens
+            // anyway pointing at the URL and shows a native "can't connect"
+            // page which the user can retry by reloading from the menu.
+            let cfg_clone = cfg.clone();
+            tauri::async_runtime::block_on(async move {
+                let outcome = crate::sidecar::wait_for_health(
+                    &cfg_clone,
+                    std::time::Duration::from_secs(30),
+                ).await;
+                if outcome.healthy {
+                    log::info!("sidecar healthy in {}ms", outcome.elapsed_ms);
+                } else {
+                    log::warn!(
+                        "sidecar not healthy after {}ms (status={:?} err={:?})",
+                        outcome.elapsed_ms,
+                        outcome.last_status,
+                        outcome.last_error
+                    );
+                }
+            });
+
+            // Build the main window pointing directly at the FastAPI UI.
+            // This avoids cross-origin navigation issues that occur when the
+            // boot shim tries to `window.location.replace()` from
+            // tauri://localhost to http://127.0.0.1:8087.
+            let webview_url: tauri::Url = format!("{}/", cfg.endpoint())
                 .parse()
-                .expect("valid url");
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+                .expect("valid sidecar url");
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(webview_url))
                 .title("Catchem")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(980.0, 640.0)
                 .center()
+                .resizable(true)
                 .build()?;
 
             // Native menu bar.

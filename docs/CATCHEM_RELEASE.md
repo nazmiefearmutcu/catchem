@@ -126,8 +126,46 @@ release dry-run).
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Boot screen stuck on "Starting local sidecar…" 30s | Sidecar crashed | `tail -120 data/logs/api.out`; check Python is in PATH; restart from menu |
+| Boot screen stuck on "Starting local sidecar…" 30s | Sidecar crashed OR hit a TCC consent block | `tail -120 ~/Library/Logs/Catchem/sidecar.log`; for TCC see "Sidecar log is empty" below |
+| Sidecar log file exists but is empty (only the boot banner) | macOS TCC is blocking the sidecar's `open()` syscall on a Desktop / Documents / Downloads file. The Python process spawns but never gets through interpreter init. | The release `build_catchem_release.sh` calls `inject_info_plist.sh` automatically — but if you built without it, run `bash desktop/catchem/scripts/inject_info_plist.sh /Applications/Catchem.app`. See "Bug #5" below for the full root cause. |
 | Catchem opens but UI shows "bundle not built" placeholder | React bundle missing | `(cd frontend && npm install && npm run build)` |
 | "rejected unsafe external url" in console | A link in a record points at `javascript:` / `data:` | Expected — `safeHref` is doing its job |
 | `cargo tauri build` fails with `Xcode not found` | Command line tools missing | `xcode-select --install` |
 | Sidecar binary in `.app` rejects with "killed: 9" | Hardened runtime entitlements wrong | Re-sign with `--options runtime --entitlements src-tauri/Entitlements.plist` |
+
+### Sidecar logs
+
+The Tauri shell writes the sidecar's stdout+stderr to `~/Library/Logs/Catchem/sidecar.log`. Each launch is delimited by a banner line:
+
+```
+=== catchem sidecar start 2026-05-17T14:11:57Z python=/.../.venv/bin/python cwd=/.../fusion_stack ===
+INFO:     Started server process [35012]
+INFO:     Uvicorn running on http://127.0.0.1:8087 (Press CTRL+C to quit)
+```
+
+Tail it during boot if you suspect the sidecar isn't binding:
+
+```bash
+tail -f ~/Library/Logs/Catchem/sidecar.log
+```
+
+If the banner is present but nothing follows after ~5 seconds, the sidecar is hung in interpreter init — almost certainly a TCC block (see Bug #5).
+
+### Bug #5: sidecar hangs on Desktop-located repos (TCC)
+
+**Symptom:** Catchem.app launches, window appears, status banner shows "Starting local sidecar…" forever. `lsof -iTCP:8087` returns nothing. `~/Library/Logs/Catchem/sidecar.log` contains only the boot banner — zero Python output.
+
+**Root cause:** macOS TCC ("Transparency, Consent, and Control") requires user consent for any app to read files under `~/Desktop`, `~/Documents`, and `~/Downloads`. When the .app is launched from `open Catchem.app` (i.e. via Finder/LaunchServices), it spawns the sidecar Python interpreter, which tries to read its `pyvenv.cfg` from the dev `.venv` on Desktop. The `open()` syscall blocks indefinitely while `tccd` waits for a consent decision — but the consent prompt is never shown because Catchem's `Info.plist` has no `NSDesktopFolderUsageDescription` key. The Python process sits at 0% CPU forever.
+
+This does NOT reproduce when `cargo tauri dev` runs from a Terminal session — Terminal has its own TCC entry and inherits Desktop access to its children.
+
+**Fix (automatic in release builds):** `scripts/build_catchem_release.sh` calls `scripts/inject_info_plist.sh` after `cargo tauri build`. That script uses `plutil -replace` to add `NSDesktopFolderUsageDescription`, `NSDocumentsFolderUsageDescription`, `NSDownloadsFolderUsageDescription`, and `NSAppleEventsUsageDescription` to the bundle's `Info.plist`, then re-signs the bundle if `APPLE_DEVELOPER_IDENTITY` is set (modifying the plist invalidates the prior signature).
+
+**Manual fix (for ad-hoc debug bundles):**
+
+```bash
+bash desktop/catchem/scripts/inject_info_plist.sh \
+  desktop/catchem/src-tauri/target/debug/bundle/macos/Catchem.app
+```
+
+First launch after the fix will show a one-time "Catchem would like to access your Desktop folder" prompt. After "Allow", the consent is sticky for the bundle identifier.

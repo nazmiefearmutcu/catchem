@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, fmtScore, safeHref } from "@/lib/api";
+import { mergeByCaptureId, newCaptureIds } from "@/lib/feedMerge";
 import { Pill } from "@/components/Pill";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
 import { useUrlFilters } from "@/hooks/useUrlFilters";
@@ -26,9 +27,47 @@ export function FeedPage() {
     staleTime: 5_000,
   });
 
+  // ── live-polling buffer ─────────────────────────────────────────────────
+  // While a record is open in the drawer (or the user explicitly froze the
+  // list), incoming rows are buffered instead of replacing the current
+  // snapshot. This prevents the analyst's reading viewport from reordering.
+  const [stableRows, setStableRows] = useState<FinancialRecord[]>([]);
+  const [buffered, setBuffered] = useState<FinancialRecord[]>([]);
+  const isFrozen = !!captureId;
+  // The last query key that fed `stableRows` — change → reset snapshot.
+  const prevQueryKey = useRef<string>("");
+
+  useEffect(() => {
+    const key = JSON.stringify([filters.ac, filters.rc, filters.sym, filters.relevant]);
+    const incoming = list.data?.items ?? [];
+    if (key !== prevQueryKey.current) {
+      // Filter changed — always replace, drop any buffer.
+      prevQueryKey.current = key;
+      setStableRows(incoming);
+      setBuffered([]);
+      return;
+    }
+    if (!isFrozen) {
+      // Free viewport — merge in place, sorted, deduped.
+      setStableRows((prev) => mergeByCaptureId(prev, incoming));
+      setBuffered([]);
+      return;
+    }
+    // Drawer open — buffer only what's NEW relative to current snapshot.
+    const newIds = newCaptureIds(stableRows, incoming);
+    if (newIds.length === 0) return;
+    const idSet = new Set(newIds);
+    setBuffered((prev) => mergeByCaptureId(prev, incoming.filter((i) => idSet.has(i.capture_id))));
+  }, [list.data, filters.ac, filters.rc, filters.sym, filters.relevant, isFrozen]);
+
+  function applyBufferedRows() {
+    setStableRows((prev) => mergeByCaptureId(prev, buffered));
+    setBuffered([]);
+  }
+
   // client-side filters that the backend doesn't index for
   const filtered = useMemo(() => {
-    let items = list.data?.items ?? [];
+    let items = stableRows;
     if (filters.relevant === "only") items = items.filter((i) => i.is_finance_relevant);
     if (filters.sentiment) items = items.filter((i) => i.sentiment_label === filters.sentiment);
     if (filters.diagnosticOnly === "1") items = items.filter((i) => i.diagnostic_multimodal_enabled);
@@ -41,7 +80,7 @@ export function FeedPage() {
       );
     }
     return items;
-  }, [list.data, filters]);
+  }, [stableRows, filters]);
 
   return (
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
@@ -122,7 +161,21 @@ export function FeedPage() {
           {filters.ac && <span>· asset={filters.ac}</span>}
           {filters.rc && <span>· reason={filters.rc}</span>}
           {filters.sym && <span>· sym={filters.sym}</span>}
+          {isFrozen && (
+            <span className="text-warn" title="The feed is paused while you read a record">· paused</span>
+          )}
         </div>
+        {buffered.length > 0 && (
+          <button
+            type="button"
+            onClick={applyBufferedRows}
+            className="mb-2 w-full rounded-md border border-accent/60 bg-accent/10 px-3 py-1.5 text-xs text-accent hover:bg-accent/15"
+            aria-live="polite"
+            data-testid="buffer-flush"
+          >
+            {buffered.length} new item{buffered.length === 1 ? "" : "s"} available — click to update
+          </button>
+        )}
         {list.isLoading ? (
           <div className="grid gap-2">
             {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12" />)}

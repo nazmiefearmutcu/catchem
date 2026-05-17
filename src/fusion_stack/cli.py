@@ -163,5 +163,40 @@ def bootstrap_init(skip_warm: bool = typer.Option(True, help="Skip HF model warm
     typer.echo(json.dumps(summary, indent=2))
 
 
+@app.command()
+def demo(
+    title: str = typer.Option(..., "--title", "-t", help="Headline of the article to ingest."),
+    text: Optional[str] = typer.Option(None, "--text", help="Article body. If omitted, read from --text-file or stdin."),
+    text_file: Optional[Path] = typer.Option(None, "--text-file", help="Read article body from this file."),
+    domain: str = typer.Option("demo.local", "--domain", help="Source domain (sets the domain prior)."),
+    url: Optional[str] = typer.Option(None, "--url", help="Canonical URL (sanity-checked by the safeHref filter in UI)."),
+    json_out: bool = typer.Option(False, "--json", help="Emit the raw record JSON instead of the report."),
+) -> None:
+    """End-to-end demo: paste one news article, write the same JSONL Awareness
+    would write, run the replay, and print the materialized record.
+
+    Examples:
+      fusion-stack demo --title "Fed raises rates by 25 bps" --text "The Fed hiked..."
+      fusion-stack demo -t "Apple beats earnings" --text-file body.txt --domain wsj.com
+      cat body.txt | fusion-stack demo -t "Headline" --domain reuters.com
+    """
+    from .demo import render_demo_report, run_demo
+
+    if text is None and text_file is not None:
+        text = text_file.read_text(encoding="utf-8")
+    if text is None and not sys.stdin.isatty():
+        text = sys.stdin.read()
+    if not text or not text.strip():
+        typer.echo("error: provide --text, --text-file, or pipe stdin", err=True)
+        raise typer.Exit(2)
+
+    configure_logging(level="WARNING", json_mode=False)
+    result = run_demo(title=title, text=text.strip(), domain=domain, url=url)
+    if json_out:
+        typer.echo(json.dumps(result.record, indent=2, default=str))
+    else:
+        typer.echo(render_demo_report(result))
+
+
 if __name__ == "__main__":
     app()

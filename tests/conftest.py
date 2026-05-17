@@ -34,13 +34,22 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     Tests that change env vars themselves should call ``reload_settings()`` so
     the cached Settings instance is rebuilt. The autouse fixture handles the
     initial setup but not subsequent monkeypatches inside the test body.
+
+    CI escape hatch: when the caller has pre-set ``FUSION_PATHS__NEWSIMPACT_REPO``
+    or ``FUSION_PATHS__AWARENESS_REPO`` in the process env (typical for GitHub
+    Actions, which synthesizes a quarantined governance fixture under /tmp),
+    we honor that path instead of pointing at the developer's local repos.
+    Captured BEFORE the env wipe so the override survives the cleanup.
     """
+    ci_newsimpact = os.environ.get("FUSION_PATHS__NEWSIMPACT_REPO")
+    ci_awareness = os.environ.get("FUSION_PATHS__AWARENESS_REPO")
+
     for k in list(os.environ.keys()):
         if k.startswith("FUSION_"):
             monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_REPO", str(AWARENESS_DEFAULT))
-    monkeypatch.setenv("FUSION_PATHS__NEWSIMPACT_REPO", str(NEWSIMPACT_DEFAULT))
+    monkeypatch.setenv("FUSION_PATHS__AWARENESS_REPO", ci_awareness or str(AWARENESS_DEFAULT))
+    monkeypatch.setenv("FUSION_PATHS__NEWSIMPACT_REPO", ci_newsimpact or str(NEWSIMPACT_DEFAULT))
     # Point at an empty awareness dir by default so replay tests don't accidentally
     # sweep the entire real repo. Tests that exercise the real repo override this.
     monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path / "aw"))

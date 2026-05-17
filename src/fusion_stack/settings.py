@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -153,9 +153,14 @@ class Settings(BaseSettings):
         dotenv_settings,
         file_secret_settings,
     ):
-        # Flip the default order: env beats init-kwargs so YAML (which we pass
-        # as init kwargs) is the LOWEST priority instead of the highest.
-        return dotenv_settings, env_settings, init_settings, file_secret_settings
+        # Precedence (lowest → highest):
+        #   defaults  <  configs/fusion.yaml (init kwargs)  <  .env file  <  process env
+        #
+        # Process env must beat .env so:
+        #   (a) explicit shell overrides win (operator intent),
+        #   (b) pytest's monkeypatch.setenv works as expected (test ergonomics),
+        #   (c) CI's job env beats any committed .env (deployment determinism).
+        return env_settings, dotenv_settings, init_settings, file_secret_settings
 
     mode: FusionMode = FusionMode.PRODUCTION_SAFE
     paths: PathConfig = Field(default_factory=PathConfig)
@@ -170,6 +175,18 @@ class Settings(BaseSettings):
     kaggle: KaggleConfig = Field(default_factory=KaggleConfig)
 
     use_ml_stubs: bool | None = None  # convenience flat env override
+
+    @model_validator(mode="after")
+    def _propagate_flat_overrides(self) -> "Settings":
+        """Wire the documented flat env vars into the nested sub-configs.
+
+        `FUSION_USE_ML_STUBS=false` MUST flip `models_.use_ml_stubs` to False,
+        even though the field formally lives on the nested `ModelConfig`. This
+        keeps `.env.example` and the docs honest.
+        """
+        if self.use_ml_stubs is not None:
+            self.models_.use_ml_stubs = self.use_ml_stubs
+        return self
 
     # ── derived paths ────────────────────────────────────────────────────────
     def output_path(self, *parts: str) -> Path:

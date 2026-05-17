@@ -46,3 +46,22 @@ pub fn bundled_sidecar(resource_dir: &PathBuf) -> Option<PathBuf> {
         None
     }
 }
+
+/// Directory where Catchem writes its sidecar logs. On macOS this is
+/// `~/Library/Logs/Catchem/`. Created on first use.
+///
+/// We always log to a file rather than piping stdio back into the Rust
+/// process — an undrained pipe will deadlock the child once the kernel
+/// buffer fills (~16-64 KB), which makes "why didn't the sidecar bind?"
+/// debugging effectively impossible.
+pub fn log_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let dir = PathBuf::from(home).join("Library").join("Logs").join("Catchem");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Path to the sidecar stdout/stderr log file.
+pub fn sidecar_log_path() -> PathBuf {
+    log_dir().join("sidecar.log")
+}

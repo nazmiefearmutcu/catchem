@@ -58,9 +58,18 @@ fi
 cd src-tauri
 cargo-tauri build "${SIGN_FLAGS[@]}"
 
+# 6a. Inject NSDesktopFolderUsageDescription (and related TCC keys) into the
+# bundled Info.plist. Tauri 2 doesn't expose arbitrary plist entries via its
+# config schema; without these keys the sidecar Python hangs forever the
+# first time it tries to read .venv files on the user's Desktop. The
+# inject script also re-signs the bundle if APPLE_DEVELOPER_IDENTITY is set
+# (modifying the plist invalidates any prior signature).
+APP_BUNDLE="$CATCHEM_DIR/src-tauri/target/release/bundle/macos/Catchem.app"
+bash "$CATCHEM_DIR/scripts/inject_info_plist.sh" "$APP_BUNDLE"
+
 echo
 echo "Release build complete:"
-echo "  Catchem.app  → $CATCHEM_DIR/src-tauri/target/release/bundle/macos/Catchem.app"
+echo "  Catchem.app  → $APP_BUNDLE"
 echo "  Catchem.dmg  → $CATCHEM_DIR/src-tauri/target/release/bundle/dmg/Catchem_*.dmg"
 
 # 7. Optional notarization

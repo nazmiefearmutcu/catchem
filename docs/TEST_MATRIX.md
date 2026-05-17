@@ -88,6 +88,36 @@ storage), `ml` (requires the optional ML extra).
 | `frontend/src/tests/StatusBanner.test.tsx` | Banner shows quarantine + release_gate, warns in diagnostic mode, reds out on guard error. |
 | `frontend/src/tests/feedMerge.test.ts` | `mergeByCaptureId` dedupes + sorts; `newCaptureIds` diff; `isIncompleteRecord`; fallback to `created_at` when `published_ts` is missing; empty-input tolerance. |
 
+## Group I — Catchem desktop endpoints (Python)
+
+| File | Coverage |
+|---|---|
+| `test_catchem_endpoints.py::test_demo_paste_happy_path` | `POST /ui/demo/paste` returns `DemoRunResponse` shape; record is relevant; symbols + reasons match expectations. |
+| `test_catchem_endpoints.py::test_demo_paste_validation_rejects_empty` | Empty title/text → 422. |
+| `test_catchem_endpoints.py::test_demo_paste_validation_rejects_oversized_text` | >5MB → 413. |
+| `test_catchem_endpoints.py::test_demo_paste_deterministic_capture_id` | Same input → same `capture_id`. |
+| `test_catchem_endpoints.py::test_demo_upload_txt` | `.txt` upload → score. |
+| `test_catchem_endpoints.py::test_demo_upload_markdown_extracts_heading` | `# H1` becomes title hint. |
+| `test_catchem_endpoints.py::test_demo_upload_html_strips_scripts` | `<script>` / `<style>` content does not leak into the response. |
+| `test_catchem_endpoints.py::test_demo_upload_jsonl_uses_text_field` | JSONL row's `text` field is the body. |
+| `test_catchem_endpoints.py::test_demo_upload_rejects_unsupported_suffix` | `.exe` → 422. |
+| `test_catchem_endpoints.py::test_demo_upload_rejects_oversized` | >5MB → 422. |
+| `test_catchem_endpoints.py::test_demo_upload_rejects_empty_body` | Empty body → 422. |
+| `test_catchem_endpoints.py::test_app_info_shape` | `/ui/app-info` documented keys; `diagnostic_allowed=false` in prod-safe. |
+| `test_catchem_endpoints.py::test_sidecar_status_shape` | `/ui/sidecar-status` keys + pid > 0. |
+| `test_catchem_endpoints.py::test_log_tail_empty_when_no_log_yet` | Missing log file → empty list, not 500. |
+| `test_catchem_endpoints.py::test_log_tail_rejects_silly_limits` | `lines=0` and `lines=99999` → 422. |
+| `test_catchem_endpoints.py::test_demo_paste_jsonl_basename_only` | No directory separators in `jsonl_basename`. |
+| `test_catchem_endpoints.py::test_app_info_does_not_leak_filesystem_paths` | `/ui/app-info` payload contains no `/Users/...` or `/etc/...`. |
+
+## Group J — Catchem desktop shell (Rust)
+
+| File | Coverage |
+|---|---|
+| `desktop/catchem/src-tauri/src/security.rs::tests::rejects_javascript_data_file_schemes` | `is_safe_external_url` rejects `javascript:`, `data:`, `file:`, `vbscript:`, `ftp:`, empty. |
+| `desktop/catchem/src-tauri/src/security.rs::tests::accepts_http_and_https` | `is_safe_external_url` accepts http/https case-insensitively. |
+| `desktop/catchem/src-tauri/src/security.rs::tests::internal_navigation_locked_to_local_api` | `is_allowed_internal_url` allows only `http://127.0.0.1:<port>` and `http://localhost:<port>`. |
+
 ## Group G — UI hardening / bug-hunt remediation (Python)
 
 | File | Coverage |
@@ -106,11 +136,12 @@ storage), `ml` (requires the optional ML extra).
 ## Running
 
 ```bash
-make test               # full Python suite (163 tests)
+make test               # full Python suite (192 tests now)
 make test-fast          # skip ml + smoke + integration
 make test-guards        # guard only (red here = stop the world)
 make test-smoke         # end-to-end shell
-(cd frontend && npm test)   # Vitest UI tests (13 tests)
+(cd frontend && npm test)                  # Vitest UI tests (13)
+(cd desktop/catchem/src-tauri && cargo test --lib)   # Rust security tests (3)
 ```
 
 The `ml` marker is opt-in and runs only when `pip install -e ".[ml]"` has been

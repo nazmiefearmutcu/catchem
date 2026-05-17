@@ -14,10 +14,32 @@ together with the component scores that produced the decision.
 It ships with a premium analyst UI (React + TypeScript) served from the same
 FastAPI process — no separate frontend runtime.
 
+It also ships with **Catchem**, a Tauri 2 macOS desktop wrapper that gives
+the analyst experience native menus, drag-and-drop file analysis, sidecar
+lifecycle controls, and a notarizable `.app`/`.dmg` distribution path. See
+[`docs/CATCHEM_APP.md`](docs/CATCHEM_APP.md).
+
 This repo never modifies Awareness or NewsImpact source. It is reversible:
 deleting it has zero effect on either upstream system.
 
-## One-command bootstrap
+## Catchem (macOS desktop)
+
+```bash
+# Once
+bash scripts/fusion_bootstrap_and_run.sh                       # creates .venv + bundle
+cargo install create-tauri-app tauri-cli --version '^2.0' --locked
+
+# Run
+bash desktop/catchem/scripts/build_catchem_dev.sh              # dev (Cmd+R restarts sidecar)
+bash desktop/catchem/scripts/build_catchem_release.sh          # .app + .dmg
+```
+
+Catchem boots, spawns the local FastAPI sidecar, waits on `/healthz`, then
+loads the existing React UI in a native macOS window. Production-safe is the
+only mode the shell ever launches in. See [`docs/CATCHEM_RELEASE.md`](docs/CATCHEM_RELEASE.md)
+for signing and notarization.
+
+## One-command bootstrap (web only)
 
 ```bash
 bash scripts/fusion_bootstrap_and_run.sh

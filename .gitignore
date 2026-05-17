@@ -22,6 +22,8 @@ data/kaggle/
 data/replay/
 data/demo-input/
 data/golden/extended.jsonl
+data/live-news/
+data/jsonl/
 
 # Node / frontend
 node_modules/

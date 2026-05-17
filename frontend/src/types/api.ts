@@ -175,3 +175,13 @@ export interface LogTail {
   lines: string[];
   truncated: boolean;
 }
+
+export interface NewsStatus {
+  enabled: boolean;
+  feeds: number;
+  interval_seconds: number | null;
+  last_run_at: string | null;
+  last_ingested: number;
+  total_ingested: number;
+  last_error: string | null;
+}

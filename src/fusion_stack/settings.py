@@ -115,6 +115,20 @@ class KaggleConfig(BaseModel):
     datasets: list[str] = Field(default_factory=list)
 
 
+class NewsConfig(BaseModel):
+    """Background RSS poller — keeps the Live Feed live in the Catchem .app.
+
+    Set `poller_enabled=false` to skip ingestion entirely (CI/tests do this).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    poller_enabled: bool = True
+    poll_interval_seconds: float = 60.0
+    # Built-in defaults defined in news_poller.DEFAULT_FEEDS. Use this to
+    # supply or replace the source set: list of {name, url, fallback_domain}.
+    feeds: list[dict[str, str]] = Field(default_factory=list)
+
+
 class PathConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     awareness_repo: Path = Field(default_factory=lambda: Path("/tmp/awareness-missing"))
@@ -173,6 +187,7 @@ class Settings(BaseSettings):
     logging_: LoggingConfig = Field(default_factory=LoggingConfig, alias="logging")
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig)
     kaggle: KaggleConfig = Field(default_factory=KaggleConfig)
+    news: NewsConfig = Field(default_factory=NewsConfig)
 
     use_ml_stubs: bool | None = None  # convenience flat env override
 

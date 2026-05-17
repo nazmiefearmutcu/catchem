@@ -32,10 +32,26 @@ export default {
           from: { transform: "translateX(100%)", opacity: "0" },
           to: { transform: "translateX(0)", opacity: "1" },
         },
+        // Brief accent flash on freshly-ingested feed rows so the analyst
+        // sees the poller is doing its job even when only 1-2 items arrive
+        // per tick. Background-only — text/border stay stable to avoid CLS.
+        feed_flash: {
+          "0%":   { backgroundColor: "rgba(95, 179, 255, 0.22)" },
+          "70%":  { backgroundColor: "rgba(95, 179, 255, 0.08)" },
+          "100%": { backgroundColor: "rgba(95, 179, 255, 0.00)" },
+        },
+        // Counter pulse for the "+N new" badge so the eye catches it.
+        count_pulse: {
+          "0%":   { transform: "scale(1.0)", opacity: "1" },
+          "30%":  { transform: "scale(1.15)", opacity: "1" },
+          "100%": { transform: "scale(1.0)", opacity: "0.9" },
+        },
       },
       animation: {
         "pulse-dot": "pulse_dot 1.6s ease-in-out infinite",
         "slide-in": "slide_in 240ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+        "feed-flash": "feed_flash 4.5s ease-out forwards",
+        "count-pulse": "count_pulse 600ms ease-out",
       },
     },
   },

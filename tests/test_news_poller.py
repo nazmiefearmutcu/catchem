@@ -178,7 +178,7 @@ def test_default_feeds_have_valid_https_urls() -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_news_poller_floors_interval_to_15s() -> None:
+def test_news_poller_floors_interval_to_10s() -> None:
     """A misconfigured interval shouldn't hammer publishers."""
     class _StubSupervisor: pass
     class _StubSettings:
@@ -191,7 +191,7 @@ def test_news_poller_floors_interval_to_15s() -> None:
         feeds=[FeedSpec("test", "https://example.com/rss")],
         interval_seconds=2.0,  # too aggressive
     )
-    assert poller._interval == 15.0
+    assert poller._interval == 10.0
 
 
 def test_news_poller_status_fields_start_zeroed() -> None:

@@ -123,10 +123,10 @@ class NewsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     poller_enabled: bool = True
-    # 30s default: 18 feeds × ~5 new items/min cumulative makes the visible
-    # rate ~2 new items per tick — frequent enough to look alive without
-    # hammering publishers (each is still polled at most twice per minute).
-    poll_interval_seconds: float = 30.0
+    # 20s default with ~30 sources active. Each individual publisher is
+    # still polled at most three times per minute — well within any
+    # reasonable RSS politeness budget.
+    poll_interval_seconds: float = 20.0
     # Built-in defaults defined in news_poller.DEFAULT_FEEDS. Use this to
     # supply or replace the source set: list of {name, url, fallback_domain}.
     feeds: list[dict[str, str]] = Field(default_factory=list)

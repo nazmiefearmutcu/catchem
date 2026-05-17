@@ -43,11 +43,11 @@ export function FeedPage() {
       if (filters.sym) return api.bySymbol(filters.sym, 200);
       return api.recent(200, filters.relevant !== "all");
     },
-    staleTime: 5_000,
-    // Polling fallback: even with SSE up, the news poller runs every 60s,
-    // and this guarantees the feed redraws within ~15s of a new ingest if
+    staleTime: 3_000,
+    // Polling fallback: even with SSE up, the news poller runs every 20s,
+    // and this guarantees the feed redraws within ~5s of a new ingest if
     // SSE is dropped or the browser tab is throttled.
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
     refetchIntervalInBackground: false,
   });
 
@@ -61,20 +61,75 @@ export function FeedPage() {
   // The last query key that fed `stableRows` — change → reset snapshot.
   const prevQueryKey = useRef<string>("");
 
+  // ── freshness tracking ──────────────────────────────────────────────────
+  // The user shouldn't need to count records to know the poller is working.
+  // We keep a per-session Set of capture_ids we've seen since the page
+  // mounted; any row not in that set is "fresh" and gets a brief CSS flash
+  // (`animate-feed-flash`). Tracked in refs so updates don't re-render.
+  const seenIds = useRef<Set<string>>(new Set());
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+  const firstSnapshotApplied = useRef(false);
+  const freshTimers = useRef<Map<string, number>>(new Map());
+
+  function markFresh(ids: string[]) {
+    if (ids.length === 0) return;
+    setFreshIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    for (const id of ids) {
+      // Clear after the CSS animation finishes so the row settles into
+      // its normal background.
+      const t = window.setTimeout(() => {
+        setFreshIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        freshTimers.current.delete(id);
+      }, 4_800);
+      freshTimers.current.set(id, t);
+    }
+  }
+  useEffect(() => () => {
+    freshTimers.current.forEach((t) => window.clearTimeout(t));
+    freshTimers.current.clear();
+  }, []);
+
   useEffect(() => {
     const key = JSON.stringify([filters.ac, filters.rc, filters.sym, filters.relevant]);
     const incoming = list.data?.items ?? [];
     if (key !== prevQueryKey.current) {
-      // Filter changed — always replace, drop any buffer.
+      // Filter changed — always replace, drop any buffer + freshness
+      // (the user is asking for a different cut, not for live deltas).
       prevQueryKey.current = key;
       setStableRows(incoming);
       setBuffered([]);
+      seenIds.current = new Set(incoming.map((i) => i.capture_id));
+      firstSnapshotApplied.current = true;
+      setFreshIds(new Set());
       return;
     }
     if (!isFrozen) {
       // Free viewport — merge in place, sorted, deduped.
       setStableRows((prev) => mergeByCaptureId(prev, incoming));
       setBuffered([]);
+      // Detect genuinely new items vs the seen-set and flash them.
+      // Skip the very first snapshot (the initial backfill is not "new").
+      if (firstSnapshotApplied.current) {
+        const newOnes = incoming
+          .map((i) => i.capture_id)
+          .filter((id) => !seenIds.current.has(id));
+        if (newOnes.length > 0) {
+          newOnes.forEach((id) => seenIds.current.add(id));
+          markFresh(newOnes);
+        }
+      } else {
+        incoming.forEach((i) => seenIds.current.add(i.capture_id));
+        firstSnapshotApplied.current = true;
+      }
       return;
     }
     // Drawer open — buffer only what's NEW relative to current snapshot.
@@ -200,7 +255,10 @@ export function FeedPage() {
             <span>
               last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>
               {news.data.last_ingested > 0 && (
-                <span className="text-good"> · +{news.data.last_ingested}</span>
+                <span
+                  key={news.data.last_run_at ?? "0"}
+                  className="text-good inline-block animate-count-pulse"
+                > · +{news.data.last_ingested}</span>
               )}
             </span>
             {news.data.next_run_at && !news.data.is_polling && (
@@ -253,7 +311,12 @@ export function FeedPage() {
           filtered.length === 0 ? <EmptyState title="No matches" hint="Try clearing filters." /> : (
             <ul className="divide-y divide-[color:var(--border)] rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)]">
               {filtered.map((r) => (
-                <FeedRow key={r.capture_id} r={r} onOpen={() => nav(`/feed/${encodeURIComponent(r.capture_id)}`)} />
+                <FeedRow
+                  key={r.capture_id}
+                  r={r}
+                  isFresh={freshIds.has(r.capture_id)}
+                  onOpen={() => nav(`/feed/${encodeURIComponent(r.capture_id)}`)}
+                />
               ))}
             </ul>
           )}
@@ -297,13 +360,23 @@ function FacetGroup({
   );
 }
 
-function FeedRow({ r, onOpen }: { r: FinancialRecord; onOpen: () => void }) {
+function FeedRow({ r, onOpen, isFresh = false }: { r: FinancialRecord; onOpen: () => void; isFresh?: boolean }) {
   const href = safeHref(r.url);
   return (
-    <li className="px-3 py-2 hover:bg-[color:var(--bg-elev2)]">
+    <li
+      className={`px-3 py-2 hover:bg-[color:var(--bg-elev2)] ${isFresh ? "animate-feed-flash" : ""}`}
+      data-fresh={isFresh ? "true" : undefined}
+    >
       <div className="grid grid-cols-[90px_1fr_auto] gap-3 items-start">
         <div className="grid" title={r.published_ts ?? ""}>
-          <span className="text-[11px] text-[color:var(--fg-dim)]">{fmtRel(r.published_ts)}</span>
+          <span className="text-[11px] text-[color:var(--fg-dim)]">
+            {fmtRel(r.published_ts)}
+            {isFresh && (
+              <span className="ml-1 text-good text-[9px] uppercase tracking-wider" aria-label="freshly arrived">
+                new
+              </span>
+            )}
+          </span>
           <span className="text-[10px] text-[color:var(--fg-muted)] truncate">{r.domain ?? ""}</span>
         </div>
         <div className="min-w-0">

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, fmtDate, fmtPct, fmtScore, safeHref } from "@/lib/api";
+import { api, fmtPct, fmtRel, fmtScore, safeHref } from "@/lib/api";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
 import { Pill } from "@/components/Pill";
 import { EChart } from "@/charts/EChart";
@@ -70,7 +70,7 @@ export function OverviewPage() {
         </div>
         {s.recent_top.length === 0 ? (
           <EmptyState title="No records yet"
-                      hint="Run `fusion-stack run --mode replay_existing --max-records 50` to populate." />
+                      hint="The live news poller is fetching now — items will appear here within a minute. You can also paste an article in Replay/Upload to ingest immediately." />
         ) : (
           <ul className="divide-y divide-[color:var(--border)]">
             {s.recent_top.map((r) => {
@@ -78,7 +78,7 @@ export function OverviewPage() {
               return (
                 <li key={r.capture_id} className="py-2 grid gap-1">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-[10px] text-[color:var(--fg-dim)]">{fmtDate(r.published_ts)}</span>
+                    <span className="text-[11px] text-[color:var(--fg-dim)]" title={r.published_ts ?? ""}>{fmtRel(r.published_ts)}</span>
                     <span className="text-[10px] text-[color:var(--fg-muted)]">{r.domain}</span>
                     <span className="ml-auto text-[10px] text-[color:var(--fg-dim)]">score {fmtScore(r.finance_relevance_score)}</span>
                   </div>

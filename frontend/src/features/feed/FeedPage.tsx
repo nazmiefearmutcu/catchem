@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, fmtDate, fmtScore, safeHref } from "@/lib/api";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, fmtRel, fmtScore, safeHref } from "@/lib/api";
 import { mergeByCaptureId, newCaptureIds } from "@/lib/feedMerge";
 import { Pill } from "@/components/Pill";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
@@ -15,6 +15,12 @@ export function FeedPage() {
   const nav = useNavigate();
 
   const facets = useQuery({ queryKey: ["facets"], queryFn: () => api.facets(500), staleTime: 10_000 });
+  const news = useQuery({
+    queryKey: ["news-status"],
+    queryFn: api.newsStatus,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
 
   const list = useQuery<{ items: FinancialRecord[] }>({
     queryKey: ["feed-list", filters.ac, filters.rc, filters.sym, filters.relevant],
@@ -25,6 +31,11 @@ export function FeedPage() {
       return api.recent(200, filters.relevant !== "all");
     },
     staleTime: 5_000,
+    // Polling fallback: even with SSE up, the news poller runs every 60s,
+    // and this guarantees the feed redraws within ~15s of a new ingest if
+    // SSE is dropped or the browser tab is throttled.
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
 
   // ── live-polling buffer ─────────────────────────────────────────────────
@@ -154,6 +165,32 @@ export function FeedPage() {
 
       {/* Results */}
       <section>
+        {news.data?.enabled && (
+          <div
+            className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-[11px] text-[color:var(--fg-dim)]"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-good animate-pulse-dot" aria-hidden="true" />
+              <span className="uppercase tracking-wider">live</span>
+            </span>
+            <span>
+              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"}, polls every {Math.round((news.data.interval_seconds ?? 60))}s
+            </span>
+            <span>
+              last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>
+              {news.data.last_ingested > 0 && (
+                <span className="text-good"> · +{news.data.last_ingested}</span>
+              )}
+            </span>
+            <span className="ml-auto">
+              {news.data.total_ingested.toLocaleString()} ingested this session
+            </span>
+            {news.data.last_error && (
+              <span className="text-warn" title={news.data.last_error}>· error</span>
+            )}
+          </div>
+        )}
         <div className="flex items-baseline gap-3 mb-2 text-xs text-[color:var(--fg-dim)]">
           <span>{filtered.length} record{filtered.length === 1 ? "" : "s"}</span>
           {list.isFetching && <span>(refreshing…)</span>}
@@ -232,10 +269,10 @@ function FeedRow({ r, onOpen }: { r: FinancialRecord; onOpen: () => void }) {
   const href = safeHref(r.url);
   return (
     <li className="px-3 py-2 hover:bg-[color:var(--bg-elev2)]">
-      <div className="grid grid-cols-[80px_1fr_auto] gap-3 items-start">
-        <div className="grid">
-          <span className="text-[10px] text-[color:var(--fg-dim)]">{fmtDate(r.published_ts).split(",")[0]}</span>
-          <span className="text-[10px] text-[color:var(--fg-muted)] truncate" title={r.domain ?? ""}>{r.domain ?? ""}</span>
+      <div className="grid grid-cols-[90px_1fr_auto] gap-3 items-start">
+        <div className="grid" title={r.published_ts ?? ""}>
+          <span className="text-[11px] text-[color:var(--fg-dim)]">{fmtRel(r.published_ts)}</span>
+          <span className="text-[10px] text-[color:var(--fg-muted)] truncate">{r.domain ?? ""}</span>
         </div>
         <div className="min-w-0">
           <div className="text-sm">

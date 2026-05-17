@@ -33,9 +33,18 @@ export function useLiveStream(): { status: LiveStatus; lastBeatAt: number | null
     es.addEventListener("summary", () => {
       setStatus("open");
       setLastBeatAt(Date.now());
+      // Bump every query the live feed actually watches. The feed page
+      // keys on ["feed-list", ...filters], so we predicate-invalidate
+      // every variant of that key rather than rely on a single string.
       qc.invalidateQueries({ queryKey: ["summary"] });
       qc.invalidateQueries({ queryKey: ["facets"] });
       qc.invalidateQueries({ queryKey: ["recent"] });
+      qc.invalidateQueries({ queryKey: ["trends"] });
+      qc.invalidateQueries({ queryKey: ["news-status"] });
+      qc.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) && q.queryKey[0] === "feed-list",
+      });
     });
     es.addEventListener("tick", () => {
       setStatus("open");

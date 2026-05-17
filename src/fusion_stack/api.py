@@ -46,6 +46,7 @@ from .text_extract import ALLOWED_SUFFIXES, MAX_UPLOAD_BYTES, extract_text
 from .dashboard_data import overview
 from .logging import get_logger
 from .newsimpact_guarded_adapter import snapshot_guard_state, NewsImpactGuardError
+from .news_poller import DEFAULT_FEEDS, FeedSpec, NewsPoller
 from .redaction import redact_record_for_mode, redact_records_for_mode, safe_guard_view
 from .schemas import AwarenessCaptureView
 from .settings import Settings, load_settings
@@ -110,6 +111,7 @@ logger = get_logger("fusion.api")
 
 _SUPERVISOR: Supervisor | None = None
 _SETTINGS: Settings | None = None
+_NEWS_POLLER: NewsPoller | None = None
 
 
 def _get_supervisor() -> Supervisor:
@@ -119,14 +121,43 @@ def _get_supervisor() -> Supervisor:
     return _SUPERVISOR
 
 
+def _build_news_poller(supervisor: Supervisor, settings: Settings) -> NewsPoller | None:
+    """Construct the poller from settings, or None if disabled."""
+    if not settings.news.poller_enabled:
+        return None
+    feeds: tuple[FeedSpec, ...] = DEFAULT_FEEDS
+    if settings.news.feeds:
+        feeds = tuple(
+            FeedSpec(
+                name=str(f.get("name", "user")),
+                url=str(f["url"]),
+                fallback_domain=str(f.get("fallback_domain", "")),
+            )
+            for f in settings.news.feeds
+            if f.get("url")
+        )
+    return NewsPoller(
+        supervisor=supervisor,
+        settings=settings,
+        feeds=feeds,
+        interval_seconds=settings.news.poll_interval_seconds,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
-    global _SUPERVISOR, _SETTINGS
+    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER
     _SETTINGS = load_settings()
     _SUPERVISOR = Supervisor(_SETTINGS)
+    _NEWS_POLLER = _build_news_poller(_SUPERVISOR, _SETTINGS)
+    if _NEWS_POLLER is not None:
+        _NEWS_POLLER.start()
     try:
         yield
     finally:
+        if _NEWS_POLLER is not None:
+            await _NEWS_POLLER.stop()
+        _NEWS_POLLER = None
         if _SUPERVISOR is not None:
             _SUPERVISOR.close()
         _SUPERVISOR = None
@@ -617,6 +648,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "reason_distribution": dict(rc),
             "sentiment_distribution": dict(sent),
             "items": redact_records_for_mode(items, production_safe=_is_production_safe()),
+        }
+
+    @app.get("/ui/news-status")
+    def news_status() -> dict[str, Any]:
+        """Diagnostics for the background RSS poller. Surfaced in Live Feed UI."""
+        if _NEWS_POLLER is None:
+            return {
+                "enabled": False,
+                "feeds": 0,
+                "interval_seconds": None,
+                "last_run_at": None,
+                "last_ingested": 0,
+                "total_ingested": 0,
+                "last_error": None,
+            }
+        return {
+            "enabled": True,
+            "feeds": len(_NEWS_POLLER._feeds),  # type: ignore[attr-defined]
+            "interval_seconds": _NEWS_POLLER._interval,  # type: ignore[attr-defined]
+            "last_run_at": _NEWS_POLLER.last_run_at.isoformat() if _NEWS_POLLER.last_run_at else None,
+            "last_ingested": _NEWS_POLLER.last_ingested,
+            "total_ingested": _NEWS_POLLER.total_ingested,
+            "last_error": _NEWS_POLLER.last_error,
         }
 
     @app.get("/ui/stream")

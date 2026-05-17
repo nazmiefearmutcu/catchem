@@ -151,6 +151,31 @@ tail -f ~/Library/Logs/Catchem/sidecar.log
 
 If the banner is present but nothing follows after ~5 seconds, the sidecar is hung in interpreter init — almost certainly a TCC block (see Bug #5).
 
+### Bug #6: macOS keeps re-asking for Desktop folder access on every launch
+
+**Symptom:** Each launch of Catchem.app shows the "Catchem would like to access files in your Desktop folder" prompt again, even after you clicked Allow.
+
+**Root cause:** macOS TCC pins Files-and-Folders consent to `(bundle_id, cdhash)` for unsigned apps. Every `cargo tauri build` produces a different binary (timestamps, build IDs), changing the cdhash, so TCC treats each rebuild as a brand-new app and re-prompts.
+
+**Fix:** install Catchem to `/Applications` and launch from there. Rebuilds don't replace it unless you re-run the installer.
+
+```bash
+bash desktop/catchem/scripts/install_catchem.sh
+# then open from /Applications/Catchem.app
+```
+
+What the script does:
+  - Rebuilds the React bundle (cheap; static-served by FastAPI).
+  - Builds the Tauri shell (skip with `SKIP_BUILD=1` if you only changed React/Python).
+  - Runs `inject_info_plist.sh` (idempotent — only writes the plist if values differ, so the cdhash stays stable when you re-run).
+  - Ad-hoc signs the bundle (`codesign --sign -`) so macOS sees a complete signature instead of a bare unsigned binary.
+  - Strips the `com.apple.quarantine` xattr so Gatekeeper doesn't bark.
+  - `ditto`-copies to `/Applications/Catchem.app` and re-registers with LaunchServices.
+
+First launch from `/Applications/Catchem.app` shows the TCC prompt **once**. Click Allow. Subsequent launches don't re-prompt unless you `install_catchem.sh` again (which produces a new cdhash).
+
+For day-to-day work where you're editing the React UI or the Python sidecar, you do NOT need to rebuild the Tauri shell — those changes flow into the running `/Applications/Catchem.app` automatically (React bundle reload + sidecar restart on next launch).
+
 ### Bug #5: sidecar hangs on Desktop-located repos (TCC)
 
 **Symptom:** Catchem.app launches, window appears, status banner shows "Starting local sidecar…" forever. `lsof -iTCP:8087` returns nothing. `~/Library/Logs/Catchem/sidecar.log` contains only the boot banner — zero Python output.

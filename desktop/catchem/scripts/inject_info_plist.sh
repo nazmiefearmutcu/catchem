@@ -45,34 +45,62 @@ fi
 
 echo "[inject_info_plist] target: $PLIST"
 
-# Use -replace so re-runs are idempotent (-insert errors if the key exists).
-/usr/bin/plutil -replace NSDesktopFolderUsageDescription \
-  -string "Catchem reads news articles, the local fusion_stack repository, and exports/imports analysis bundles from your Desktop." \
-  "$PLIST"
-/usr/bin/plutil -replace NSDocumentsFolderUsageDescription \
-  -string "Catchem stores analysis exports and reads pasted news files from Documents." \
-  "$PLIST"
-/usr/bin/plutil -replace NSDownloadsFolderUsageDescription \
-  -string "Catchem may save analysis bundles to Downloads." \
-  "$PLIST"
-/usr/bin/plutil -replace NSAppleEventsUsageDescription \
-  -string "Catchem uses AppleEvents to coordinate the local fusion_stack sidecar process." \
-  "$PLIST"
-# Hint Gatekeeper that the app launches a child process — purely cosmetic
-# but quiets a launchd warning on first run.
-/usr/bin/plutil -replace LSUIElement -bool NO "$PLIST"
+# Idempotent write: read the current value first; only call plutil -replace
+# if it differs. plutil -replace ALWAYS re-serializes the plist (different
+# byte layout per run), which churns the bundle cdhash and forces macOS
+# TCC to re-prompt for Files-and-Folders consent on the next launch.
+plist_get() {
+  /usr/bin/plutil -extract "$1" raw -o - "$PLIST" 2>/dev/null || echo ""
+}
+plist_set() {
+  local key="$1"; local value="$2"
+  if [ "$(plist_get "$key")" != "$value" ]; then
+    /usr/bin/plutil -replace "$key" -string "$value" "$PLIST"
+    return 0
+  fi
+  return 1
+}
 
-echo "[inject_info_plist] privacy keys inserted:"
-/usr/bin/plutil -p "$PLIST" | grep -E 'NS(Desktop|Documents|Downloads|AppleEvents)' | sed 's/^/  /'
+CHANGED=0
+plist_set NSDesktopFolderUsageDescription \
+  "Catchem reads news articles, the local fusion_stack repository, and exports/imports analysis bundles from your Desktop." \
+  && CHANGED=$((CHANGED + 1))
+plist_set NSDocumentsFolderUsageDescription \
+  "Catchem stores analysis exports and reads pasted news files from Documents." \
+  && CHANGED=$((CHANGED + 1))
+plist_set NSDownloadsFolderUsageDescription \
+  "Catchem may save analysis bundles to Downloads." \
+  && CHANGED=$((CHANGED + 1))
+plist_set NSAppleEventsUsageDescription \
+  "Catchem uses AppleEvents to coordinate the local fusion_stack sidecar process." \
+  && CHANGED=$((CHANGED + 1))
+# LSUIElement bool needs its own treatment (plutil -extract returns "0"/"1").
+if [ "$(plist_get LSUIElement)" != "false" ]; then
+  /usr/bin/plutil -replace LSUIElement -bool NO "$PLIST"
+  CHANGED=$((CHANGED + 1))
+fi
+
+if [ "$CHANGED" -eq 0 ]; then
+  echo "[inject_info_plist] plist already up to date — no changes (cdhash preserved)"
+else
+  echo "[inject_info_plist] $CHANGED key(s) updated"
+fi
 
 # Force LaunchServices to re-read the bundle so the modified plist takes
 # effect on the *next* `open Catchem.app`.
 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$APP_PATH" >/dev/null 2>&1 || true
 
-# If a signing identity is available, re-sign the bundle. Modifying Info.plist
-# invalidates the existing signature, so unsigned-but-modified bundles work
-# fine on dev machines (Gatekeeper warns once) but signed releases need a
-# fresh signature.
+# Sign the bundle. Modifying Info.plist invalidates any prior signature, so
+# we always re-sign:
+#   - APPLE_DEVELOPER_IDENTITY set    → notarization-ready signature
+#   - otherwise                       → ad-hoc signature ("--sign -") so
+#                                       Gatekeeper sees a complete, valid
+#                                       (though untrusted) signature
+#
+# Ad-hoc signing doesn't get TCC persistence across cdhash changes, but it
+# DOES quiet Gatekeeper's "developer cannot be verified" prompt on
+# subsequent launches of the same binary — which is most of the user-facing
+# annoyance.
 if [ -n "${APPLE_DEVELOPER_IDENTITY:-}" ]; then
   ENT="${CATCHEM_ENTITLEMENTS:-$(cd "$(dirname "$0")/.." && pwd)/src-tauri/Entitlements.plist}"
   if [ ! -f "$ENT" ]; then
@@ -86,7 +114,14 @@ if [ -n "${APPLE_DEVELOPER_IDENTITY:-}" ]; then
     "$APP_PATH"
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 else
-  echo "[inject_info_plist] no APPLE_DEVELOPER_IDENTITY set — bundle remains unsigned"
+  echo "[inject_info_plist] ad-hoc signing (no APPLE_DEVELOPER_IDENTITY set)"
+  /usr/bin/codesign --force --deep --sign - "$APP_PATH" 2>&1 | sed 's/^/  /' || true
 fi
+
+# Strip the quarantine xattr added by macOS when the bundle is downloaded
+# or built into a Downloads/Desktop directory. Without this, Gatekeeper
+# prompts "Catchem.app cannot be opened because the developer cannot be
+# verified" on every launch. Quarantine removal is safe for dev-builds.
+/usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
 
 echo "[inject_info_plist] done"

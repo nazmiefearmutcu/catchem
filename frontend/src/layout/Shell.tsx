@@ -4,9 +4,11 @@ import { useEffect } from "react";
 import { api } from "@/lib/api";
 import { useTheme } from "@/hooks/useTheme";
 import { useLiveStream } from "@/hooks/useLiveStream";
+import { useDesktopAlerts } from "@/hooks/useDesktopAlerts";
 import { StatusBanner } from "@/components/StatusBanner";
 import { LiveDot } from "@/components/LiveDot";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ToastTray } from "@/components/ToastTray";
 
 const NAV = [
   { label: "Overview", path: "/" },
@@ -30,6 +32,8 @@ export function Shell() {
     staleTime: 5_000,
   });
   const { status, lastBeatAt } = useLiveStream();
+  // App-wide arrival toasts (works from any tab).
+  useDesktopAlerts();
 
   // Power-user nav: "g o" / "g f" etc.
   useEffect(() => {
@@ -126,6 +130,7 @@ export function Shell() {
       </footer>
 
       <CommandPalette />
+      <ToastTray />
     </div>
   );
 }

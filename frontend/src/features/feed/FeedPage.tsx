@@ -7,6 +7,7 @@ import { Pill } from "@/components/Pill";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
 import { useUrlFilters } from "@/hooks/useUrlFilters";
 import { RecordDrawer } from "@/features/record-detail/RecordDrawer";
+import { useDesktopAlertState } from "@/hooks/useDesktopAlerts";
 import type { FinancialRecord } from "@/types/api";
 
 export function FeedPage() {
@@ -34,6 +35,10 @@ export function FeedPage() {
       });
     },
   });
+
+  // In-app toast on/off (defaults on; persisted in localStorage).
+  const [alertState, setAlertEnabled] = useDesktopAlertState();
+
 
   const list = useQuery<{ items: FinancialRecord[] }>({
     queryKey: ["feed-list", filters.ac, filters.rc, filters.sym, filters.relevant],
@@ -266,6 +271,18 @@ export function FeedPage() {
             )}
             <span className="ml-auto inline-flex items-center gap-3">
               <span>{news.data.total_ingested.toLocaleString()} ingested this session</span>
+              <button
+                type="button"
+                className={`chip text-[11px] ${alertState === "on" ? "chip-active" : ""}`}
+                onClick={() => setAlertEnabled(alertState !== "on")}
+                title={
+                  alertState === "on"
+                    ? "In-app toasts active for high-relevance arrivals (score ≥ 0.85). Click to mute."
+                    : "Toasts muted. Click to show a top-right notification each time a high-relevance article arrives."
+                }
+              >
+                {alertState === "on" ? "🔔 alerts on" : "🔕 alerts off"}
+              </button>
               <button
                 type="button"
                 className="chip text-[11px]"

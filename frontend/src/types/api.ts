@@ -200,3 +200,23 @@ export interface NewsPollNowResponse {
   ingested: number;
   total_ingested: number;
 }
+
+export interface ArchiveStatus {
+  enabled: boolean;
+  drive_dir: string | null;
+  interval_seconds: number | null;
+  local_cap_rows: number | null;
+  last_run_at: string | null;
+  last_archived_count: number;
+  total_archived: number;
+  last_error: string | null;
+  is_archiving: boolean;
+  current_csv_path: string | null;
+}
+
+export interface ArchiveNowResponse {
+  archived: number;
+  csv_path: string | null;
+  error: string | null;
+  total_archived: number;
+}

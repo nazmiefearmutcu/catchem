@@ -36,6 +36,25 @@ export function FeedPage() {
     },
   });
 
+  // Drive archiver — every 30s the backend drains old rows to a CSV on
+  // the user's cloud-sync folder; the UI shows where + the running total.
+  const archive = useQuery({
+    queryKey: ["archive-status"],
+    queryFn: api.archiveStatus,
+    refetchInterval: 4_000,
+    staleTime: 2_000,
+  });
+  const archiveNow = useMutation({
+    mutationFn: api.archiveNow,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["archive-status"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({
+        predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "feed-list",
+      });
+    },
+  });
+
   // In-app toast on/off (defaults on; persisted in localStorage).
   const [alertState, setAlertEnabled] = useDesktopAlertState();
 
@@ -321,6 +340,59 @@ export function FeedPage() {
             </span>
             {news.data.last_error && (
               <span className="text-warn" title={news.data.last_error}>· error</span>
+            )}
+          </div>
+        )}
+        {archive.data?.enabled && (
+          <div
+            className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-[11px] text-[color:var(--fg-dim)]"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  archive.data.last_error
+                    ? "bg-warn"
+                    : archive.data.is_archiving
+                      ? "bg-accent animate-pulse-dot"
+                      : "bg-good"
+                }`}
+                aria-hidden="true"
+              />
+              <span className="uppercase tracking-wider">drive</span>
+            </span>
+            <span title={archive.data.drive_dir ?? ""}>
+              → <span className="text-[color:var(--fg)]">
+                {archive.data.current_csv_path?.split("/").slice(-1)[0]
+                  ?? archive.data.drive_dir?.split("/").slice(-2).join("/")
+                  ?? "—"}
+              </span>
+            </span>
+            <span>cap {archive.data.local_cap_rows}</span>
+            <span>every {Math.round(archive.data.interval_seconds ?? 30)}s</span>
+            {archive.data.last_run_at && (
+              <span>last drain <span className="text-[color:var(--fg)]">{fmtRel(archive.data.last_run_at) || "—"}</span></span>
+            )}
+            {archive.data.last_archived_count > 0 && (
+              <span
+                key={archive.data.last_run_at ?? "0"}
+                className="text-good inline-block animate-count-pulse"
+              >+{archive.data.last_archived_count}</span>
+            )}
+            <span className="ml-auto inline-flex items-center gap-3">
+              <span>{archive.data.total_archived.toLocaleString()} archived this session</span>
+              <button
+                type="button"
+                className="chip text-[11px]"
+                onClick={() => archiveNow.mutate()}
+                disabled={archiveNow.isPending || archive.data.is_archiving}
+                title={`Trigger an immediate archive sweep. Drive dir: ${archive.data.drive_dir ?? "—"}`}
+              >
+                {archiveNow.isPending || archive.data.is_archiving ? "archiving…" : "archive now"}
+              </button>
+            </span>
+            {archive.data.last_error && (
+              <span className="text-warn" title={archive.data.last_error}>· error</span>
             )}
           </div>
         )}

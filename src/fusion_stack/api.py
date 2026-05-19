@@ -40,6 +40,7 @@ from .contracts import (
     RecordListResponse,
     SidecarStatusResponse,
 )
+from .archive import DriveArchiver
 from .demo import DemoResult as _DemoResult
 from .demo import build_capture as _build_capture, run_demo as _run_demo
 from .text_extract import ALLOWED_SUFFIXES, MAX_UPLOAD_BYTES, extract_text
@@ -112,6 +113,7 @@ logger = get_logger("fusion.api")
 _SUPERVISOR: Supervisor | None = None
 _SETTINGS: Settings | None = None
 _NEWS_POLLER: NewsPoller | None = None
+_ARCHIVER: DriveArchiver | None = None
 
 
 def _get_supervisor() -> Supervisor:
@@ -144,17 +146,39 @@ def _build_news_poller(supervisor: Supervisor, settings: Settings) -> NewsPoller
     )
 
 
+def _build_archiver(supervisor: Supervisor, settings: Settings) -> DriveArchiver | None:
+    """Construct the Drive archiver from settings, or None if disabled."""
+    if not settings.archive.enabled:
+        return None
+    drive_dir: Path | None = None
+    if settings.archive.drive_dir:
+        drive_dir = Path(settings.archive.drive_dir).expanduser()
+    return DriveArchiver(
+        supervisor=supervisor,
+        settings=settings,
+        drive_dir=drive_dir,
+        interval_seconds=settings.archive.interval_seconds,
+        local_cap_rows=settings.archive.local_cap_rows,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
-    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER
+    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER, _ARCHIVER
     _SETTINGS = load_settings()
     _SUPERVISOR = Supervisor(_SETTINGS)
     _NEWS_POLLER = _build_news_poller(_SUPERVISOR, _SETTINGS)
     if _NEWS_POLLER is not None:
         _NEWS_POLLER.start()
+    _ARCHIVER = _build_archiver(_SUPERVISOR, _SETTINGS)
+    if _ARCHIVER is not None:
+        _ARCHIVER.start()
     try:
         yield
     finally:
+        if _ARCHIVER is not None:
+            await _ARCHIVER.stop()
+        _ARCHIVER = None
         if _NEWS_POLLER is not None:
             await _NEWS_POLLER.stop()
         _NEWS_POLLER = None
@@ -668,7 +692,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "empty_ticks": 0,
                 "last_avg_publisher_lag_seconds": None,
                 "last_median_publisher_lag_seconds": None,
+                "unhealthy_feeds": 0,
+                "feed_health": [],
+                "max_item_age_seconds": None,
+                "last_stale_skipped": 0,
             }
+        feed_health = _NEWS_POLLER.feed_health_snapshot()
         return {
             "enabled": True,
             "feeds": len(_NEWS_POLLER._feeds),  # type: ignore[attr-defined]
@@ -691,6 +720,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # vs our pipeline (our pipeline is ~4ms/item in stub mode).
             "last_avg_publisher_lag_seconds": _NEWS_POLLER.last_avg_publisher_lag_seconds,
             "last_median_publisher_lag_seconds": _NEWS_POLLER.last_median_publisher_lag_seconds,
+            "unhealthy_feeds": sum(1 for f in feed_health if int(f.get("consecutive_errors") or 0) > 0),
+            "feed_health": feed_health,
+            "max_item_age_seconds": _NEWS_POLLER._max_item_age_seconds,  # type: ignore[attr-defined]
+            "last_stale_skipped": _NEWS_POLLER.last_stale_skipped,
         }
 
     @app.post("/ui/news-poll-now")
@@ -704,6 +737,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail="news_poller_disabled")
         ingested = await _NEWS_POLLER.poll_now()
         return {"ingested": ingested, "total_ingested": _NEWS_POLLER.total_ingested}
+
+    @app.get("/ui/archive-status")
+    def archive_status() -> dict[str, Any]:
+        """Diagnostics for the Drive archiver."""
+        if _ARCHIVER is None:
+            return {
+                "enabled": False,
+                "drive_dir": None,
+                "interval_seconds": None,
+                "local_cap_rows": None,
+                "last_run_at": None,
+                "last_archived_count": 0,
+                "total_archived": 0,
+                "last_error": None,
+                "is_archiving": False,
+                "current_csv_path": None,
+            }
+        return {
+            "enabled": True,
+            "drive_dir": str(_ARCHIVER.drive_dir),
+            "interval_seconds": _ARCHIVER.interval_seconds,
+            "local_cap_rows": _ARCHIVER.local_cap,
+            "last_run_at": _ARCHIVER.last_run_at.isoformat() if _ARCHIVER.last_run_at else None,
+            "last_archived_count": _ARCHIVER.last_archived_count,
+            "total_archived": _ARCHIVER.total_archived,
+            "last_error": _ARCHIVER.last_error,
+            "is_archiving": _ARCHIVER.is_archiving,
+            "current_csv_path": str(_ARCHIVER.current_csv_path) if _ARCHIVER.current_csv_path else None,
+        }
+
+    @app.post("/ui/archive-now")
+    async def archive_now() -> dict[str, Any]:
+        """Force an immediate archive sweep. Powers the UI 'Archive now' button."""
+        if _ARCHIVER is None:
+            raise HTTPException(status_code=503, detail="archiver_disabled")
+        result = await _ARCHIVER.archive_now()
+        return {
+            "archived": result.archived,
+            "csv_path": str(result.csv_path) if result.csv_path else None,
+            "error": result.error,
+            "total_archived": _ARCHIVER.total_archived,
+        }
 
     @app.get("/ui/stream")
     async def ui_stream(request: Request) -> EventSourceResponse:

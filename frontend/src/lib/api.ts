@@ -25,6 +25,7 @@ import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot,
   DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
+  ArchiveStatus, ArchiveNowResponse,
 } from "@/types/api";
 
 export const api = {
@@ -75,6 +76,9 @@ export const api = {
   newsStatus: () => request<NewsStatus>("/ui/news-status"),
   newsPollNow: () =>
     request<NewsPollNowResponse>("/ui/news-poll-now", { method: "POST" }),
+  archiveStatus: () => request<ArchiveStatus>("/ui/archive-status"),
+  archiveNow: () =>
+    request<ArchiveNowResponse>("/ui/archive-now", { method: "POST" }),
 };
 
 // Safe URL filter for outbound links. Blocks javascript:/data:/file: schemes.

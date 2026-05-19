@@ -132,6 +132,29 @@ class NewsConfig(BaseModel):
     feeds: list[dict[str, str]] = Field(default_factory=list)
 
 
+class ArchiveConfig(BaseModel):
+    """Drive archiver — drains old SQLite rows into a CSV on cloud-sync storage.
+
+    Keeps the local working set tight (`local_cap_rows`) while preserving
+    the full ingestion history in a flat CSV that opens in Excel/Sheets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    # Path to the cloud-sync folder. If empty, archive.detect_drive_dir()
+    # auto-detects Google Drive Desktop → iCloud Drive → ~/Documents/Catchem.
+    drive_dir: str = ""
+    # How many recent rows to keep in SQLite. Everything older is drained
+    # to CSV. 150 is a comfortable cap that always covers a few minutes of
+    # ingest on the busy default feed set while keeping the .sqlite3 file
+    # tiny (≈300 KB).
+    local_cap_rows: int = 150
+    # How often the archiver wakes up. 30s is a sweet spot — the news
+    # poller adds ~50 rows per minute, so 30s keeps the local count
+    # oscillating between ~150 and ~175.
+    interval_seconds: float = 30.0
+
+
 class PathConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     awareness_repo: Path = Field(default_factory=lambda: Path("/tmp/awareness-missing"))
@@ -191,6 +214,7 @@ class Settings(BaseSettings):
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig)
     kaggle: KaggleConfig = Field(default_factory=KaggleConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
+    archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
 
     use_ml_stubs: bool | None = None  # convenience flat env override
 

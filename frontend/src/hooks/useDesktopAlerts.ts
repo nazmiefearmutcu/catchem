@@ -29,11 +29,46 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { FinancialRecord } from "@/types/api";
 
-const NOTIFY_THRESHOLD = 0.85;
+// Default alert threshold. Calibration note:
+//   The finance-relevance scorer's empirical distribution on the live RSS
+//   feed reads max ≈ 0.80, p90 ≈ 0.63, median ≈ 0.48. The previous default
+//   of 0.85 sat ABOVE the empirical max, so no item ever cleared the bar
+//   and the alerts never fired ("alarm çalışmıyor"). 0.65 catches the
+//   top ~10% — roughly 1-2 toasts per active hour at current ingest rates.
+//
+// The user can tune this at runtime via localStorage key
+// `catchem:alerts-threshold` (number, 0..1).
+const DEFAULT_NOTIFY_THRESHOLD = 0.65;
+const THRESHOLD_STORAGE_KEY = "catchem:alerts-threshold";
 const POLL_INTERVAL_MS = 6_000;
 const STORAGE_KEY = "catchem:arrival-toasts-enabled";
 const TOAST_TTL_MS = 9_000;
 const MAX_VISIBLE = 4;
+
+function readThreshold(): number {
+  if (typeof window === "undefined") return DEFAULT_NOTIFY_THRESHOLD;
+  try {
+    const raw = window.localStorage?.getItem(THRESHOLD_STORAGE_KEY);
+    if (raw == null) return DEFAULT_NOTIFY_THRESHOLD;
+    const n = Number.parseFloat(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 1) return DEFAULT_NOTIFY_THRESHOLD;
+    return n;
+  } catch {
+    return DEFAULT_NOTIFY_THRESHOLD;
+  }
+}
+
+export function setAlertThreshold(value: number): number {
+  const clamped = Math.max(0, Math.min(1, value));
+  try {
+    window.localStorage?.setItem(THRESHOLD_STORAGE_KEY, String(clamped));
+  } catch { /* ignore */ }
+  return clamped;
+}
+
+export function getAlertThreshold(): number {
+  return readThreshold();
+}
 
 export interface ArrivalToast {
   id: string;
@@ -97,10 +132,13 @@ export function useDesktopAlerts(): void {
           seededRef.current = true;
           return;
         }
+        // Re-read each tick so the user's choice via the threshold
+        // setter takes effect immediately, no remount needed.
+        const threshold = readThreshold();
         const fresh = items.filter(
           (r: FinancialRecord) =>
             !notified.current.has(r.capture_id) &&
-            (r.finance_relevance_score ?? 0) >= NOTIFY_THRESHOLD,
+            (r.finance_relevance_score ?? 0) >= threshold,
         );
         for (const r of fresh) {
           notified.current.add(r.capture_id);

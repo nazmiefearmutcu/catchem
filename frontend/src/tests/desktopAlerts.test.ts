@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { readDesktopAlertState, toggleDesktopAlerts } from "@/hooks/useDesktopAlerts";
+import {
+  getAlertThreshold,
+  readDesktopAlertState,
+  setAlertThreshold,
+  toggleDesktopAlerts,
+} from "@/hooks/useDesktopAlerts";
 
 // jsdom in this project ships without a full Storage implementation, so we
 // install our own minimal shim before each test.
@@ -46,5 +51,30 @@ describe("desktop alerts (in-app toast toggle)", () => {
   it("toggle returns the new state synchronously", () => {
     expect(toggleDesktopAlerts(false)).toBe("off");
     expect(toggleDesktopAlerts(true)).toBe("on");
+  });
+});
+
+describe("alert threshold", () => {
+  beforeEach(() => {
+    installLocalStorage();
+  });
+
+  it("defaults to 0.65 when nothing is persisted", () => {
+    expect(getAlertThreshold()).toBeCloseTo(0.65);
+  });
+
+  it("setAlertThreshold persists the value", () => {
+    setAlertThreshold(0.7);
+    expect(getAlertThreshold()).toBeCloseTo(0.7);
+  });
+
+  it("clamps out-of-range values to [0, 1]", () => {
+    expect(setAlertThreshold(-1)).toBe(0);
+    expect(setAlertThreshold(2.5)).toBe(1);
+  });
+
+  it("falls back to default when stored value is garbage", () => {
+    window.localStorage.setItem("catchem:alerts-threshold", "not-a-number");
+    expect(getAlertThreshold()).toBeCloseTo(0.65);
   });
 });

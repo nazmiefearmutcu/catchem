@@ -7,7 +7,7 @@ import { Pill } from "@/components/Pill";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
 import { useUrlFilters } from "@/hooks/useUrlFilters";
 import { RecordDrawer } from "@/features/record-detail/RecordDrawer";
-import { useDesktopAlertState } from "@/hooks/useDesktopAlerts";
+import { getAlertThreshold, setAlertThreshold, useDesktopAlertState } from "@/hooks/useDesktopAlerts";
 import type { FinancialRecord } from "@/types/api";
 
 export function FeedPage() {
@@ -57,6 +57,10 @@ export function FeedPage() {
 
   // In-app toast on/off (defaults on; persisted in localStorage).
   const [alertState, setAlertEnabled] = useDesktopAlertState();
+  // Threshold knob — defaults to 0.65 (calibrated against the real
+  // scoring distribution; the older default of 0.85 was higher than any
+  // item ever scored, which is why the alarm never fired).
+  const [alertThreshold, setAlertThresholdState] = useState<number>(() => getAlertThreshold());
 
 
   const list = useQuery<{ items: FinancialRecord[] }>({
@@ -322,12 +326,31 @@ export function FeedPage() {
                 onClick={() => setAlertEnabled(alertState !== "on")}
                 title={
                   alertState === "on"
-                    ? "In-app toasts active for high-relevance arrivals (score ≥ 0.85). Click to mute."
-                    : "Toasts muted. Click to show a top-right notification each time a high-relevance article arrives."
+                    ? `Toasts active for arrivals with score ≥ ${alertThreshold.toFixed(2)}. Click to mute.`
+                    : "Toasts muted. Click to fire a top-right notification for each high-relevance arrival."
                 }
               >
                 {alertState === "on" ? "🔔 alerts on" : "🔕 alerts off"}
               </button>
+              {alertState === "on" && (
+                <button
+                  type="button"
+                  className="chip text-[11px]"
+                  onClick={() => {
+                    // Cycle through preset thresholds: 0.50 → 0.60 → 0.70 → 0.80 → back.
+                    // 0.50 is permissive (~50% of items), 0.80 is aggressive
+                    // (~top 2-3%). The empirical max on this scorer is ~0.80,
+                    // so anything above leaves the user with no toasts at all.
+                    const presets = [0.50, 0.60, 0.65, 0.70, 0.80];
+                    const idx = presets.findIndex((p) => p >= alertThreshold - 0.001);
+                    const next = presets[(idx + 1) % presets.length];
+                    setAlertThresholdState(setAlertThreshold(next));
+                  }}
+                  title={`Alert threshold: ${alertThreshold.toFixed(2)} (max observed ≈ 0.80). Click to cycle through 0.50 → 0.60 → 0.65 → 0.70 → 0.80.`}
+                >
+                  ≥{alertThreshold.toFixed(2)}
+                </button>
+              )}
               <button
                 type="button"
                 className="chip text-[11px]"

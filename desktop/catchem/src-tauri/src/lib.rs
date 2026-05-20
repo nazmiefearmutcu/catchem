@@ -25,12 +25,11 @@ pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_process::init())
+        // No plugins registered — see Cargo.toml for the rationale. The
+        // capability set in `capabilities/default.json` is intentionally
+        // narrow (core:default, core:window:default, core:event:default)
+        // and JS doesn't call invoke() anywhere, so the plugin surface
+        // would be pure overhead.
         .invoke_handler(tauri::generate_handler![
             commands::sidecar_status,
             commands::sidecar_start,

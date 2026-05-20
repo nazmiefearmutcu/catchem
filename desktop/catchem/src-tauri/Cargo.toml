@@ -17,18 +17,24 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
-tauri-plugin-shell = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-process = "2"
+# Plugins that USED to be registered (shell, dialog, fs, notification, opener,
+# process) were removed in commit-after-capabilities-narrowing. JS has zero
+# `@tauri-apps/api` imports anywhere in `frontend/` or `desktop/catchem/web/`
+# so the only effect of keeping them was build time + binary bloat. If a
+# future feature needs one back, add BOTH the Cargo dep AND the matching
+# capability permission in `capabilities/default.json` — capabilities is
+# default-deny, the explicit grant is required.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 log = "0.4"
 env_logger = "0.11"
+# `open` is used directly by `commands::open_external` + the on_navigation
+# handler in lib.rs to hand external URLs to the system browser. We don't
+# use `tauri-plugin-opener` because that exposes IPC commands to the
+# webview — `open::that_detached` is Rust-only and never crosses the
+# trust boundary.
 open = "5"
 
 [profile.release]

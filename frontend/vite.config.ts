@@ -4,7 +4,7 @@ import path from "node:path";
 
 // Vite bundles into the FastAPI package's static dir so the Python app can
 // serve / and /assets/* without a separate frontend process in production.
-const BUILD_TARGET = path.resolve(__dirname, "../src/fusion_stack/static/app");
+const BUILD_TARGET = path.resolve(__dirname, "../src/catchem/static/app");
 
 export default defineConfig({
   plugins: [react()],

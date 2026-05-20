@@ -1,8 +1,8 @@
-"""Runtime configuration. Loads configs/fusion.yaml (lowest priority), then env vars,
+"""Runtime configuration. Loads configs/catchem.yaml (lowest priority), then env vars,
 then `.env`. The CLI may pass an explicit config path.
 
 Priority (lowest → highest):
-  configs/fusion.yaml  <  process env  <  .env file  <  CLI overrides
+  configs/catchem.yaml  <  process env  <  .env file  <  CLI overrides
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class FusionMode(str, Enum):
+class CatchemMode(str, Enum):
     PRODUCTION_SAFE = "production_safe"
     REPLAY_EXISTING = "replay_existing"
     LIVE_TAIL = "live_tail"
@@ -26,19 +26,19 @@ class FusionMode(str, Enum):
 
 
 def project_root() -> Path:
-    """fusion_stack project root (parent of src/)."""
+    """catchem project root (parent of src/)."""
     return Path(__file__).resolve().parents[2]
 
 
 def _yaml_overrides(path: Path | None = None) -> dict[str, Any]:
     if path is None:
-        path = project_root() / "configs" / "fusion.yaml"
+        path = project_root() / "configs" / "catchem.yaml"
     if not path.exists():
         return {}
     with path.open(encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     if not isinstance(data, dict):
-        raise ValueError(f"fusion config at {path} did not parse to a mapping")
+        raise ValueError(f"catchem config at {path} did not parse to a mapping")
     return data
 
 
@@ -87,7 +87,7 @@ class ApiConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    sqlite_url: str = "sqlite:///data/db/fusion.sqlite3"
+    sqlite_url: str = "sqlite:///data/db/catchem.sqlite3"
     parquet_results_dir: str = "data/results"
     dlq_dir: str = "data/results/dlq"
     vector_index_dir: str = "data/vector_index"
@@ -98,7 +98,7 @@ class LoggingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
     level: str = "INFO"
     json_logs: bool = Field(default=True, alias="json")
-    file: str = "data/logs/fusion_stack.log"
+    file: str = "data/logs/catchem.log"
 
 
 class ThresholdConfig(BaseModel):
@@ -160,9 +160,9 @@ class PathConfig(BaseModel):
     awareness_repo: Path = Field(default_factory=lambda: Path("/tmp/awareness-missing"))
     newsimpact_repo: Path = Field(default_factory=lambda: Path("/tmp/merged_news-missing"))
     awareness_data_dir: Path = Field(default_factory=lambda: Path("/tmp/awareness-missing/data"))
-    fusion_output_dir: Path = Field(default_factory=lambda: project_root() / "data")
+    catchem_output_dir: Path = Field(default_factory=lambda: project_root() / "data")
 
-    @field_validator("awareness_repo", "newsimpact_repo", "awareness_data_dir", "fusion_output_dir", mode="before")
+    @field_validator("awareness_repo", "newsimpact_repo", "awareness_data_dir", "catchem_output_dir", mode="before")
     @classmethod
     def _coerce_path(cls, v: Any) -> Path:
         return Path(v).expanduser() if v is not None else v
@@ -172,11 +172,11 @@ class Settings(BaseSettings):
     """Top-level settings. Aggregates sub-configs and applies env overrides.
 
     Precedence (lowest → highest):
-      defaults  <  configs/fusion.yaml (via init kwargs)  <  env vars  <  .env file
+      defaults  <  configs/catchem.yaml (via init kwargs)  <  env vars  <  .env file
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="FUSION_",
+        env_prefix="CATCHEM_",
         env_file=".env",
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
@@ -194,7 +194,7 @@ class Settings(BaseSettings):
         file_secret_settings,
     ):
         # Precedence (lowest → highest):
-        #   defaults  <  configs/fusion.yaml (init kwargs)  <  .env file  <  process env
+        #   defaults  <  configs/catchem.yaml (init kwargs)  <  .env file  <  process env
         #
         # Process env must beat .env so:
         #   (a) explicit shell overrides win (operator intent),
@@ -202,7 +202,7 @@ class Settings(BaseSettings):
         #   (c) CI's job env beats any committed .env (deployment determinism).
         return env_settings, dotenv_settings, init_settings, file_secret_settings
 
-    mode: FusionMode = FusionMode.PRODUCTION_SAFE
+    mode: CatchemMode = CatchemMode.PRODUCTION_SAFE
     paths: PathConfig = Field(default_factory=PathConfig)
     models_: ModelConfig = Field(default_factory=ModelConfig, alias="models")
     guards: GuardConfig = Field(default_factory=GuardConfig)
@@ -222,7 +222,7 @@ class Settings(BaseSettings):
     def _propagate_flat_overrides(self) -> "Settings":
         """Wire the documented flat env vars into the nested sub-configs.
 
-        `FUSION_USE_ML_STUBS=false` MUST flip `models_.use_ml_stubs` to False,
+        `CATCHEM_USE_ML_STUBS=false` MUST flip `models_.use_ml_stubs` to False,
         even though the field formally lives on the nested `ModelConfig`. This
         keeps `.env.example` and the docs honest.
         """
@@ -232,7 +232,7 @@ class Settings(BaseSettings):
 
     # ── derived paths ────────────────────────────────────────────────────────
     def output_path(self, *parts: str) -> Path:
-        return self.paths.fusion_output_dir.joinpath(*parts)
+        return self.paths.catchem_output_dir.joinpath(*parts)
 
     def sqlite_path(self) -> Path:
         url = self.storage.sqlite_url
@@ -240,20 +240,20 @@ class Settings(BaseSettings):
             rel = url.removeprefix("sqlite:///")
             p = Path(rel)
             if not p.is_absolute():
-                p = self.paths.fusion_output_dir / Path(rel).relative_to("data") if rel.startswith("data/") else self.paths.fusion_output_dir.parent / p
+                p = self.paths.catchem_output_dir / Path(rel).relative_to("data") if rel.startswith("data/") else self.paths.catchem_output_dir.parent / p
             p.parent.mkdir(parents=True, exist_ok=True)
             return p
         raise ValueError(f"unsupported sqlite_url: {url}")
 
     def is_production_safe(self) -> bool:
-        return self.mode == FusionMode.PRODUCTION_SAFE
+        return self.mode == CatchemMode.PRODUCTION_SAFE
 
     def diagnostic_allowed(self) -> bool:
         """True only when mode is research_diagnostic AND the guard flag is set AND
         the configured diagnostic-allowed list includes the mode."""
         if not self.guards.newsimpact_diagnostic_enabled:
             return False
-        if self.mode == FusionMode.PRODUCTION_SAFE:
+        if self.mode == CatchemMode.PRODUCTION_SAFE:
             return False
         return self.mode.value in self.guards.allow_research_diagnostic_in_modes
 
@@ -283,7 +283,7 @@ def reload_settings() -> None:
 
 
 __all__ = [
-    "FusionMode",
+    "CatchemMode",
     "Settings",
     "load_settings",
     "reload_settings",

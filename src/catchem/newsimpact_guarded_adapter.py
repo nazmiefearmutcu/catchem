@@ -2,7 +2,7 @@
 
 This module implements *one* very narrow capability: in research_diagnostic mode
 only, load read-only NewsImpact governance/score artifacts and emit a
-clearly-labeled `diagnostic_multimodal_result` payload alongside a fusion
+clearly-labeled `diagnostic_multimodal_result` payload alongside a catchem
 record. It does **not**:
 
   * train anything
@@ -10,10 +10,10 @@ record. It does **not**:
   * load or modify final_best.pt
   * relax any threshold
   * publish artifacts
-  * override fusion_stack's own is_finance_relevant decision
+  * override catchem's own is_finance_relevant decision
 
 The adapter refuses to activate unless three independent conditions hold:
-  1. fusion_stack is configured for research_diagnostic mode
+  1. catchem is configured for research_diagnostic mode
   2. the guards.newsimpact_diagnostic_enabled flag is True
   3. governance_index.json shows release_gate_passed = False (the expected state)
 
@@ -32,7 +32,7 @@ from typing import Any, Iterable, Mapping
 
 from .logging import get_logger
 
-logger = get_logger("fusion.newsimpact_guard")
+logger = get_logger("catchem.newsimpact_guard")
 
 
 GOVERNANCE_INDEX_REL = "models/governance_index/governance_index.json"

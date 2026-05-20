@@ -22,7 +22,7 @@ Reference for what's required on a clean macOS box to build Catchem from source.
 
 ```bash
 # 1. Project tools
-cd ~/Desktop/Projeler/proje/fusion_stack
+cd ~/Desktop/Projeler/proje/catchem
 python3 -m venv .venv
 . .venv/bin/activate
 uv pip install -e .
@@ -43,11 +43,11 @@ pip install kaggle && bash scripts/download_kaggle_assets.sh    # opt-in dataset
 
 | Goal                              | Command                                                                                 | What you get                                                  | Time                  |
 |-----------------------------------|-----------------------------------------------------------------------------------------|---------------------------------------------------------------|-----------------------|
-| Local dev loop                    | `bash scripts/fusion_bootstrap_and_run.sh`                                              | FastAPI on :8087 + React UI rebuilt                            | ~30 s warm            |
-| Local dev with real ML            | `bash scripts/fusion_bootstrap_and_run.sh --with-ml`                                    | Same, but loads HF models                                      | +60-180 s cold model load |
-| Sidecar standalone                | `python -m fusion_stack.cli serve`                                                       | FastAPI only, no SPA build                                     | ~3 s                  |
+| Local dev loop                    | `bash scripts/catchem_bootstrap_and_run.sh`                                              | FastAPI on :8087 + React UI rebuilt                            | ~30 s warm            |
+| Local dev with real ML            | `bash scripts/catchem_bootstrap_and_run.sh --with-ml`                                    | Same, but loads HF models                                      | +60-180 s cold model load |
+| Sidecar standalone                | `python -m catchem.cli serve`                                                       | FastAPI only, no SPA build                                     | ~3 s                  |
 | Catchem dev .app                  | `bash desktop/catchem/scripts/build_catchem_dev.sh`                                     | `cargo tauri dev` → window opens                               | ~5-12 min cold, ~10 s warm |
-| Sidecar PyInstaller bundle        | `bash desktop/catchem/scripts/build_sidecar.sh`                                         | `desktop/catchem/sidecar-out/fusion-stack-sidecar/`            | ~90 s                 |
+| Sidecar PyInstaller bundle        | `bash desktop/catchem/scripts/build_sidecar.sh`                                         | `desktop/catchem/sidecar-out/catchem-sidecar/`            | ~90 s                 |
 | Catchem release .app + .dmg       | `bash desktop/catchem/scripts/build_catchem_release.sh`                                  | `.app` + `.dmg` under `target/release/bundle/`                 | ~6-10 min cold        |
 | Install to /Applications          | `bash desktop/catchem/scripts/install_catchem.sh`                                       | `/Applications/Catchem.app` with quarantine xattr stripped     | <5 s                  |
 | Notarize + staple (with creds)    | release script reads `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD`         | Notarized DMG                                                  | ~5-15 min (apple side)|
@@ -62,7 +62,7 @@ If `APPLE_DEVELOPER_IDENTITY` is not set, the release script still produces an u
 | Rust shell       | `(cd desktop/catchem/src-tauri && cargo test --lib -q)`  | 8 passed         |
 | Frontend         | `(cd frontend && npm test)`                              | 31 passed        |
 | Boot shim        | `(cd desktop/catchem/web && npm test)`                   | 15 passed        |
-| Smoke flow       | `bash scripts/fusion_bootstrap_and_run.sh --skip-frontend-build --no-api --max=20` | exits 0         |
+| Smoke flow       | `bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build --no-api --max=20` | exits 0         |
 | Dev window       | `bash desktop/catchem/scripts/build_catchem_dev.sh`      | Window opens, boot stages animate, UI loads after /healthz |
 
 The 1-skip in pytest is `tests/test_existing_repo_regressions.py:51` — gated on `final_best.pt` being present; the prompt forbids touching that file, so the skip is permanent.

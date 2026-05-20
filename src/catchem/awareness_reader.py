@@ -19,7 +19,7 @@ from typing import Generator, Iterable, Iterator
 from .logging import get_logger
 from .schemas import AwarenessCaptureView, ReplayOffset
 
-logger = get_logger("fusion.awareness_reader")
+logger = get_logger("catchem.awareness_reader")
 
 
 def iter_finalized_files(root: Path, pattern: str = "**/*.jsonl") -> list[Path]:

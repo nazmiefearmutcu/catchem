@@ -1,6 +1,6 @@
 """Programmatic bootstrap: validate environment, verify guard, init storage.
 
-The shell script ``scripts/fusion_bootstrap_and_run.sh`` calls this via the CLI
+The shell script ``scripts/catchem_bootstrap_and_run.sh`` calls this via the CLI
 after creating the venv. Tests call it directly.
 """
 
@@ -15,7 +15,7 @@ from .logging import configure_logging, get_logger
 from .settings import Settings, load_settings
 
 
-logger = get_logger("fusion.bootstrap")
+logger = get_logger("catchem.bootstrap")
 
 
 def bootstrap(skip_warm: bool = True) -> dict[str, Any]:
@@ -25,10 +25,10 @@ def bootstrap(skip_warm: bool = True) -> dict[str, Any]:
     summary: dict[str, Any] = {"mode": s.mode.value}
 
     # 1. ensure output dirs
-    s.paths.fusion_output_dir.mkdir(parents=True, exist_ok=True)
+    s.paths.catchem_output_dir.mkdir(parents=True, exist_ok=True)
     for sub in ("results", "cache", "db", "logs", "vector_index", "golden", "kaggle", "replay"):
-        (s.paths.fusion_output_dir / sub).mkdir(parents=True, exist_ok=True)
-    summary["fusion_output_dir"] = str(s.paths.fusion_output_dir)
+        (s.paths.catchem_output_dir / sub).mkdir(parents=True, exist_ok=True)
+    summary["catchem_output_dir"] = str(s.paths.catchem_output_dir)
 
     # 2. repo paths exist?
     summary["awareness_repo_exists"] = s.paths.awareness_repo.exists()

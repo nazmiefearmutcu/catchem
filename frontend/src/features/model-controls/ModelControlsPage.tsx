@@ -113,7 +113,7 @@ export function ModelControlsPage() {
         <p className="text-xs text-[color:var(--fg-dim)]">
           Start / restart / stop is handled by the Catchem desktop shell (Tauri).
           In the browser, the API process is owned by whoever launched
-          <code className="font-mono ml-1">fusion-stack serve</code>. See Help for restart instructions.
+          <code className="font-mono ml-1">catchem serve</code>. See Help for restart instructions.
         </p>
       </section>
     </div>

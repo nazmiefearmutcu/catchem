@@ -18,8 +18,8 @@ concurrency:
 env:
   PYTHON_VERSION: "3.13"
   NODE_VERSION: "20"
-  FUSION_MODELS__USE_ML_STUBS: "true"
-  FUSION_MODE: "production_safe"
+  CATCHEM_MODELS__USE_ML_STUBS: "true"
+  CATCHEM_MODE: "production_safe"
 
 jobs:
   backend:
@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Install fusion_stack[dev] + build
+      - name: Install catchem[dev] + build
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -58,7 +58,7 @@ jobs:
             "safeguards": {"no_external_publish": true, "no_governance_mutation": true}
           }
           EOF
-          echo "FUSION_PATHS__NEWSIMPACT_REPO=/tmp/newsimpact-fixture" >> $GITHUB_ENV
+          echo "CATCHEM_PATHS__NEWSIMPACT_REPO=/tmp/newsimpact-fixture" >> $GITHUB_ENV
       - name: Guard verifier (must exit 0)
         run: python scripts/verify_newsimpact_guard.py /tmp/newsimpact-fixture
       - name: pytest (full suite)
@@ -69,21 +69,21 @@ jobs:
           python -m build --wheel --outdir dist
           python - <<'EOF'
           import zipfile, glob, sys
-          wheels = glob.glob("dist/fusion_stack-*.whl")
+          wheels = glob.glob("dist/catchem-*.whl")
           assert wheels, f"no wheel produced"
           with zipfile.ZipFile(wheels[0]) as z:
               names = z.namelist()
-          assert any(n == "fusion_stack/static/dashboard.html" for n in names), \
+          assert any(n == "catchem/static/dashboard.html" for n in names), \
               f"static files missing from wheel: {[n for n in names if 'static' in n]}"
-          print("ok: wheel contains fusion_stack/static/dashboard.html")
+          print("ok: wheel contains catchem/static/dashboard.html")
           EOF
       - name: Golden benchmark schema + F1 floor
         run: |
           python - <<'EOF'
           import json
-          from fusion_stack.golden import GOLDEN_SCHEMA_VERSION, SYNTHETIC, run_benchmark
-          from fusion_stack.service import build_service
-          from fusion_stack.settings import load_settings, reload_settings
+          from catchem.golden import GOLDEN_SCHEMA_VERSION, SYNTHETIC, run_benchmark
+          from catchem.service import build_service
+          from catchem.settings import load_settings, reload_settings
           reload_settings()
           rep = run_benchmark(build_service(load_settings()), SYNTHETIC)
           out = rep.to_dict()
@@ -122,8 +122,8 @@ jobs:
         run: npm run build
       - name: Confirm bundle is inside the package static dir
         run: |
-          test -f src/fusion_stack/static/app/index.html
-          test -d src/fusion_stack/static/app/assets
+          test -f src/catchem/static/app/index.html
+          test -d src/catchem/static/app/assets
 
   # ── Catchem desktop ────────────────────────────────────────────────────
   # Compiles the Rust crate + runs the security unit tests.
@@ -174,11 +174,11 @@ jobs:
           cache: pip
       - name: Install + serve background
         env:
-          FUSION_PATHS__FUSION_OUTPUT_DIR: "${{ runner.temp }}/fusion-data"
+          CATCHEM_PATHS__CATCHEM_OUTPUT_DIR: "${{ runner.temp }}/catchem-data"
         run: |
           pip install --upgrade pip
           pip install -e ".[dev]"
-          nohup python -m fusion_stack.cli serve > api.out 2>&1 &
+          nohup python -m catchem.cli serve > api.out 2>&1 &
           for i in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8087/healthz && break
             sleep 1
@@ -200,7 +200,7 @@ jobs:
           EOF
       - name: Demo CLI end-to-end (pasted-news flow)
         run: |
-          fusion-stack demo \
+          catchem demo \
             --title "Federal Reserve raises rates by 25 bps" \
             --text-file docs/examples/news_fed.txt \
             --domain reuters.com

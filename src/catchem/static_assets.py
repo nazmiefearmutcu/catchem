@@ -11,7 +11,7 @@ zipapp, namespace packages, or wheels where Hatch installed `static/` as
 This module wraps `importlib.resources` so the lookup is robust across:
   * editable installs (`pip install -e .`)
   * wheel installs (`pip install dist/*.whl`)
-  * the FUSION_STATIC_DIR override (useful for dev rebuilds without reinstall)
+  * the CATCHEM_STATIC_DIR override (useful for dev rebuilds without reinstall)
 
 It never accepts a `name` containing `..` or absolute paths — only flat names
 relative to the package's `static/` folder.
@@ -46,13 +46,13 @@ def _validate_name(name: str) -> str:
 
 
 def _env_override(name: str) -> Optional[Path]:
-    """If FUSION_STATIC_DIR is set, prefer it but only for files that exist there.
+    """If CATCHEM_STATIC_DIR is set, prefer it but only for files that exist there.
 
     The env override is a dev convenience: it lets you rebuild the React bundle
     into a sibling directory and refresh the page without reinstalling the
     package. It is strictly file-based — we never expose arbitrary dirs.
     """
-    env_dir = os.environ.get("FUSION_STATIC_DIR")
+    env_dir = os.environ.get("CATCHEM_STATIC_DIR")
     if not env_dir:
         return None
     base = Path(env_dir).expanduser().resolve()
@@ -72,14 +72,14 @@ def _env_override(name: str) -> Optional[Path]:
 def static_dir() -> Path:
     """Filesystem dir of the package's static assets (for StaticFiles mount).
 
-    Falls back to the FUSION_STATIC_DIR override when set and valid.
+    Falls back to the CATCHEM_STATIC_DIR override when set and valid.
     """
-    env_dir = os.environ.get("FUSION_STATIC_DIR")
+    env_dir = os.environ.get("CATCHEM_STATIC_DIR")
     if env_dir:
         p = Path(env_dir).expanduser().resolve()
         if p.is_dir():
             return p
-    resource = files("fusion_stack").joinpath("static")
+    resource = files("catchem").joinpath("static")
     return Path(_KEEPALIVE.enter_context(as_file(resource)))
 
 
@@ -100,7 +100,7 @@ def get_static_path(name: str) -> Optional[Path]:
         return override
 
     try:
-        resource = files("fusion_stack").joinpath("static", name)
+        resource = files("catchem").joinpath("static", name)
     except (FileNotFoundError, ModuleNotFoundError):
         return None
 

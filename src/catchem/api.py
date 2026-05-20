@@ -1,4 +1,4 @@
-"""FastAPI surface for the local fusion stack.
+"""FastAPI surface for the local catchem stack.
 
 Endpoints are intentionally thin pass-throughs to the Supervisor. Auth is
 out-of-scope (local-first). The API binds to 127.0.0.1 by default.
@@ -108,7 +108,7 @@ def _git_branch_safe() -> str | None:
     return None
 
 
-logger = get_logger("fusion.api")
+logger = get_logger("catchem.api")
 
 _SUPERVISOR: Supervisor | None = None
 _SETTINGS: Settings | None = None
@@ -189,7 +189,7 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Factory. Tests can pass a Settings instance; CLI uses lifespan loading."""
-    app = FastAPI(title="fusion_stack", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="catchem", version="0.1.0", lifespan=lifespan)
 
     cors = (settings or Settings()).api.cors_origins
     if cors:
@@ -249,13 +249,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return HTMLResponse(body.decode("utf-8"))
         # Friendly fallback when the bundle hasn't been built yet
         msg = (
-            "<!doctype html><meta charset=utf-8><title>fusion_stack</title>"
+            "<!doctype html><meta charset=utf-8><title>catchem</title>"
             "<style>body{font-family:ui-monospace,monospace;background:#0e1014;color:#e7ebf0;"
             "padding:48px;max-width:640px;line-height:1.6}h1{color:#5fb3ff;font-size:18px}"
             "code{background:#161922;padding:2px 6px;border-radius:4px}a{color:#5fb3ff}</style>"
-            "<h1>fusion_stack</h1>"
+            "<h1>catchem</h1>"
             "<p>The premium UI bundle has not been built yet.</p>"
-            "<p>Run <code>bash scripts/fusion_bootstrap_and_run.sh</code> "
+            "<p>Run <code>bash scripts/catchem_bootstrap_and_run.sh</code> "
             "or <code>(cd frontend && npm install && npm run build)</code>.</p>"
             "<p>Legacy dashboard meanwhile: <a href=\"/legacy\">/legacy</a></p>"
         )
@@ -460,9 +460,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def ui_log_tail(lines: int = Query(120, ge=1, le=2000)) -> LogTailResponse:
         s = _SETTINGS or load_settings()
         log_rel = s.logging_.file
-        # `file` is relative like "data/logs/fusion_stack.log"; resolve under output dir
+        # `file` is relative like "data/logs/catchem.log"; resolve under output dir
         if log_rel.startswith("data/"):
-            log_path = s.paths.fusion_output_dir / Path(log_rel).relative_to("data")
+            log_path = s.paths.catchem_output_dir / Path(log_rel).relative_to("data")
         else:
             log_path = Path(log_rel)
         if not log_path.exists():
@@ -643,7 +643,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ui/benchmark/history")
     def ui_benchmark_history() -> dict[str, Any]:
         """Return the persisted benchmark history (if any). Empty for v1."""
-        history_path = (_SETTINGS or load_settings()).paths.fusion_output_dir / "results" / "benchmark_history.jsonl"
+        history_path = (_SETTINGS or load_settings()).paths.catchem_output_dir / "results" / "benchmark_history.jsonl"
         items: list[dict] = []
         if history_path.exists():
             for line in history_path.read_text(encoding="utf-8").splitlines():
@@ -873,13 +873,13 @@ def _guard_snapshot(settings: Settings) -> dict[str, Any]:
 
 
 def run() -> None:
-    """Entry point for the ``fusion-stack-api`` console script."""
+    """Entry point for the ``catchem-api`` console script."""
     s = load_settings()
     app = create_app(s)
-    host = os.getenv("FUSION_API_HOST", s.api.host)
-    port = int(os.getenv("FUSION_API_PORT", s.api.port))
+    host = os.getenv("CATCHEM_API_HOST", s.api.host)
+    port = int(os.getenv("CATCHEM_API_PORT", s.api.port))
     uvicorn.run(app, host=host, port=port, log_level=s.logging_.level.lower())
 
 
-# Module-level app for `uvicorn fusion_stack.api:app`
+# Module-level app for `uvicorn catchem.api:app`
 app = create_app()

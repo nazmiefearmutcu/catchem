@@ -63,7 +63,7 @@ plist_set() {
 
 CHANGED=0
 plist_set NSDesktopFolderUsageDescription \
-  "Catchem reads news articles, the local fusion_stack repository, and exports/imports analysis bundles from your Desktop." \
+  "Catchem reads news articles, the local catchem repository, and exports/imports analysis bundles from your Desktop." \
   && CHANGED=$((CHANGED + 1))
 plist_set NSDocumentsFolderUsageDescription \
   "Catchem stores analysis exports and reads pasted news files from Documents." \
@@ -72,7 +72,7 @@ plist_set NSDownloadsFolderUsageDescription \
   "Catchem may save analysis bundles to Downloads." \
   && CHANGED=$((CHANGED + 1))
 plist_set NSAppleEventsUsageDescription \
-  "Catchem uses AppleEvents to coordinate the local fusion_stack sidecar process." \
+  "Catchem uses AppleEvents to coordinate the local catchem sidecar process." \
   && CHANGED=$((CHANGED + 1))
 # LSUIElement bool needs its own treatment (plutil -extract returns "0"/"1").
 if [ "$(plist_get LSUIElement)" != "false" ]; then

@@ -35,7 +35,7 @@ export function OpsPage() {
             <ul className="text-xs grid sm:grid-cols-2 gap-y-1">
               <KVInline label="release_gate_passed" value={String(guards.data.release_gate_passed)} tone={guards.data.release_gate_passed ? "bad" : "good"} />
               <KVInline label="quarantine_state" value={guards.data.quarantine_state ?? "—"} />
-              <KVInline label="fusion_verdict" value={guards.data.fusion_verdict_class ?? "—"} />
+              <KVInline label="catchem_verdict" value={guards.data.fusion_verdict_class ?? "—"} />
               <KVInline label="safe_to_publish" value={String(guards.data.safe_to_publish)} tone={guards.data.safe_to_publish ? "bad" : "good"} />
               <KVInline label="safe_to_promote" value={String(guards.data.safe_to_promote)} tone={guards.data.safe_to_promote ? "bad" : "good"} />
               <KVInline label="governance sha256" value={guards.data.governance_index_sha256?.slice(0, 16) + "…"} mono />

@@ -1,6 +1,6 @@
-//! Catchem — macOS desktop wrapper for fusion_stack.
+//! Catchem — macOS desktop wrapper for catchem.
 //!
-//! This crate boots Tauri, spawns the local fusion_stack sidecar, waits for
+//! This crate boots Tauri, spawns the local catchem sidecar, waits for
 //! /healthz, and loads the FastAPI-served React UI in a single webview.
 
 mod commands;
@@ -154,8 +154,30 @@ pub fn run() {
             let menu = menu::build_menu(&app.handle().clone())?;
             app.set_menu(menu)?;
 
-            // Menu event router → emit JS events the webview can react to.
+            // Menu event router. Navigation menu items call
+            // `webview.navigate(<sidecar>/<route>)` directly — the browser
+            // sees a normal URL change, the on_navigation classifier OKs
+            // the same-origin jump, and React Router picks it up. Doing it
+            // this way avoids the "emit a JS event no one listens to"
+            // dead path the original implementation shipped with — frontend/
+            // has zero `@tauri-apps/api` imports, so `handle.emit()` had
+            // no receiver. The legacy emit() calls below stay for any
+            // future tauri:// page (boot shim, etc.) that wants to listen.
             let app_handle = app.handle().clone();
+            let sidecar_endpoint = cfg.endpoint();
+            let go_to = move |handle: &tauri::AppHandle, route: &str| {
+                if let Some(win) = handle.get_webview_window("main") {
+                    let url_str = format!("{sidecar_endpoint}{route}");
+                    match tauri::Url::parse(&url_str) {
+                        Ok(url) => {
+                            if let Err(e) = win.navigate(url) {
+                                log::warn!("menu navigate failed: {e}");
+                            }
+                        }
+                        Err(e) => log::warn!("bad menu url {url_str}: {e}"),
+                    }
+                }
+            };
             app.on_menu_event(move |handle, ev| {
                 let id = ev.id().0.as_str();
                 let route = match id {
@@ -165,15 +187,23 @@ pub fn run() {
                     "nav_analysis" => Some("/map"),
                     "nav_model" => Some("/model-controls"),
                     "help_open" => Some("/help"),
+                    "file_new_paste" => Some("/replay"),
+                    "sidecar_health" => Some("/model-controls"),
+                    "help_logs" => Some("/model-controls"),
                     _ => None,
                 };
                 if let Some(r) = route {
+                    go_to(handle, r);
+                    // Legacy emit kept for any tauri:// page that may later
+                    // listen (e.g. an updated boot shim). No-op for the
+                    // external-origin React UI.
                     let _ = handle.emit("catchem:nav", r);
                     return;
                 }
                 match id {
-                    "file_open" => { let _ = app_handle.emit("catchem:file-open", ()); }
-                    "file_new_paste" => { let _ = app_handle.emit("catchem:nav", "/replay"); }
+                    "file_open" => {
+                        let _ = app_handle.emit("catchem:file-open", ());
+                    }
                     "sidecar_restart" => {
                         let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
                         let cfg = state.sidecar_config.read().unwrap().clone();
@@ -182,12 +212,6 @@ pub fn run() {
                     "sidecar_stop" => {
                         let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
                         let _ = state.sidecar.stop();
-                    }
-                    "sidecar_health" => {
-                        let _ = app_handle.emit("catchem:nav", "/model-controls");
-                    }
-                    "help_logs" => {
-                        let _ = app_handle.emit("catchem:nav", "/model-controls");
                     }
                     _ => {}
                 }

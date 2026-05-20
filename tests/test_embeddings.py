@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from fusion_stack.embeddings import EmbedderStub, VectorIndex, cosine
+from catchem.embeddings import EmbedderStub, VectorIndex, cosine
 
 
 def test_stub_vector_is_normalized_and_stable() -> None:

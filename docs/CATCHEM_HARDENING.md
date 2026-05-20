@@ -49,8 +49,8 @@ guard and leave `final_best.pt`, `awareness/`, and `merged_news/` untouched.
    `Catchem.app/Contents/MacOS/` — Gatekeeper read-only space.
    - `paths::app_data_dir()` returns `~/Library/Application Support/Catchem/`
    - `SidecarConfig.release_mode` (defaulted via `#[serde(default)]`)
-     drives env-var injection: `FUSION_PATHS__FUSION_OUTPUT_DIR` and
-     `FUSION_PATHS__AWARENESS_DATA_DIR` both land under AppSupport
+     drives env-var injection: `CATCHEM_PATHS__CATCHEM_OUTPUT_DIR` and
+     `CATCHEM_PATHS__AWARENESS_DATA_DIR` both land under AppSupport
      when the flag is set.
    - cwd in release falls back to `app_data_dir()`, not `current_dir()`.
 

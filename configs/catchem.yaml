@@ -1,4 +1,4 @@
-# fusion_stack main configuration. Env vars (prefix FUSION_) and .env override these.
+# catchem main configuration. Env vars (prefix CATCHEM_) and .env override these.
 # The settings module merges this file last so YAML is the lowest-priority layer.
 
 mode: production_safe                # production_safe | replay_existing | live_tail | research_diagnostic
@@ -6,16 +6,16 @@ mode: production_safe                # production_safe | replay_existing | live_
 # Paths intentionally left to defaults so CI / containers / fresh clones
 # resolve to portable, writable locations. Override via env on the dev box:
 #
-#   FUSION_PATHS__AWARENESS_REPO=/Users/.../awareness
-#   FUSION_PATHS__NEWSIMPACT_REPO=/Users/.../merged_news
-#   FUSION_PATHS__AWARENESS_DATA_DIR=/Users/.../awareness/data
-#   FUSION_PATHS__FUSION_OUTPUT_DIR=/Users/.../fusion_stack/data
+#   CATCHEM_PATHS__AWARENESS_REPO=/Users/.../awareness
+#   CATCHEM_PATHS__NEWSIMPACT_REPO=/Users/.../merged_news
+#   CATCHEM_PATHS__AWARENESS_DATA_DIR=/Users/.../awareness/data
+#   CATCHEM_PATHS__CATCHEM_OUTPUT_DIR=/Users/.../catchem/data
 #
 # Pydantic defaults:
 #   awareness_repo       /tmp/awareness-missing            (lookup-only; safe if absent)
 #   newsimpact_repo      /tmp/merged_news-missing          (lookup-only; safe if absent)
 #   awareness_data_dir   /tmp/awareness-missing/data       (returns 0 captures if absent)
-#   fusion_output_dir    <project_root>/data               (the one the API mkdirs at startup)
+#   catchem_output_dir    <project_root>/data               (the one the API mkdirs at startup)
 paths: {}
 
 models:
@@ -53,7 +53,7 @@ api:
   recent_limit_max: 500
 
 storage:
-  sqlite_url: "sqlite:///data/db/fusion.sqlite3"
+  sqlite_url: "sqlite:///data/db/catchem.sqlite3"
   parquet_results_dir: "data/results"
   dlq_dir: "data/results/dlq"
   vector_index_dir: "data/vector_index"
@@ -62,7 +62,7 @@ storage:
 logging:
   level: INFO
   json: true
-  file: "data/logs/fusion_stack.log"
+  file: "data/logs/catchem.log"
 
 thresholds:
   finance_relevance_floor: 0.35

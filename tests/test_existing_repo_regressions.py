@@ -37,10 +37,10 @@ def test_awareness_jsonl_writer_signature_unmodified() -> None:
 
 
 @pytest.mark.regression
-def test_newsimpact_final_best_pt_not_modified_by_fusion_run(tmp_path: Path) -> None:
-    """fusion_stack must never write to final_best.pt.
+def test_newsimpact_final_best_pt_not_modified_by_catchem_run(tmp_path: Path) -> None:
+    """catchem must never write to final_best.pt.
 
-    We capture a sha256 of the file (if present), run a fusion replay, and re-check.
+    We capture a sha256 of the file (if present), run a catchem replay, and re-check.
     """
     # Locate any final_best.pt under merged_news (none expected on this machine,
     # but fail-loudly if one appears.)
@@ -52,8 +52,8 @@ def test_newsimpact_final_best_pt_not_modified_by_fusion_run(tmp_path: Path) -> 
     baselines = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in candidates}
 
     # Run a tiny replay through the supervisor
-    from fusion_stack.settings import load_settings, reload_settings
-    from fusion_stack.supervisor import Supervisor
+    from catchem.settings import load_settings, reload_settings
+    from catchem.supervisor import Supervisor
 
     reload_settings()
     sup = Supervisor(load_settings())
@@ -67,12 +67,12 @@ def test_newsimpact_final_best_pt_not_modified_by_fusion_run(tmp_path: Path) -> 
 
 
 @pytest.mark.regression
-def test_no_fusion_call_into_v7_runner_training_path() -> None:
-    """Imports of training/runner modules from fusion_stack should be impossible.
+def test_no_catchem_call_into_v7_runner_training_path() -> None:
+    """Imports of training/runner modules from catchem should be impossible.
 
-    Inspect every fusion_stack module's source for imports of merged_news training files.
+    Inspect every catchem module's source for imports of merged_news training files.
     """
-    src = Path(__file__).resolve().parents[1] / "src" / "fusion_stack"
+    src = Path(__file__).resolve().parents[1] / "src" / "catchem"
     forbidden = ("v7_runner", "v6_runner", "v5_runner", "pipeline_v7", "v4_runner", "v3_runner")
     for py in src.rglob("*.py"):
         text = py.read_text(encoding="utf-8")

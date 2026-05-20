@@ -6,8 +6,8 @@
 #   KAGGLE_KEY
 
 set -euo pipefail
-FUSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="$FUSION_ROOT/data/kaggle"
+CATCHEM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="$CATCHEM_ROOT/data/kaggle"
 mkdir -p "$TARGET"
 
 if [ -z "${KAGGLE_USERNAME:-}" ] || [ -z "${KAGGLE_KEY:-}" ]; then

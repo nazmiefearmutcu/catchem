@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fusion_stack.entity_linker import EntityLinker
-from fusion_stack.evidence import clean_boilerplate_text
+from catchem.entity_linker import EntityLinker
+from catchem.evidence import clean_boilerplate_text
 
 
 def test_cashtag_detected() -> None:

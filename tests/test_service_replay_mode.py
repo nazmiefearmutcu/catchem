@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.settings import load_settings
-from fusion_stack.supervisor import Supervisor
+from catchem.schemas import AwarenessCaptureView
+from catchem.settings import load_settings
+from catchem.supervisor import Supervisor
 
 
 @pytest.mark.integration
@@ -27,9 +27,9 @@ def test_replay_produces_records(tmp_path: Path, write_jsonl, synth_capture, mon
     # write_jsonl puts the file at tmp_path/jsonl/captures/2026/05/16/captures.jsonl
     write_jsonl(rows)
     # Awareness data dir is tmp_path; discover_awareness_jsonl_root walks tmp_path/jsonl.
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
 
-    from fusion_stack.settings import reload_settings
+    from catchem.settings import reload_settings
     reload_settings()
     s = load_settings()
     sup = Supervisor(s)
@@ -61,8 +61,8 @@ def test_replay_produces_records(tmp_path: Path, write_jsonl, synth_capture, mon
 def test_replay_idempotent(tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch) -> None:
     cap = synth_capture()
     write_jsonl([json.loads(cap.model_dump_json())])
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
-    from fusion_stack.settings import reload_settings
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    from catchem.settings import reload_settings
     reload_settings()
     sup = Supervisor(load_settings())
     try:

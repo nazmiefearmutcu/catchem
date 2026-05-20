@@ -17,8 +17,8 @@ from typing import Any, Callable
 
 import pytest
 
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.settings import FusionMode, Settings, load_settings, reload_settings
+from catchem.schemas import AwarenessCaptureView
+from catchem.settings import CatchemMode, Settings, load_settings, reload_settings
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -35,26 +35,26 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     the cached Settings instance is rebuilt. The autouse fixture handles the
     initial setup but not subsequent monkeypatches inside the test body.
 
-    CI escape hatch: when the caller has pre-set ``FUSION_PATHS__NEWSIMPACT_REPO``
-    or ``FUSION_PATHS__AWARENESS_REPO`` in the process env (typical for GitHub
+    CI escape hatch: when the caller has pre-set ``CATCHEM_PATHS__NEWSIMPACT_REPO``
+    or ``CATCHEM_PATHS__AWARENESS_REPO`` in the process env (typical for GitHub
     Actions, which synthesizes a quarantined governance fixture under /tmp),
     we honor that path instead of pointing at the developer's local repos.
     Captured BEFORE the env wipe so the override survives the cleanup.
     """
-    ci_newsimpact = os.environ.get("FUSION_PATHS__NEWSIMPACT_REPO")
-    ci_awareness = os.environ.get("FUSION_PATHS__AWARENESS_REPO")
+    ci_newsimpact = os.environ.get("CATCHEM_PATHS__NEWSIMPACT_REPO")
+    ci_awareness = os.environ.get("CATCHEM_PATHS__AWARENESS_REPO")
 
     for k in list(os.environ.keys()):
-        if k.startswith("FUSION_"):
+        if k.startswith("CATCHEM_"):
             monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_REPO", ci_awareness or str(AWARENESS_DEFAULT))
-    monkeypatch.setenv("FUSION_PATHS__NEWSIMPACT_REPO", ci_newsimpact or str(NEWSIMPACT_DEFAULT))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_REPO", ci_awareness or str(AWARENESS_DEFAULT))
+    monkeypatch.setenv("CATCHEM_PATHS__NEWSIMPACT_REPO", ci_newsimpact or str(NEWSIMPACT_DEFAULT))
     # Point at an empty awareness dir by default so replay tests don't accidentally
     # sweep the entire real repo. Tests that exercise the real repo override this.
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path / "aw"))
-    monkeypatch.setenv("FUSION_MODELS__USE_ML_STUBS", "true")
-    monkeypatch.setenv("FUSION_LOGGING__LEVEL", "WARNING")
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path / "aw"))
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "true")
+    monkeypatch.setenv("CATCHEM_LOGGING__LEVEL", "WARNING")
     reload_settings()
 
 

@@ -6,7 +6,7 @@
   <!-- Top bar -->
   <rect x="0" y="0" width="1280" height="56" fill="#161a22"/>
   <line x1="0" y1="56" x2="1280" y2="56" stroke="rgba(255,255,255,0.06)"/>
-  <text x="24" y="35" fill="#e7ebf0" font-size="14" font-weight="700">fusion_stack</text>
+  <text x="24" y="35" fill="#e7ebf0" font-size="14" font-weight="700">catchem</text>
   <text x="124" y="35" fill="#9aa3b2" font-size="10">analyst workstation</text>
   <g font-size="11">
     <text x="220" y="35" fill="#9aa3b2">Overview</text>
@@ -150,9 +150,9 @@
   <g font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9.5" fill="#9aa3b2">
     <text x="684" y="376">12:47:18 INFO  catchem boot: python=Library/.../python cwd=Application Support/Catchem release=true</text>
     <text x="684" y="392">12:47:19 INFO  sidecar spawned pid=4127 log=~/Library/Logs/Catchem/sidecar.log</text>
-    <text x="684" y="408">12:47:21 INFO  storage_initialized db=~/Library/Application Support/Catchem/data/db/fusion.sqlite</text>
+    <text x="684" y="408">12:47:21 INFO  storage_initialized db=~/Library/Application Support/Catchem/data/db/catchem.sqlite</text>
     <text x="684" y="424">12:47:22 INFO  news_poller_started feeds=49 interval=10s</text>
-    <text x="684" y="440">12:47:22 INFO  fusion service ready · mode=production_safe · stubs=true</text>
+    <text x="684" y="440">12:47:22 INFO  catchem service ready · mode=production_safe · stubs=true</text>
     <text x="684" y="456">12:47:23 INFO  sidecar healthy in 487ms</text>
     <text x="684" y="472" fill="#e7ebf0">12:47:30 INFO  news_poll_ingested count=3 fresh_count=3 avg_pub_lag=614s median_pub_lag=601s</text>
     <text x="684" y="488">12:47:40 INFO  news_poll_ingested count=2 fresh_count=2 avg_pub_lag=720s</text>
@@ -180,7 +180,7 @@
     <text x="40" y="716" fill="#9aa3b2">app_data_dir</text>
     <text x="180" y="716" fill="#e7ebf0">~/Library/Application Support/Catchem/</text>
 
-    <text x="40" y="738" fill="#9aa3b2">fusion_output_dir</text>
+    <text x="40" y="738" fill="#9aa3b2">catchem_output_dir</text>
     <text x="180" y="738" fill="#e7ebf0">~/Library/Application Support/Catchem/data/</text>
 
     <text x="40" y="760" fill="#9aa3b2">awareness_data_dir</text>

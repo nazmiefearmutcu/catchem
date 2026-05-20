@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.api import create_app
+from catchem.settings import load_settings, reload_settings
 
 
 FED_ARTICLE = (
@@ -27,8 +27,8 @@ FED_ARTICLE = (
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
     reload_settings()
     app = create_app(load_settings())
     c = TestClient(app)

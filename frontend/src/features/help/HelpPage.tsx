@@ -21,7 +21,7 @@ export function HelpPage() {
       <header>
         <h1 className="text-lg font-bold">Help</h1>
         <p className="text-xs text-[color:var(--fg-dim)] mt-1">
-          Catchem is a local-first desktop wrapper around the fusion_stack pipeline.
+          Catchem is a local-first desktop wrapper around the catchem pipeline.
           Everything runs on this machine — no cloud services are contacted.
         </p>
       </header>
@@ -29,7 +29,7 @@ export function HelpPage() {
       <section className="card">
         <h2 className="label mb-2">version</h2>
         <ul className="grid sm:grid-cols-2 gap-y-1 text-xs">
-          <li><span className="text-[color:var(--fg-dim)]">app</span> <span className="font-mono">{info.data?.name ?? "fusion_stack"}</span></li>
+          <li><span className="text-[color:var(--fg-dim)]">app</span> <span className="font-mono">{info.data?.name ?? "catchem"}</span></li>
           <li><span className="text-[color:var(--fg-dim)]">version</span> <span className="font-mono">{info.data?.version ?? "—"}</span></li>
           <li><span className="text-[color:var(--fg-dim)]">branch</span> <span className="font-mono">{info.data?.branch ?? "—"}</span></li>
           <li><span className="text-[color:var(--fg-dim)]">commit</span> <span className="font-mono">{info.data?.commit_sha ?? "—"}</span></li>
@@ -90,8 +90,8 @@ export function HelpPage() {
           <div className="mt-2 text-[color:var(--fg-dim)] pl-3 grid gap-1">
             <p>In a terminal:</p>
             <pre className="bg-[color:var(--bg-elev2)] rounded p-2 text-[10px] font-mono overflow-x-auto">
-{`pkill -f 'fusion_stack.cli serve' 2>/dev/null
-bash scripts/fusion_bootstrap_and_run.sh --skip-frontend-build`}
+{`pkill -f 'catchem.cli serve' 2>/dev/null
+bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
             </pre>
           </div>
         </details>
@@ -107,7 +107,7 @@ bash scripts/fusion_bootstrap_and_run.sh --skip-frontend-build`}
           <summary className="cursor-pointer font-semibold">Want real Hugging Face models</summary>
           <div className="mt-2 text-[color:var(--fg-dim)] pl-3 grid gap-1">
             <pre className="bg-[color:var(--bg-elev2)] rounded p-2 text-[10px] font-mono overflow-x-auto">
-{`bash scripts/fusion_bootstrap_and_run.sh --with-ml`}
+{`bash scripts/catchem_bootstrap_and_run.sh --with-ml`}
             </pre>
             <p>See <code className="font-mono">docs/ML_FALLBACK.md</code> for the stub→HF mapping and why <code className="font-mono">--with-ml</code> may degrade gracefully to stubs.</p>
           </div>

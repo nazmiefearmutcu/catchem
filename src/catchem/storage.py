@@ -27,7 +27,7 @@ import pyarrow.parquet as pq
 from .logging import get_logger
 from .schemas import FinancialImpactRecord, ReplayOffset
 
-logger = get_logger("fusion.storage")
+logger = get_logger("catchem.storage")
 
 
 SCHEMA_VERSION = 1
@@ -400,7 +400,7 @@ def _row_to_payload(r: dict[str, Any]) -> dict[str, Any]:
 
 def load_storage_from_settings(settings: "Any") -> Storage:
     """Helper: build a Storage from a Settings object."""
-    out_dir = settings.paths.fusion_output_dir
+    out_dir = settings.paths.catchem_output_dir
     return Storage(
         db_path=settings.sqlite_path(),
         parquet_dir=out_dir / Path(settings.storage.parquet_results_dir).relative_to("data"),

@@ -43,8 +43,8 @@ frontend/node_modules/
 .env.local
 
 # Generated bundle (built into src for runtime serving)
-src/fusion_stack/static/app/
-!src/fusion_stack/static/app/.gitkeep
+src/catchem/static/app/
+!src/catchem/static/app/.gitkeep
 .claude/
 
 # Catchem build artifacts

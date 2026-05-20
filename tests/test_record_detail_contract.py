@@ -9,15 +9,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.api import create_app
+from catchem.settings import load_settings, reload_settings
 
 
 @pytest.fixture
 def populated_client(tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     cap = synth_capture(capture_id="d-fed", doc_id="d-fed-doc")
     write_jsonl([json.loads(cap.model_dump_json())])
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
     reload_settings()
     app = create_app(load_settings())
     client = TestClient(app)

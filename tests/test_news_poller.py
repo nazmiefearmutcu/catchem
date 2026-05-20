@@ -1,7 +1,7 @@
 """Tests for the background RSS/Atom poller.
 
 We don't make real network calls in CI — the poller is gated by
-FUSION_NEWS__POLLER_ENABLED=false in the test env. These tests pin the
+CATCHEM_NEWS__POLLER_ENABLED=false in the test env. These tests pin the
 pure-function helpers: feed parsing and the small dedup cache.
 """
 
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from fusion_stack.news_poller import (
+from catchem.news_poller import (
     DEFAULT_FEEDS,
     FeedFetchResult,
     FeedSpec,
@@ -217,7 +217,7 @@ def test_news_poller_floors_interval_to_10s() -> None:
     class _StubSettings:
         class paths:
             from pathlib import Path
-            fusion_output_dir = Path("/tmp")
+            catchem_output_dir = Path("/tmp")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
         settings=_StubSettings(),  # type: ignore[arg-type]
@@ -232,7 +232,7 @@ def test_news_poller_status_fields_start_zeroed() -> None:
     class _StubSettings:
         class paths:
             from pathlib import Path
-            fusion_output_dir = Path("/tmp")
+            catchem_output_dir = Path("/tmp")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
         settings=_StubSettings(),  # type: ignore[arg-type]
@@ -255,7 +255,7 @@ def test_news_poller_records_per_feed_health() -> None:
     class _StubSettings:
         class paths:
             from pathlib import Path
-            fusion_output_dir = Path("/tmp")
+            catchem_output_dir = Path("/tmp")
     spec = FeedSpec("sample-feed", "https://example.com/rss", "example.com")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]

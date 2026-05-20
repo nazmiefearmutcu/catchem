@@ -43,8 +43,14 @@ pub fn run() {
         .setup(|app| {
             // Resolve sidecar python: dev = repo .venv, release = bundled
             // PyInstaller binary under the .app's Resources/sidecar/.
+            //
+            // The dev / release split also drives the cwd choice. Dev builds
+            // run from the repo so the analyst can `git diff` outputs.
+            // Release builds MUST write to ~/Library/Application Support/
+            // because the .app bundle is read-only (Gatekeeper + codesign).
+            let dev_root = paths::dev_repo_root();
+            let release_mode = dev_root.is_none();
             let python_path: PathBuf = paths::dev_python().unwrap_or_else(|| {
-                // Release fallback: look beside the executable for sidecar/
                 let resource = app
                     .path()
                     .resource_dir()
@@ -52,21 +58,22 @@ pub fn run() {
                     .to_path_buf();
                 paths::bundled_sidecar(&resource).unwrap_or_else(|| PathBuf::from("python3"))
             });
-            let cwd: PathBuf =
-                paths::dev_repo_root().unwrap_or_else(|| std::env::current_dir().unwrap());
+            let cwd: PathBuf = dev_root.unwrap_or_else(paths::app_data_dir);
 
             let cfg = SidecarConfig {
                 python: python_path.clone(),
                 cwd: cwd.clone(),
                 host: DEFAULT_HOST.to_string(),
                 port: DEFAULT_PORT,
+                release_mode,
             };
 
             log::info!(
-                "catchem boot: python={} cwd={} endpoint={}",
+                "catchem boot: python={} cwd={} endpoint={} release={}",
                 python_path.display(),
                 cwd.display(),
-                cfg.endpoint()
+                cfg.endpoint(),
+                release_mode
             );
 
             let state = AppState::new(cfg.clone());

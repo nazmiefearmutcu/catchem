@@ -24,6 +24,12 @@ pub struct SidecarConfig {
     /// API host + port the server listens on.
     pub host: String,
     pub port: u16,
+    /// `true` for the bundled .app build — sidecar must write all output
+    /// under `~/Library/Application Support/Catchem/`, NOT relative to
+    /// the (read-only, codesigned) bundle. Dev builds keep the repo-local
+    /// `data/` layout so analysts can `git diff` outputs.
+    #[serde(default)]
+    pub release_mode: bool,
 }
 
 impl SidecarConfig {
@@ -67,6 +73,20 @@ impl SidecarState {
         cmd.env("FUSION_USE_ML_STUBS", "true");
         // Force unbuffered Python output so errors surface immediately.
         cmd.env("PYTHONUNBUFFERED", "1");
+        // Release-only: pin the writable data root to Application Support.
+        // Dev builds intentionally inherit the repo-local `data/` layout
+        // so analysts can `git diff` outputs.
+        if cfg.release_mode {
+            let out_dir = paths::release_fusion_output_dir();
+            let aw_dir = paths::release_awareness_data_dir();
+            cmd.env("FUSION_PATHS__FUSION_OUTPUT_DIR", &out_dir);
+            cmd.env("FUSION_PATHS__AWARENESS_DATA_DIR", &aw_dir);
+            log::info!(
+                "sidecar release-mode paths: out={} awareness_data={}",
+                out_dir.display(),
+                aw_dir.display()
+            );
+        }
 
         // Redirect stdout+stderr to a log file we can tail. Piped+undrained
         // streams will deadlock the child once the pipe buffer fills, which

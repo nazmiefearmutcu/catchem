@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS records (
     capture_id TEXT PRIMARY KEY,
     doc_id TEXT NOT NULL,
     title TEXT,
+    text_excerpt TEXT NOT NULL DEFAULT '',
     domain TEXT,
     language TEXT,
     is_finance_relevant INTEGER NOT NULL,
@@ -133,10 +134,25 @@ class Storage:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.executescript(_SCHEMA_SQL)
+            self._migrate_records_table(conn)
         logger.info("storage_initialized", db=str(self.db_path), parquet=str(self.parquet_dir))
+
+    def _migrate_records_table(self, conn: sqlite3.Connection) -> None:
+        columns = {str(r["name"]) for r in conn.execute("PRAGMA table_info(records)").fetchall()}
+        if "text_excerpt" not in columns:
+            conn.execute("ALTER TABLE records ADD COLUMN text_excerpt TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def cursor(self) -> Iterator[sqlite3.Cursor]:
@@ -149,11 +165,11 @@ class Storage:
 
     # ── record write ---------------------------------------------------------
     def insert_record(self, rec: FinancialImpactRecord) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO records (
-                    capture_id, doc_id, title, domain, language,
+                    capture_id, doc_id, title, text_excerpt, domain, language,
                     is_finance_relevant, finance_relevance_score,
                     asset_classes_json, impact_reason_codes_json,
                     candidate_symbols_json, candidate_entities_json,
@@ -163,12 +179,13 @@ class Storage:
                     diagnostic_enabled, diagnostic_json,
                     processing_mode, model_versions_json,
                     published_ts, created_at, url
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     rec.capture_id,
                     rec.doc_id,
                     rec.title,
+                    rec.text_excerpt,
                     rec.domain,
                     rec.language,
                     int(rec.is_finance_relevant),
@@ -244,16 +261,16 @@ class Storage:
             sql += " WHERE is_finance_relevant = 1"
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(int(limit))
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             return [_row_to_payload(dict(r)) for r in conn.execute(sql, params)]
 
     def get_record(self, capture_id: str) -> dict[str, Any] | None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             r = conn.execute("SELECT * FROM records WHERE capture_id = ?", (capture_id,)).fetchone()
             return _row_to_payload(dict(r)) if r else None
 
     def by_label(self, kind: str, value: str, limit: int = 50) -> list[dict[str, Any]]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             rows = conn.execute(
                 """SELECT records.* FROM records
                      JOIN record_labels ON records.capture_id = record_labels.capture_id
@@ -265,14 +282,14 @@ class Storage:
             return [_row_to_payload(dict(r)) for r in rows]
 
     def count_records(self) -> dict[str, int]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             total = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
             relevant = conn.execute("SELECT COUNT(*) FROM records WHERE is_finance_relevant = 1").fetchone()[0]
             return {"total": int(total), "finance_relevant": int(relevant)}
 
     # ── offsets --------------------------------------------------------------
     def get_offset(self, source_path: str) -> ReplayOffset:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             r = conn.execute("SELECT * FROM offsets WHERE source_path=?", (source_path,)).fetchone()
             if r is None:
                 return ReplayOffset(source_path=source_path)
@@ -284,7 +301,7 @@ class Storage:
             )
 
     def save_offset(self, offset: ReplayOffset) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO offsets
                    (source_path, line_offset, last_capture_id, updated_at)
@@ -299,7 +316,7 @@ class Storage:
 
     # ── DLQ ------------------------------------------------------------------
     def record_failure(self, capture_id: str | None, error: str, payload_excerpt: str) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """INSERT INTO dlq (capture_id, error, payload_excerpt, created_at)
                    VALUES (?,?,?,?)""",
@@ -307,7 +324,7 @@ class Storage:
             )
 
     def dlq_count(self) -> int:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM dlq").fetchone()[0])
 
     # ── housekeeping ---------------------------------------------------------
@@ -326,6 +343,7 @@ def _record_to_row(rec: FinancialImpactRecord) -> dict[str, Any]:
         "capture_id": rec.capture_id,
         "doc_id": rec.doc_id,
         "title": rec.title,
+        "text_excerpt": rec.text_excerpt,
         "domain": rec.domain,
         "language": rec.language,
         "is_finance_relevant": rec.is_finance_relevant,
@@ -355,6 +373,7 @@ def _row_to_payload(r: dict[str, Any]) -> dict[str, Any]:
         "capture_id": r["capture_id"],
         "doc_id": r["doc_id"],
         "title": r["title"],
+        "text_excerpt": r.get("text_excerpt") or "",
         "domain": r["domain"],
         "language": r["language"],
         "url": r["url"],

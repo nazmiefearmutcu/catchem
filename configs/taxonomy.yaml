@@ -12,7 +12,7 @@ asset_classes:
     aliases: ["forex", "foreign exchange", "currency", "EUR/USD", "JPY"]
     hypothesis: "This text is about foreign exchange or currency markets."
   - id: rates
-    aliases: ["interest rates", "yields", "Treasuries", "bonds", "Bunds", "Gilts"]
+    aliases: ["interest rates", "yields", "Treasuries", "bonds", "Bunds", "Gilts", "Federal Reserve", "FOMC", "Federal Open Market Committee", "monetary policy", "central bank"]
     hypothesis: "This text is about interest rates or government bond markets."
   - id: credit
     aliases: ["credit spreads", "corporate bonds", "HY", "IG", "CDS"]
@@ -44,7 +44,7 @@ impact_reason_codes:
     aliases: ["lawsuit", "litigation", "court", "ruling", "settlement", "verdict", "judge"]
     hypothesis: "This text is about lawsuits, court rulings, or legal disputes."
   - id: central_bank
-    aliases: ["Fed", "Federal Reserve", "FOMC", "ECB", "BoJ", "BoE", "PBoC", "RBA", "rate hike", "rate cut", "interest rate", "interest rates", "monetary policy", "hawkish", "dovish", "Powell", "Lagarde", "Bailey"]
+    aliases: ["Fed", "Federal Reserve", "FOMC", "Federal Open Market Committee", "ECB", "BoJ", "BoE", "PBoC", "RBA", "rate hike", "rate cut", "interest rate", "interest rates", "monetary policy", "hawkish", "dovish", "Powell", "Lagarde", "Bailey"]
     hypothesis: "This text is about a central bank decision, rate move, or monetary policy."
   - id: inflation
     aliases: ["inflation", "CPI", "PPI", "deflation", "disinflation", "core CPI", "sticky inflation"]

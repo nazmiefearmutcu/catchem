@@ -79,6 +79,7 @@ class FinancialImpactDetail(_CompactBase):
     capture_id: str
     doc_id: str
     title: str | None = None
+    text_excerpt: str = ""
     domain: str | None = None
     language: str | None = None
     url: str | None = None

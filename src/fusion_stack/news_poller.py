@@ -28,6 +28,7 @@ import contextlib
 import html
 import logging
 import re
+import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -185,6 +186,22 @@ class ParsedItem:
     published_ts: datetime
 
 
+@dataclass(frozen=True)
+class FeedFetchResult:
+    """Fetch outcome for one feed, used for per-source health diagnostics."""
+
+    spec: FeedSpec
+    items: tuple[ParsedItem, ...] = ()
+    status_code: int | None = None
+    error: str | None = None
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    elapsed_ms: float | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.status_code == 200
+
+
 def _strip_html(html_text: str) -> str:
     """Cheap HTML → plain-text. Good enough for RSS descriptions."""
     if not html_text:
@@ -203,6 +220,16 @@ def _resolve_domain(url: str, fallback: str) -> str:
         return host[4:] if host.startswith("www.") else (host or fallback)
     except Exception:
         return fallback
+
+
+def _strip_source_suffix(title: str, source_name: str | None) -> str:
+    source = (source_name or "").strip()
+    if not title or not source:
+        return title
+    suffix = f" - {source}"
+    if title.endswith(suffix):
+        return title[: -len(suffix)].rstrip()
+    return title
 
 
 def _parse_ts(value: str | None) -> datetime:
@@ -228,6 +255,14 @@ def _parse_ts(value: str | None) -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _is_stale_published_ts(published_ts: datetime, now: datetime, max_age_seconds: float) -> bool:
+    if max_age_seconds <= 0:
+        return False
+    published = published_ts if published_ts.tzinfo is not None else published_ts.replace(tzinfo=timezone.utc)
+    current = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    return (current.astimezone(timezone.utc) - published.astimezone(timezone.utc)).total_seconds() > max_age_seconds
+
+
 def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
     """Parse an RSS 2.0 or Atom feed body into a list of ParsedItem.
 
@@ -250,8 +285,12 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
         content_enc = item.find("content:encoded", _NS)
         if content_enc is not None and content_enc.text:
             desc = content_enc.text
+        source_el = item.find("source")
+        source_name = (source_el.text if source_el is not None else "") or ""
+        source_url = (source_el.attrib.get("url") if source_el is not None else "") or ""
         pub = item.findtext("pubDate") or item.findtext("dc:date", default=None, namespaces=_NS)
         text = _strip_html(desc) or title
+        title = _strip_source_suffix(title, source_name)
         # Title-less feeds (Mastodon micro-posts, etc.): synthesize a short
         # title from the first sentence/clause of the body so the row is
         # still readable in the Live Feed.
@@ -259,11 +298,15 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
             title = text[:120].rstrip()
         if not title or not link or not text:
             continue
+        domain = _resolve_domain(link, fallback_domain)
+        source_domain = _resolve_domain(source_url, "") if source_url else ""
+        if domain == "news.google.com" and source_domain:
+            domain = source_domain
         items.append(ParsedItem(
             title=title,
             text=text,
             url=link,
-            domain=_resolve_domain(link, fallback_domain),
+            domain=domain,
             published_ts=_parse_ts(pub),
         ))
 
@@ -293,8 +336,9 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
     return items
 
 
-async def fetch_feed(client: httpx.AsyncClient, spec: FeedSpec) -> list[ParsedItem]:
-    """Fetch + parse one feed. Returns [] on any error so callers can keep going."""
+async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFetchResult:
+    """Fetch + parse one feed and return a structured health result."""
+    started = time.perf_counter()
     try:
         resp = await client.get(
             spec.url,
@@ -302,16 +346,41 @@ async def fetch_feed(client: httpx.AsyncClient, spec: FeedSpec) -> list[ParsedIt
             timeout=12.0,
             follow_redirects=True,
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
         if resp.status_code != 200:
             logger.info("rss_non200 feed=%s status=%d", spec.name, resp.status_code)
-            return []
-        return parse_feed(resp.content, fallback_domain=spec.fallback_domain)
+            return FeedFetchResult(
+                spec=spec,
+                status_code=resp.status_code,
+                error=f"http_{resp.status_code}",
+                elapsed_ms=elapsed_ms,
+            )
+        return FeedFetchResult(
+            spec=spec,
+            items=tuple(parse_feed(resp.content, fallback_domain=spec.fallback_domain)),
+            status_code=resp.status_code,
+            elapsed_ms=elapsed_ms,
+        )
     except httpx.HTTPError as exc:
         logger.info("rss_fetch_error feed=%s error=%s", spec.name, exc)
-        return []
+        return FeedFetchResult(
+            spec=spec,
+            error=exc.__class__.__name__,
+            elapsed_ms=(time.perf_counter() - started) * 1000.0,
+        )
     except Exception as exc:  # belt and suspenders — never let one feed kill the poller
         logger.warning("rss_unexpected feed=%s error=%s", spec.name, exc, exc_info=False)
-        return []
+        return FeedFetchResult(
+            spec=spec,
+            error=exc.__class__.__name__,
+            elapsed_ms=(time.perf_counter() - started) * 1000.0,
+        )
+
+
+async def fetch_feed(client: httpx.AsyncClient, spec: FeedSpec) -> list[ParsedItem]:
+    """Fetch + parse one feed. Returns [] on any error so callers can keep going."""
+    result = await fetch_feed_result(client, spec)
+    return list(result.items)
 
 
 class NewsPoller:
@@ -325,12 +394,14 @@ class NewsPoller:
         feeds: Iterable[FeedSpec] | None = None,
         interval_seconds: float = 10.0,
         startup_grace_seconds: float = 3.0,
+        max_item_age_seconds: float = 14 * 24 * 3600,
     ) -> None:
         self._sup = supervisor
         self._settings = settings
         self._feeds: tuple[FeedSpec, ...] = tuple(feeds) if feeds is not None else DEFAULT_FEEDS
         self._interval = max(10.0, float(interval_seconds))  # floor to keep us friendly
         self._grace = max(0.0, float(startup_grace_seconds))
+        self._max_item_age_seconds = max(0.0, float(max_item_age_seconds))
         self._seen = _SeenCache()
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
@@ -358,6 +429,8 @@ class NewsPoller:
         # our pipeline (which adds ~4ms in stub mode, ~100ms with real ML).
         self.last_avg_publisher_lag_seconds: float | None = None
         self.last_median_publisher_lag_seconds: float | None = None
+        self.feed_health: dict[str, dict[str, object]] = {}
+        self.last_stale_skipped: int = 0
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -485,20 +558,28 @@ class NewsPoller:
         from .demo import _deterministic_capture_id
 
         # Phase 1: parallel fetch.
-        results = await asyncio.gather(*[fetch_feed(client, s) for s in self._feeds])
+        results = await asyncio.gather(*[fetch_feed_result(client, s) for s in self._feeds])
+        for result in results:
+            self._record_feed_result(result)
 
         # Filter to genuinely-new items (URL not seen + capture_id not in
         # storage). This happens on the event loop — both checks are cheap.
         new_items: list[tuple[FeedSpec, ParsedItem]] = []
-        for spec, items in zip(self._feeds, results):
-            for item in items:
+        stale_skipped = 0
+        now = datetime.now(timezone.utc)
+        for result in results:
+            for item in result.items:
+                if _is_stale_published_ts(item.published_ts, now, self._max_item_age_seconds):
+                    stale_skipped += 1
+                    continue
                 if item.url in self._seen:
                     continue
                 self._seen.add(item.url)
                 cap_id = _deterministic_capture_id(item.text, item.url)
                 if self._sup.storage.get_record(cap_id) is not None:
                     continue
-                new_items.append((spec, item))
+                new_items.append((result.spec, item))
+        self.last_stale_skipped = stale_skipped
 
         if not new_items:
             return 0
@@ -591,12 +672,42 @@ class NewsPoller:
         # deterministic so insert_record is upsert-safe (PRIMARY KEY).
         self._sup.process_capture(cap)
 
+    def _record_feed_result(self, result: FeedFetchResult) -> None:
+        prev = self.feed_health.get(result.spec.name, {})
+        ok = result.ok
+        total_fetches = int(prev.get("total_fetches", 0)) + 1
+        total_errors = int(prev.get("total_errors", 0)) + (0 if ok else 1)
+        consecutive_errors = 0 if ok else int(prev.get("consecutive_errors", 0)) + 1
+        snapshot: dict[str, object] = {
+            "name": result.spec.name,
+            "url": result.spec.url,
+            "fallback_domain": result.spec.fallback_domain,
+            "ok": ok,
+            "status_code": result.status_code,
+            "error": result.error,
+            "item_count": len(result.items),
+            "last_fetch_at": result.fetched_at.isoformat(),
+            "elapsed_ms": result.elapsed_ms,
+            "total_fetches": total_fetches,
+            "total_errors": total_errors,
+            "consecutive_errors": consecutive_errors,
+            "last_success_at": result.fetched_at.isoformat() if ok else prev.get("last_success_at"),
+            "last_failure_at": result.fetched_at.isoformat() if not ok else prev.get("last_failure_at"),
+        }
+        self.feed_health[result.spec.name] = snapshot
+
+    def feed_health_snapshot(self) -> list[dict[str, object]]:
+        return [dict(v) for _, v in sorted(self.feed_health.items())]
+
 
 __all__ = [
     "FeedSpec",
     "DEFAULT_FEEDS",
     "ParsedItem",
+    "FeedFetchResult",
+    "_is_stale_published_ts",
     "parse_feed",
     "fetch_feed",
+    "fetch_feed_result",
     "NewsPoller",
 ]

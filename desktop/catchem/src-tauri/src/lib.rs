@@ -106,12 +106,38 @@ pub fn run() {
             let webview_url: tauri::Url = format!("{}/", cfg.endpoint())
                 .parse()
                 .expect("valid sidecar url");
+            // Pin host/port for the navigation guard. Same values lib.rs
+            // uses to spawn the sidecar.
+            let nav_host = DEFAULT_HOST.to_string();
+            let nav_port = DEFAULT_PORT;
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(webview_url))
                 .title("Catchem")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(980.0, 640.0)
                 .center()
                 .resizable(true)
+                .on_navigation(move |url| {
+                    let url_str = url.as_str();
+                    match security::classify_navigation(url_str, &nav_host, nav_port) {
+                        security::NavigationDecision::AllowInWebview => true,
+                        security::NavigationDecision::OpenExternal => {
+                            let url_owned = url_str.to_string();
+                            // Spawn a thread so the closure can return
+                            // immediately — system browser launch may take
+                            // ~100ms on cold start.
+                            std::thread::spawn(move || {
+                                if let Err(e) = open::that_detached(&url_owned) {
+                                    log::warn!("open_external failed url={url_owned} err={e}");
+                                }
+                            });
+                            false
+                        }
+                        security::NavigationDecision::Block => {
+                            log::info!("blocked navigation: {url_str}");
+                            false
+                        }
+                    }
+                })
                 .build()?;
 
             // Native menu bar.

@@ -106,18 +106,21 @@ pub fn run() {
                 }
             });
 
-            // Build the main window pointing directly at the FastAPI UI.
-            // This avoids cross-origin navigation issues that occur when the
-            // boot shim tries to `window.location.replace()` from
-            // tauri://localhost to http://127.0.0.1:8087.
-            let webview_url: tauri::Url = format!("{}/", cfg.endpoint())
-                .parse()
-                .expect("valid sidecar url");
-            // Pin host/port for the navigation guard. Same values lib.rs
-            // uses to spawn the sidecar.
+            // Build the main window pointing at the local boot-shim. The
+            // shim shows the 5-stage startup state machine (checking →
+            // spawning → waiting → bundle → ready) and, once /healthz
+            // returns 200, does `window.location.replace(<sidecar>/)` to
+            // hand the window to the React UI. The on_navigation guard
+            // below allows that cross-origin jump because the target is
+            // `is_allowed_internal_url(127.0.0.1:8087)`.
+            //
+            // The block_on(wait_for_health) above is still useful: even if
+            // the boot shim never loads (rare — e.g., bundle missing) the
+            // log records sidecar health, and the FastAPI URL is ready by
+            // the time the shim's first fetch fires.
             let nav_host = DEFAULT_HOST.to_string();
             let nav_port = DEFAULT_PORT;
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(webview_url))
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Catchem")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(980.0, 640.0)

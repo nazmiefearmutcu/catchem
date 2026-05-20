@@ -24,6 +24,13 @@ from .logging import get_logger
 logger = get_logger("fusion.symbol_mapper")
 
 
+_PAREN_TICKER_RE = re.compile(r"\(([A-Z]{1,6}(?:\.[A-Z])?)\)")
+_TICKER_DENYLIST = {
+    "CEO", "CFO", "COO", "CTO", "IPO", "ETF", "ETFS", "GDP", "CPI", "PPI",
+    "SEC", "FTC", "FDA", "FOMC", "ECB", "BOJ", "BOE", "PBOC", "RBA",
+}
+
+
 _INTERNAL_REGISTRY: Mapping[str, str] = {
     # Equity giants
     "Apple": "AAPL", "Microsoft": "MSFT", "Alphabet": "GOOGL", "Google": "GOOGL",
@@ -43,8 +50,13 @@ _INTERNAL_REGISTRY: Mapping[str, str] = {
     "Boeing": "BA", "Lockheed Martin": "LMT", "General Electric": "GE", "Ford": "F",
     "General Motors": "GM", "Toyota": "TM",
     # Crypto
-    "Bitcoin": "BTC-USD", "Ethereum": "ETH-USD", "Solana": "SOL-USD", "Ripple": "XRP-USD",
-    "Cardano": "ADA-USD", "Dogecoin": "DOGE-USD", "Polkadot": "DOT-USD",
+    "Bitcoin": "BTC-USD", "BTC": "BTC-USD",
+    "Ethereum": "ETH-USD", "Ether": "ETH-USD", "ETH": "ETH-USD",
+    "Solana": "SOL-USD", "SOL": "SOL-USD",
+    "Ripple": "XRP-USD", "XRP": "XRP-USD",
+    "Cardano": "ADA-USD", "ADA": "ADA-USD",
+    "Dogecoin": "DOGE-USD", "DOGE": "DOGE-USD",
+    "Polkadot": "DOT-USD", "DOT": "DOT-USD",
     # Indices (Yahoo-style)
     "S&P 500": "^GSPC", "Dow Jones": "^DJI", "Nasdaq": "^IXIC", "Russell 2000": "^RUT",
     "FTSE 100": "^FTSE", "DAX": "^GDAXI", "Nikkei 225": "^N225", "Hang Seng": "^HSI",
@@ -54,6 +66,12 @@ _INTERNAL_REGISTRY: Mapping[str, str] = {
     # Commodities
     "Brent": "BZ=F", "WTI": "CL=F", "gold": "GC=F", "silver": "SI=F", "copper": "HG=F",
 }
+
+
+def _alias_pattern(alias: str) -> re.Pattern[str]:
+    # Company names and instruments must match as tokens, not as substrings of
+    # unrelated words such as "unaffordable" -> "Ford".
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -80,6 +98,11 @@ class SymbolMapper:
         # Precompute lowercase index
         self._alias_lc = {k.lower(): v for k, v in self._aliases.items()}
         self._alias_keys = list(self._aliases.keys())
+        self._alias_exact_patterns = {
+            alias_lc: _alias_pattern(alias_lc)
+            for alias_lc in self._alias_lc
+            if len(alias_lc.strip()) > 1
+        }
 
     def alias_dict(self) -> Mapping[str, str]:
         return dict(self._aliases)
@@ -95,15 +118,25 @@ class SymbolMapper:
             if sym not in seen:
                 seen.add(sym)
                 out.append(SymbolMatch(text=f"${sym}", symbol=sym, score=1.0, source="cashtag"))
+        for m in _PAREN_TICKER_RE.finditer(text):
+            sym = m.group(1)
+            if sym in _TICKER_DENYLIST:
+                continue
+            if sym not in seen:
+                seen.add(sym)
+                out.append(SymbolMatch(text=f"({sym})", symbol=sym, score=0.98, source="paren_ticker"))
         lc = text.lower()
         for alias_lc, sym in self._alias_lc.items():
-            if alias_lc in lc and sym not in seen:
+            pattern = self._alias_exact_patterns.get(alias_lc)
+            if pattern is not None and pattern.search(lc) and sym not in seen:
                 seen.add(sym)
                 out.append(SymbolMatch(text=alias_lc, symbol=sym, score=1.0, source="alias_exact"))
         # Fuzzy fallback for the title (top-3 only)
         if len(out) < 3 and len(text) < 400:
             extracted = process.extract(text, self._alias_keys, scorer=fuzz.partial_ratio, limit=3)
             for alias, score, _ in extracted:
+                if len(alias.strip()) < 5:
+                    continue
                 if score / 100.0 < min_fuzzy:
                     continue
                 sym = self._aliases[alias]

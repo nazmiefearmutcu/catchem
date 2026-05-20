@@ -29,7 +29,7 @@ _KNOWN_CURRENCIES = {
     "MXN", "BRL", "ZAR", "KRW", "SEK", "NOK", "PLN", "RUB",
 }
 _KNOWN_CENTRAL_BANKS = {
-    "Federal Reserve", "Fed", "FOMC", "ECB", "European Central Bank", "Bank of Japan",
+    "Federal Reserve", "Fed", "FOMC", "Federal Open Market Committee", "ECB", "European Central Bank", "Bank of Japan",
     "BoJ", "Bank of England", "BoE", "People's Bank of China", "PBoC", "Bank of Canada",
     "BoC", "Reserve Bank of Australia", "RBA", "Reserve Bank of New Zealand", "RBNZ",
     "Swiss National Bank", "SNB", "Bank of Korea", "BoK", "Central Bank of Turkey",
@@ -47,6 +47,12 @@ _KNOWN_CRYPTO = {
     "Bitcoin", "BTC", "Ethereum", "ETH", "Solana", "SOL", "Cardano", "ADA",
     "Ripple", "XRP", "Dogecoin", "DOGE", "Polkadot", "DOT", "stablecoin",
 }
+
+
+def _contains_alias(text: str, alias: str) -> bool:
+    if len(alias.strip()) <= 1:
+        return False
+    return re.search(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", text, flags=re.IGNORECASE) is not None
 
 
 @dataclass
@@ -136,9 +142,10 @@ class EntityLinker:
             if re.search(rf"\b{re.escape(k)}\b", joined, flags=re.IGNORECASE):
                 add(k, "crypto", "lex:crypto")
 
-        # Company aliases — substring match for now, simple and fast.
+        # Company aliases must match as whole tokens. Plain substring matching
+        # turns words like "unaffordable" into a false Ford/F hit.
         for alias, ticker in self.company_aliases.items():
-            if alias and alias.lower() in joined.lower():
+            if alias and _contains_alias(joined, alias):
                 add(alias, "company", "alias")
                 add(ticker, "ticker", "alias")
 

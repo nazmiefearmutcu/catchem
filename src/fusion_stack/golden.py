@@ -72,6 +72,16 @@ SYNTHETIC: tuple[GoldenItem, ...] = (
         expected_reason_codes=("central_bank", "inflation"),
         expected_sentiment=None,
     ),
+    GoldenItem(
+        "g-fomc-minutes",
+        "Minutes of the Federal Open Market Committee, March 17-18, 2026",
+        "The Federal Open Market Committee released minutes from its March meeting. Officials discussed monetary policy, inflation risks, Treasury yields, and the path for interest rates.",
+        "federalreserve.gov", "rss",
+        expected_finance_relevant=True,
+        expected_asset_classes=("rates", "macro"),
+        expected_reason_codes=("central_bank", "inflation"),
+        expected_sentiment=None,
+    ),
     # finance — earnings + guidance + cashtag
     GoldenItem(
         "g-aapl-beat",

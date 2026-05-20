@@ -12,6 +12,24 @@ from typing import Iterable, Sequence
 from .schemas import AwarenessCaptureView
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.\!\?])\s+(?=[A-Z\$0-9])")
+_BOILERPLATE_RE = re.compile(
+    r"\b("
+    r"follow us|subscribe|sign up|newsletter|cookie|cookies|privacy policy|"
+    r"terms of service|advertisement|sponsored|all rights reserved|"
+    r"share this|click here|download our app"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_boilerplate_sentence(text: str) -> bool:
+    return bool(_BOILERPLATE_RE.search(text or ""))
+
+
+def clean_boilerplate_text(text: str) -> str:
+    """Drop common publisher footer/CTA sentences before entity/evidence use."""
+    kept = [s for s in split_sentences(text) if not is_boilerplate_sentence(s)]
+    return " ".join(kept)
 
 
 def split_sentences(text: str) -> list[str]:
@@ -25,6 +43,8 @@ def split_sentences(text: str) -> list[str]:
     for p in parts:
         s = p.strip()
         if not s:
+            continue
+        if is_boilerplate_sentence(s):
             continue
         if len(s) > 400:
             s = s[:400].rsplit(" ", 1)[0] + "…"

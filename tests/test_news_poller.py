@@ -13,10 +13,12 @@ import pytest
 
 from fusion_stack.news_poller import (
     DEFAULT_FEEDS,
+    FeedFetchResult,
     FeedSpec,
     NewsPoller,
     ParsedItem,
     _SeenCache,
+    _is_stale_published_ts,
     parse_feed,
 )
 
@@ -131,6 +133,37 @@ def test_parse_feed_strips_www_from_domain_resolution() -> None:
     assert items[0].domain == "bbc.co.uk"
 
 
+def test_parse_feed_uses_google_news_source_domain() -> None:
+    body = b"""<?xml version="1.0"?>
+    <rss version="2.0"><channel>
+      <item>
+        <title>Harvard Dumps Its Ethereum and Bitcoin ETF Investment - Yahoo Finance</title>
+        <link>https://news.google.com/rss/articles/abc?oc=5</link>
+        <pubDate>Sun, 17 May 2026 10:37:09 GMT</pubDate>
+        <description>Harvard Dumps Its Ethereum and Bitcoin ETF Investment Yahoo Finance</description>
+        <source url="https://finance.yahoo.com">Yahoo Finance</source>
+      </item>
+    </channel></rss>"""
+    items = parse_feed(body, fallback_domain="news.google.com")
+    assert len(items) == 1
+    assert items[0].domain == "finance.yahoo.com"
+    assert items[0].title == "Harvard Dumps Its Ethereum and Bitcoin ETF Investment"
+
+
+def test_stale_item_filter_uses_max_age_seconds() -> None:
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=timezone.utc)
+    assert _is_stale_published_ts(
+        datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
+        now,
+        max_age_seconds=14 * 24 * 3600,
+    ) is True
+    assert _is_stale_published_ts(
+        datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc),
+        now,
+        max_age_seconds=14 * 24 * 3600,
+    ) is False
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # _SeenCache
 # ──────────────────────────────────────────────────────────────────────────────
@@ -213,3 +246,40 @@ def test_news_poller_status_fields_start_zeroed() -> None:
     # the user that the poller is alive even when publishers are idle.
     assert poller.last_new_at is None
     assert poller.empty_ticks == 0
+    assert poller.last_stale_skipped == 0
+    assert poller._max_item_age_seconds == 14 * 24 * 3600
+
+
+def test_news_poller_records_per_feed_health() -> None:
+    class _StubSupervisor: pass
+    class _StubSettings:
+        class paths:
+            from pathlib import Path
+            fusion_output_dir = Path("/tmp")
+    spec = FeedSpec("sample-feed", "https://example.com/rss", "example.com")
+    poller = NewsPoller(
+        supervisor=_StubSupervisor(),  # type: ignore[arg-type]
+        settings=_StubSettings(),  # type: ignore[arg-type]
+        feeds=[spec],
+    )
+    item = ParsedItem(
+        title="Markets rally",
+        text="Stocks rallied after earnings.",
+        url="https://example.com/a",
+        domain="example.com",
+        published_ts=datetime(2026, 5, 15, 14, 0, tzinfo=timezone.utc),
+    )
+
+    poller._record_feed_result(FeedFetchResult(spec=spec, items=(item,), status_code=200, elapsed_ms=12.0))
+    healthy = poller.feed_health_snapshot()[0]
+    assert healthy["ok"] is True
+    assert healthy["item_count"] == 1
+    assert healthy["consecutive_errors"] == 0
+
+    poller._record_feed_result(FeedFetchResult(spec=spec, status_code=429, error="http_429", elapsed_ms=2.0))
+    unhealthy = poller.feed_health_snapshot()[0]
+    assert unhealthy["ok"] is False
+    assert unhealthy["status_code"] == 429
+    assert unhealthy["total_fetches"] == 2
+    assert unhealthy["total_errors"] == 1
+    assert unhealthy["consecutive_errors"] == 1

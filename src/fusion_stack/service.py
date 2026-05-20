@@ -10,7 +10,7 @@ from typing import Mapping
 from .chart_context import ChartContext, ChartContextReader
 from .embeddings import Embedder, VectorIndex, make_embedder
 from .entity_linker import EntityLinker
-from .evidence import build_reason_text, extract_evidence
+from .evidence import build_reason_text, clean_boilerplate_text, extract_evidence
 from .finance_filter import FastPrefilter
 from .logging import get_logger
 from .newsimpact_guarded_adapter import NewsImpactGuardError, NewsImpactGuardedAdapter
@@ -100,10 +100,11 @@ class FusionService:
         # so the dashboard can show what was filtered out.
         zs = self.zero_shot.classify(cap)
         sent = self.sentiment.classify(cap)
-        ents = self.entity_linker.extract(cap.title, cap.text)
+        clean_text = clean_boilerplate_text(cap.text or "")
+        ents = self.entity_linker.extract(cap.title, clean_text)
 
         # Symbol mapping over title (title is more discriminative)
-        symbol_matches = self.symbol_mapper.map_text((cap.title or "") + "\n" + (cap.text or "")[:600])
+        symbol_matches = self.symbol_mapper.map_text((cap.title or "") + "\n" + clean_text[:600])
         candidate_symbols = [m.symbol for m in symbol_matches]
         candidate_entities = ents.unique_texts()
 

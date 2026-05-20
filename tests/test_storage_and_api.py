@@ -51,6 +51,7 @@ def test_storage_round_trip(tmp_path: Path) -> None:
     s.insert_record(rec)
     fetched = s.get_record("c-rt")
     assert fetched is not None
+    assert fetched["text_excerpt"] == "example body"
     assert fetched["candidate_symbols"] == ["AAPL"]
     by_sym = s.by_label("symbol", "AAPL")
     assert len(by_sym) == 1

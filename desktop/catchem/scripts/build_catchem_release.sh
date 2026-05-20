@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$CATCHEM_DIR/../.." && pwd)"
 
 cd "$CATCHEM_DIR"
 
-# 1. Build the fusion_stack React bundle into src/fusion_stack/static/app
+# 1. Build the catchem React bundle into src/catchem/static/app
 (cd "$REPO_ROOT/frontend" && npm install --silent --no-audit --no-fund && npm run build)
 
 # 2. Build the Catchem boot shim
@@ -30,7 +30,7 @@ bash "$CATCHEM_DIR/scripts/build_sidecar.sh"
 # 4. Stage the sidecar inside src-tauri so tauri.conf.json `resources` picks it up.
 mkdir -p src-tauri/resources/sidecar
 rm -rf src-tauri/resources/sidecar/*
-cp -R sidecar-out/fusion-stack-sidecar/* src-tauri/resources/sidecar/
+cp -R sidecar-out/catchem-sidecar/* src-tauri/resources/sidecar/
 
 # 5. Patch tauri.conf.json `resources` at build time (without editing the
 #    checked-in file) by passing -c '{"bundle":{"resources":[...]}}'.

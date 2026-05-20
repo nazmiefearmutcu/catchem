@@ -6,7 +6,7 @@ Usage:
     python scripts/verify_newsimpact_guard.py /path/to/merged_news
 
 Designed to be called from the bootstrap script and from CI. Never imports
-fusion_stack source code itself so it can run before the package is installed.
+catchem source code itself so it can run before the package is installed.
 """
 
 from __future__ import annotations

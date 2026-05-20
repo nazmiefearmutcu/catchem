@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shortcut: run fusion-stack replay against the awareness data dir.
+# Shortcut: run catchem replay against the awareness data dir.
 #
 # Usage:
 #   bash scripts/replay_awareness_jsonl.sh [--max=200]
@@ -8,11 +8,11 @@
 #   AWARENESS_REPO_PATH  (defaults to /Users/nazmi/Desktop/Projeler/proje/awareness)
 
 set -euo pipefail
-FUSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$FUSION_ROOT"
+CATCHEM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$CATCHEM_ROOT"
 
 if [ ! -d ".venv" ]; then
-  echo "[replay] venv missing; run bash scripts/fusion_bootstrap_and_run.sh first" >&2
+  echo "[replay] venv missing; run bash scripts/catchem_bootstrap_and_run.sh first" >&2
   exit 1
 fi
 # shellcheck disable=SC1091
@@ -25,6 +25,6 @@ for arg in "$@"; do
   esac
 done
 
-export FUSION_MODE=replay_existing
-export FUSION_MODELS__USE_ML_STUBS=true
-python -m fusion_stack.cli run --mode replay_existing --max-records "$MAX"
+export CATCHEM_MODE=replay_existing
+export CATCHEM_MODELS__USE_ML_STUBS=true
+python -m catchem.cli run --mode replay_existing --max-records "$MAX"

@@ -71,7 +71,7 @@ export function Shell() {
       <header className="border-b border-[color:var(--border)] bg-[color:var(--bg-elev)]">
         <div className="mx-auto max-w-screen-2xl px-4 py-3 flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="font-bold tracking-wide text-sm">fusion_stack</div>
+            <div className="font-bold tracking-wide text-sm">catchem</div>
             <span className="text-[10px] text-[color:var(--fg-dim)]">analyst workstation</span>
           </div>
           <nav className="flex flex-wrap items-center gap-1 text-xs" aria-label="Primary">

@@ -17,7 +17,7 @@ Design notes:
     stops the poller.
   * Dedup: a process-local LRU of recently-seen URLs PLUS storage.get_record
     by deterministic capture_id (text+url hashed). Re-runs are no-ops.
-  * Off by default in tests (`FUSION_NEWS__POLLER_ENABLED=false`).
+  * Off by default in tests (`CATCHEM_NEWS__POLLER_ENABLED=false`).
   * UA strings on every fetch — many feeds 403 the default httpx UA.
 """
 
@@ -44,11 +44,11 @@ from .logging import get_logger
 from .settings import Settings
 from .supervisor import Supervisor
 
-logger = get_logger("fusion.news_poller")
+logger = get_logger("catchem.news_poller")
 
 # Pre-flight checks: keep UA distinctive so admins can spot us in their
 # server logs. macOS Catchem identifies itself as Catchem-News-Poller/0.1.
-_USER_AGENT = "Catchem-News-Poller/0.1 (+local fusion_stack sidecar)"
+_USER_AGENT = "Catchem-News-Poller/0.1 (+local catchem sidecar)"
 
 # Atom/RSS namespace bag — defensive over many feed variants.
 _NS = {
@@ -71,13 +71,13 @@ class FeedSpec:
 
 # Curated default set — public, no-auth, stable over years. Each one is a
 # clean RSS/Atom endpoint with a sensible Title + Description + Link triple.
-# Operators can override via FUSION_NEWS__FEEDS but the defaults Just Work.
+# Operators can override via CATCHEM_NEWS__FEEDS but the defaults Just Work.
 #
 # Coverage strategy: broad enough that *every* poll has a non-trivial chance
 # of surfacing a new URL (mainstream + financial + tech + crypto + regulator).
 # Each candidate was live-tested 2026-05-17; sources known to 404 or 403 the
 # common UA are intentionally absent. If you add new sources, run
-#   python -c "import asyncio, httpx; from fusion_stack.news_poller import \
+#   python -c "import asyncio, httpx; from catchem.news_poller import \
 #     fetch_feed, FeedSpec; ..."
 # before checking in.
 DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
@@ -663,7 +663,7 @@ class NewsPoller:
         # Persist a JSONL copy so the stream is replayable later. Best-effort;
         # failure here must not block the ingest.
         try:
-            archive_root = self._settings.paths.fusion_output_dir / "live-news"
+            archive_root = self._settings.paths.catchem_output_dir / "live-news"
             archive_root.mkdir(parents=True, exist_ok=True)
             write_jsonl(cap, archive_root)
         except OSError as exc:

@@ -150,7 +150,7 @@ class DemoRunResponse(_CompactBase):
 class AppInfoResponse(_CompactBase):
     """Catchem app banner / status surface."""
 
-    name: str = "fusion_stack"
+    name: str = "catchem"
     version: str
     commit_sha: str | None = None
     branch: str | None = None

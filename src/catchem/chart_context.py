@@ -17,7 +17,7 @@ from typing import Any, Iterable
 
 from .logging import get_logger
 
-logger = get_logger("fusion.chart_context")
+logger = get_logger("catchem.chart_context")
 
 
 @dataclass(frozen=True)

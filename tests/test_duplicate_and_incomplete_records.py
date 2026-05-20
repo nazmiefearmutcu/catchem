@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.awareness_reader import iter_captures, parse_capture_line
-from fusion_stack.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-from fusion_stack.storage import Storage
+from catchem.awareness_reader import iter_captures, parse_capture_line
+from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
+from catchem.storage import Storage
 
 
 def _make_record(capture_id: str, score: float, title: str) -> FinancialImpactRecord:
@@ -44,7 +44,7 @@ def _make_record(capture_id: str, score: float, title: str) -> FinancialImpactRe
 
 
 def test_storage_dedupes_by_capture_id_on_insert(tmp_path: Path) -> None:
-    s = Storage(db_path=tmp_path / "fusion.sqlite3",
+    s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     # Insert the same capture_id twice with different content
     s.insert_record(_make_record("dup-1", 0.4, "first"))
@@ -58,7 +58,7 @@ def test_storage_dedupes_by_capture_id_on_insert(tmp_path: Path) -> None:
 
 def test_storage_label_index_rebuilds_on_overwrite(tmp_path: Path) -> None:
     """The inverted label index must reflect the LATEST record, not stale rows."""
-    s = Storage(db_path=tmp_path / "fusion.sqlite3",
+    s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     r1 = _make_record("dup-2", 0.5, "first")
     s.insert_record(r1)
@@ -98,7 +98,7 @@ def test_iter_captures_skips_bad_lines_and_emits_good(tmp_path: Path) -> None:
 
 
 def test_dlq_records_failure(tmp_path: Path) -> None:
-    s = Storage(db_path=tmp_path / "fusion.sqlite3",
+    s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     s.record_failure("bad-1", "parse failed: missing title", "<excerpt>")
     assert s.dlq_count() == 1

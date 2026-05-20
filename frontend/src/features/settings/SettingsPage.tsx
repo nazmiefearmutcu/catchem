@@ -28,7 +28,7 @@ export function SettingsPage() {
           <span className="text-xs text-[color:var(--fg-dim)]">current: {theme}</span>
         </div>
         <p className="mt-2 text-[10px] text-[color:var(--fg-muted)]">
-          Stored in <code>localStorage["fusion.theme"]</code>. Respects <em>prefers-reduced-motion</em> globally.
+          Stored in <code>localStorage["catchem.theme"]</code>. Respects <em>prefers-reduced-motion</em> globally.
         </p>
       </section>
 

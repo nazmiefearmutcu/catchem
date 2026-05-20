@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fusion_stack.evidence import build_reason_text, extract_evidence, split_sentences
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.scoring import ScoringInputs, estimate_entity_density, score
-from fusion_stack.taxonomy import default_taxonomy_path, load_taxonomy
+from catchem.evidence import build_reason_text, extract_evidence, split_sentences
+from catchem.schemas import AwarenessCaptureView
+from catchem.scoring import ScoringInputs, estimate_entity_density, score
+from catchem.taxonomy import default_taxonomy_path, load_taxonomy
 
 
 def test_sentence_split_basic() -> None:

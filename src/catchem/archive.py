@@ -46,7 +46,7 @@ from .logging import get_logger
 from .settings import Settings
 from .supervisor import Supervisor
 
-logger = get_logger("fusion.archive")
+logger = get_logger("catchem.archive")
 
 # ── CSV schema ────────────────────────────────────────────────────────────────
 # Designed to open cleanly in Excel/Numbers/Sheets. Order matters — once a
@@ -93,7 +93,7 @@ def detect_drive_dir() -> Path:
       `com.apple.developer.icloud-container-identifiers` entitlement.
       Picking it produces "[Errno 13] Permission denied" at mkdir time.
 
-    Operator can always override via FUSION_ARCHIVE__DRIVE_DIR.
+    Operator can always override via CATCHEM_ARCHIVE__DRIVE_DIR.
     """
     home = Path.home()
     cloud = home / "Library" / "CloudStorage"

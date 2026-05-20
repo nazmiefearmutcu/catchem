@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.api import create_app
+from catchem.schemas import AwarenessCaptureView
+from catchem.settings import load_settings, reload_settings
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def client_with_records(tmp_path: Path, write_jsonl, synth_capture, monkeypatch:
         domain="wsj.com",
     )
     write_jsonl([json.loads(c.model_dump_json()) for c in (cap, cap2)])
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
     reload_settings()
     s = load_settings()
 
@@ -51,7 +51,7 @@ def test_legacy_dashboard_still_served(client_with_records: TestClient) -> None:
     for path in ("/legacy", "/legacy-dashboard"):
         r = client_with_records.get(path)
         assert r.status_code == 200
-        assert "fusion_stack" in r.text
+        assert "catchem" in r.text
         # Confirm it's the vanilla dashboard, not the SPA shell
         assert "<table>" in r.text or "dashboard" in r.text
 
@@ -153,8 +153,8 @@ def test_ui_symbol_aggregation(client_with_records: TestClient) -> None:
 
 def test_diagnostic_flag_in_summary_when_research_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Even with the env flag on, summary's diagnostic_allowed only flips outside production_safe."""
-    monkeypatch.setenv("FUSION_MODE", "research_diagnostic")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_MODE", "research_diagnostic")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
     reload_settings()
     s = load_settings()
     app = create_app(s)
@@ -170,8 +170,8 @@ def test_diagnostic_flag_in_summary_when_research_mode(monkeypatch: pytest.Monke
 
 
 def test_production_safe_summary_refuses_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")  # even with flag on
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")  # even with flag on
     reload_settings()
     s = load_settings()
     app = create_app(s)

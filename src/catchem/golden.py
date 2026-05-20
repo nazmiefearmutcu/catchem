@@ -2,7 +2,7 @@
 
 Ships a small, curated set of finance / non-finance items with multi-label
 expectations. The harness scores the live pipeline against the labels and
-reports precision/recall + per-label F1. Used by CLI `fusion-stack benchmark`
+reports precision/recall + per-label F1. Used by CLI `catchem benchmark`
 and by the regression test suite.
 
 The set is intentionally synthetic so it can ride in the repo without licensing
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .schemas import AwarenessCaptureView
-from .service import FusionService
+from .service import CatchemService
 
 
 @dataclass(frozen=True)
@@ -320,7 +320,7 @@ def load_extended(path: Path, *, strict: bool = True) -> list[GoldenItem]:
     return out
 
 
-def run_benchmark(svc: FusionService, items: Iterable[GoldenItem] | None = None) -> BenchmarkReport:
+def run_benchmark(svc: CatchemService, items: Iterable[GoldenItem] | None = None) -> BenchmarkReport:
     items = list(items if items is not None else SYNTHETIC)
     rep = BenchmarkReport()
     for it in items:

@@ -14,11 +14,11 @@ from .awareness_replay import ReplayRunner
 from .embeddings import VectorIndex
 from .logging import configure_logging, get_logger
 from .schemas import AwarenessCaptureView, FinancialImpactRecord, ProcessingMode
-from .service import FusionService, build_service
-from .settings import FusionMode, Settings
+from .service import CatchemService, build_service
+from .settings import CatchemMode, Settings
 from .storage import Storage, load_storage_from_settings
 
-logger = get_logger("fusion.supervisor")
+logger = get_logger("catchem.supervisor")
 
 
 class Supervisor:
@@ -26,13 +26,13 @@ class Supervisor:
         self.settings = settings
         configure_logging(
             level=settings.logging_.level,
-            log_file=settings.paths.fusion_output_dir / Path(settings.logging_.file).relative_to("data") if settings.logging_.file.startswith("data/") else None,
+            log_file=settings.paths.catchem_output_dir / Path(settings.logging_.file).relative_to("data") if settings.logging_.file.startswith("data/") else None,
             json_mode=settings.logging_.json_logs,
         )
         self.storage = load_storage_from_settings(settings)
-        vector_dir = settings.paths.fusion_output_dir / Path(settings.storage.vector_index_dir).relative_to("data") if settings.storage.vector_index_dir.startswith("data/") else settings.paths.fusion_output_dir / "vector_index"
+        vector_dir = settings.paths.catchem_output_dir / Path(settings.storage.vector_index_dir).relative_to("data") if settings.storage.vector_index_dir.startswith("data/") else settings.paths.catchem_output_dir / "vector_index"
         self.vector_index = VectorIndex(vector_dir)
-        self.service: FusionService = build_service(settings, vector_index=self.vector_index)
+        self.service: CatchemService = build_service(settings, vector_index=self.vector_index)
         logger.info(
             "supervisor_initialized",
             mode=settings.mode.value,

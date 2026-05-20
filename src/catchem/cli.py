@@ -11,17 +11,17 @@ import typer
 
 from .bootstrap import bootstrap as bootstrap_call
 from .logging import configure_logging, get_logger
-from .settings import FusionMode, load_settings, reload_settings
+from .settings import CatchemMode, load_settings, reload_settings
 from .supervisor import Supervisor
 
-app = typer.Typer(no_args_is_help=True, help="fusion_stack: finance-relevance layer over Awareness.")
-logger = get_logger("fusion.cli")
+app = typer.Typer(no_args_is_help=True, help="catchem: finance-relevance layer over Awareness.")
+logger = get_logger("catchem.cli")
 
 
 def _override_mode(mode: Optional[str]) -> None:
     if mode is not None:
         import os
-        os.environ["FUSION_MODE"] = mode
+        os.environ["CATCHEM_MODE"] = mode
         reload_settings()
 
 
@@ -35,7 +35,7 @@ def run(
     s = load_settings()
     sup = Supervisor(s)
     try:
-        if s.mode == FusionMode.LIVE_TAIL:
+        if s.mode == CatchemMode.LIVE_TAIL:
             sup.run_tail()
         else:
             counts = sup.run_replay(max_records=max_records)
@@ -54,7 +54,7 @@ def replay(
     if path:
         # Point the data dir at the file's parent for one-shot use
         import os
-        os.environ["FUSION_PATHS__AWARENESS_DATA_DIR"] = str(path.parent)
+        os.environ["CATCHEM_PATHS__AWARENESS_DATA_DIR"] = str(path.parent)
         reload_settings()
         s = load_settings()
     sup = Supervisor(s)
@@ -158,7 +158,7 @@ def serve(
 
 @app.command("bootstrap-init")
 def bootstrap_init(skip_warm: bool = typer.Option(True, help="Skip HF model warm-cache.")) -> None:
-    """Initialize fusion_stack directories and verify guard. Idempotent."""
+    """Initialize catchem directories and verify guard. Idempotent."""
     summary = bootstrap_call(skip_warm=skip_warm)
     typer.echo(json.dumps(summary, indent=2))
 
@@ -176,9 +176,9 @@ def demo(
     would write, run the replay, and print the materialized record.
 
     Examples:
-      fusion-stack demo --title "Fed raises rates by 25 bps" --text "The Fed hiked..."
-      fusion-stack demo -t "Apple beats earnings" --text-file body.txt --domain wsj.com
-      cat body.txt | fusion-stack demo -t "Headline" --domain reuters.com
+      catchem demo --title "Fed raises rates by 25 bps" --text "The Fed hiked..."
+      catchem demo -t "Apple beats earnings" --text-file body.txt --domain wsj.com
+      cat body.txt | catchem demo -t "Headline" --domain reuters.com
     """
     from .demo import render_demo_report, run_demo
 

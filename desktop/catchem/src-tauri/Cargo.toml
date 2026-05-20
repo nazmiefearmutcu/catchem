@@ -2,7 +2,7 @@
 name = "catchem"
 version = "0.1.0"
 edition = "2021"
-description = "Catchem — macOS desktop wrapper for fusion_stack"
+description = "Catchem — macOS desktop wrapper for catchem"
 authors = ["nazmi"]
 license = "MIT"
 publish = false

@@ -13,31 +13,31 @@ writable `static/` subtree.
 
 1. `pyproject.toml` switched from `[tool.hatch.build.targets.wheel.shared-data]`
    to `[tool.hatch.build.targets.wheel] force-include` so the static folder
-   ships INSIDE the package wheel (`fusion_stack/static/...`), not in the
+   ships INSIDE the package wheel (`catchem/static/...`), not in the
    system shared-data prefix.
-2. New `src/fusion_stack/static_assets.py` resolves files via
-   `importlib.resources.files("fusion_stack") / "static" / name` and exposes
+2. New `src/catchem/static_assets.py` resolves files via
+   `importlib.resources.files("catchem") / "static" / name` and exposes
    `get_static_path(name)` and `open_static_bytes(name)`. The FastAPI surface
    (`api.py`) calls these instead of constructing filesystem paths.
 
-**Dev override.** `FUSION_STATIC_DIR=/some/dir` is honored — but only for
+**Dev override.** `CATCHEM_STATIC_DIR=/some/dir` is honored — but only for
 files that actually exist there. Missing files fall through to package
 resources. Path traversal (`..`, leading `/`) is rejected with `ValueError`.
 
 **Test.** `tests/test_static_dashboard_packaged_install.py` (10 tests including
 a real `python -m build` wheel canary that opens the wheel ZIP and asserts
-`fusion_stack/static/dashboard.html` is present).
+`catchem/static/dashboard.html` is present).
 
 ## P0 · Nested env precedence
 
-**Risk.** Earlier output showed `FUSION_LIVE__POLL_SECONDS` not always
+**Risk.** Earlier output showed `CATCHEM_LIVE__POLL_SECONDS` not always
 propagating. pydantic-settings v2 defaults to *init kwargs* overriding env;
 our YAML loader passes config as init kwargs, so YAML was silently winning.
 
 **Fix.** `Settings.settings_customise_sources` was already flipping the
 priority order to `(dotenv, env, init, secrets)`. We added:
 
-- A `@model_validator(mode="after")` that propagates `FUSION_USE_ML_STUBS`
+- A `@model_validator(mode="after")` that propagates `CATCHEM_USE_ML_STUBS`
   (the documented flat env) into `models_.use_ml_stubs`. Previously the flat
   var was inert.
 - 10 explicit regression tests in `tests/test_settings_live_env_override.py`
@@ -46,18 +46,18 @@ priority order to `(dotenv, env, init, secrets)`. We added:
   invalid value rejection, unknown-key tolerance.
 
 **Documented precedence (lowest → highest):**
-`defaults < configs/fusion.yaml (init kwargs) < .env file < process env`
+`defaults < configs/catchem.yaml (init kwargs) < .env file < process env`
 
 > Process env beats `.env` so that explicit shell overrides win, pytest's
 > `monkeypatch.setenv` works as expected, and CI job env beats any committed
-> `.env`. See `settings_customise_sources` in `src/fusion_stack/settings.py`.
+> `.env`. See `settings_customise_sources` in `src/catchem/settings.py`.
 
 ## P0 · Guard redaction in production_safe
 
 **Risk.** UI or /ui endpoints may expose diagnostic-only fields, or allow a
 client to infer/enable blocked NewsImpact behavior in production_safe mode.
 
-**Fix.** Defense in depth via new `src/fusion_stack/redaction.py`:
+**Fix.** Defense in depth via new `src/catchem/redaction.py`:
 
 - `redact_record_for_mode(record, production_safe=True)` always sets
   `diagnostic_multimodal_enabled=False` and `diagnostic_multimodal_result=None`
@@ -80,7 +80,7 @@ diagnostic pin, the env-flag override refusal, and a mock that asserts
 **Risk.** List routes returning full-record payloads (with `text_excerpt` and
 all internals) cause overfetching, cache instability, and contract drift.
 
-**Fix.** New `src/fusion_stack/contracts.py` defines:
+**Fix.** New `src/catchem/contracts.py` defines:
 
 - `FinancialImpactSummary` — list shape. NO `text_excerpt`, NO
   `evidence_sentences` (replaced with `evidence_preview` ≤ 240 chars +
@@ -203,6 +203,6 @@ This file. Plus RUNBOOK and TEST_MATRIX updated to point here.
 - Awareness/merged_news repo modifications — none. Both upstream repos
   untouched by this branch.
 - Forbidden NewsImpact training/runner imports — static check still passes
-  (`test_no_fusion_call_into_v7_runner_training_path`).
+  (`test_no_catchem_call_into_v7_runner_training_path`).
 - Production-safe → diagnostic adapter escape — covered by guard redaction
   tests.

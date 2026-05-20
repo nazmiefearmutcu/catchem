@@ -13,7 +13,7 @@ from .logging import get_logger
 from .schemas import AwarenessCaptureView, ReplayOffset
 from .storage import Storage
 
-logger = get_logger("fusion.awareness_replay")
+logger = get_logger("catchem.awareness_replay")
 
 
 class ReplayRunner:

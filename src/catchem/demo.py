@@ -103,7 +103,7 @@ def run_demo(
     """End-to-end demo. Returns the processed record (or a synthetic miss).
 
     The replay reads the demo's awareness_data_dir, which defaults to the
-    fusion_stack data dir under a `demo-input/` subfolder so it never touches
+    catchem data dir under a `demo-input/` subfolder so it never touches
     the real Awareness JSONL. To overlay onto the real path, pass a Settings
     whose paths.awareness_data_dir points there.
     """
@@ -111,9 +111,9 @@ def run_demo(
         reload_settings()
         settings = load_settings()
 
-    # Default to a demo-input subdir under the fusion output so we never
+    # Default to a demo-input subdir under the catchem output so we never
     # touch /Users/.../awareness/data on demo runs.
-    demo_root = settings.paths.fusion_output_dir / "demo-input"
+    demo_root = settings.paths.catchem_output_dir / "demo-input"
     demo_root.mkdir(parents=True, exist_ok=True)
 
     cap = build_capture(
@@ -124,8 +124,8 @@ def run_demo(
 
     # Point a fresh Supervisor at the demo-input dir for this run only.
     import os
-    prev = os.environ.get("FUSION_PATHS__AWARENESS_DATA_DIR")
-    os.environ["FUSION_PATHS__AWARENESS_DATA_DIR"] = str(demo_root)
+    prev = os.environ.get("CATCHEM_PATHS__AWARENESS_DATA_DIR")
+    os.environ["CATCHEM_PATHS__AWARENESS_DATA_DIR"] = str(demo_root)
     try:
         reload_settings()
         sup = Supervisor(load_settings())
@@ -136,9 +136,9 @@ def run_demo(
             sup.close()
     finally:
         if prev is None:
-            os.environ.pop("FUSION_PATHS__AWARENESS_DATA_DIR", None)
+            os.environ.pop("CATCHEM_PATHS__AWARENESS_DATA_DIR", None)
         else:
-            os.environ["FUSION_PATHS__AWARENESS_DATA_DIR"] = prev
+            os.environ["CATCHEM_PATHS__AWARENESS_DATA_DIR"] = prev
         reload_settings()
 
     return DemoResult(

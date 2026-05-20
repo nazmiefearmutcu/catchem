@@ -23,23 +23,23 @@ from .schemas import (
 )
 from .scoring import ScoringInputs, estimate_entity_density, score
 from .sentiment import SentimentClassifier, make_sentiment
-from .settings import FusionMode, Settings
+from .settings import CatchemMode, Settings
 from .symbol_mapper import SymbolMapper
 from .taxonomy import Taxonomy, load_taxonomy, default_taxonomy_path
 from .zero_shot_classifier import ZeroShot, make_zero_shot
 
-logger = get_logger("fusion.service")
+logger = get_logger("catchem.service")
 
 
 _MODE_MAP = {
-    FusionMode.PRODUCTION_SAFE: ProcessingMode.PRODUCTION_SAFE,
-    FusionMode.REPLAY_EXISTING: ProcessingMode.REPLAY_EXISTING,
-    FusionMode.LIVE_TAIL: ProcessingMode.LIVE_TAIL,
-    FusionMode.RESEARCH_DIAGNOSTIC: ProcessingMode.RESEARCH_DIAGNOSTIC,
+    CatchemMode.PRODUCTION_SAFE: ProcessingMode.PRODUCTION_SAFE,
+    CatchemMode.REPLAY_EXISTING: ProcessingMode.REPLAY_EXISTING,
+    CatchemMode.LIVE_TAIL: ProcessingMode.LIVE_TAIL,
+    CatchemMode.RESEARCH_DIAGNOSTIC: ProcessingMode.RESEARCH_DIAGNOSTIC,
 }
 
 
-class FusionService:
+class CatchemService:
     """Stateful pipeline. Construct once per process; ``process`` per capture."""
 
     def __init__(
@@ -230,6 +230,6 @@ def _horizons_from_reasons(reasons: tuple[str, ...]) -> list[str]:
     return sorted(out)
 
 
-def build_service(settings: Settings, vector_index: VectorIndex | None = None) -> FusionService:
+def build_service(settings: Settings, vector_index: VectorIndex | None = None) -> CatchemService:
     taxonomy = load_taxonomy(default_taxonomy_path())
-    return FusionService(settings=settings, taxonomy=taxonomy, vector_index=vector_index)
+    return CatchemService(settings=settings, taxonomy=taxonomy, vector_index=vector_index)

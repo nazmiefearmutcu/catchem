@@ -1,7 +1,7 @@
 """Stage F (part 2): map entity hits → trading symbols.
 
 The mapper is data-driven. It loads aliases from any of three places, in order:
-  1. fusion_stack/configs/symbols.yaml (if present)
+  1. catchem/configs/symbols.yaml (if present)
   2. <newsimpact>/manifests/**/symbol*.json (read-only discovery)
   3. an internal hardcoded mini-registry of high-traffic names (always available)
 
@@ -21,7 +21,7 @@ from rapidfuzz import fuzz, process
 
 from .logging import get_logger
 
-logger = get_logger("fusion.symbol_mapper")
+logger = get_logger("catchem.symbol_mapper")
 
 
 _PAREN_TICKER_RE = re.compile(r"\(([A-Z]{1,6}(?:\.[A-Z])?)\)")

@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
-# fusion_stack one-command bootstrap (v2 — builds the premium UI).
+# catchem one-command bootstrap (v2 — builds the premium UI).
 #
 # This script is idempotent. Re-running is safe.
 #
 # Steps:
 #   1. resolve project root
 #   2. create/refresh local Python venv via uv
-#   3. install fusion_stack + dev deps
+#   3. install catchem + dev deps
 #   4. install Awareness in editable mode (if available)
 #   5. verify both repo paths
 #   6. verify NewsImpact governance guard
 #   7. (optional) warm HF model cache
 #   8. (optional) attempt Kaggle dataset downloads
-#   9. install frontend npm deps if needed and build the SPA into src/fusion_stack/static/app
-#  10. initialize fusion_stack storage
+#   9. install frontend npm deps if needed and build the SPA into src/catchem/static/app
+#  10. initialize catchem storage
 #  11. run the chosen mode (default: replay_existing)
 #  12. start the FastAPI server in the background (serves the premium UI at /)
 #  13. print a summary of where outputs/logs/results live
 
 set -euo pipefail
 
-FUSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$FUSION_ROOT"
+CATCHEM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$CATCHEM_ROOT"
 
 # ── flags ────────────────────────────────────────────────────────────────────
-MODE="${FUSION_MODE:-replay_existing}"
-WITH_ML="${FUSION_WITH_ML:-0}"
-NO_API="${FUSION_NO_API:-0}"
-MAX_RECORDS="${FUSION_MAX_RECORDS:-50}"
-SKIP_BOOTSTRAP_RUN="${FUSION_SKIP_RUN:-0}"
-SKIP_FRONTEND_BUILD="${FUSION_SKIP_FRONTEND_BUILD:-0}"
-DEV_UI="${FUSION_DEV_UI:-0}"
+MODE="${CATCHEM_MODE:-replay_existing}"
+WITH_ML="${CATCHEM_WITH_ML:-0}"
+NO_API="${CATCHEM_NO_API:-0}"
+MAX_RECORDS="${CATCHEM_MAX_RECORDS:-50}"
+SKIP_BOOTSTRAP_RUN="${CATCHEM_SKIP_RUN:-0}"
+SKIP_FRONTEND_BUILD="${CATCHEM_SKIP_FRONTEND_BUILD:-0}"
+DEV_UI="${CATCHEM_DEV_UI:-0}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -43,9 +43,9 @@ for arg in "$@"; do
     --dev-ui) DEV_UI=1 ;;
     --help|-h)
       cat <<EOF
-fusion_stack bootstrap (v2)
+catchem bootstrap (v2)
 
-Usage: bash scripts/fusion_bootstrap_and_run.sh [flags]
+Usage: bash scripts/catchem_bootstrap_and_run.sh [flags]
 
 Flags:
   --mode=replay_existing|production_safe|live_tail|research_diagnostic
@@ -58,8 +58,8 @@ Flags:
                          (use this for hot-reload UI work alongside the API)
 
 Env overrides:
-  FUSION_MODE, FUSION_WITH_ML, FUSION_NO_API, FUSION_MAX_RECORDS,
-  FUSION_SKIP_RUN, FUSION_SKIP_FRONTEND_BUILD, FUSION_DEV_UI,
+  CATCHEM_MODE, CATCHEM_WITH_ML, CATCHEM_NO_API, CATCHEM_MAX_RECORDS,
+  CATCHEM_SKIP_RUN, CATCHEM_SKIP_FRONTEND_BUILD, CATCHEM_DEV_UI,
   AWARENESS_REPO_PATH, NEWSIMPACT_REPO_PATH
 EOF
       exit 0
@@ -79,8 +79,8 @@ else
   USE_UV=1
 fi
 
-if [ ! -d "$FUSION_ROOT/.venv" ]; then
-  log "creating venv at $FUSION_ROOT/.venv"
+if [ ! -d "$CATCHEM_ROOT/.venv" ]; then
+  log "creating venv at $CATCHEM_ROOT/.venv"
   if [ "$USE_UV" = "1" ]; then
     uv venv --python 3.13 --seed
   else
@@ -89,9 +89,9 @@ if [ ! -d "$FUSION_ROOT/.venv" ]; then
 fi
 
 # shellcheck disable=SC1091
-source "$FUSION_ROOT/.venv/bin/activate"
+source "$CATCHEM_ROOT/.venv/bin/activate"
 
-log "installing fusion_stack (editable, dev extras)"
+log "installing catchem (editable, dev extras)"
 if [ "$USE_UV" = "1" ]; then
   uv pip install -e ".[dev]" --quiet
 else
@@ -114,12 +114,12 @@ NEWSIMPACT_REPO_PATH="${NEWSIMPACT_REPO_PATH:-/Users/nazmi/Desktop/Projeler/proj
 if [ -d "$AWARENESS_REPO_PATH" ] && [ -f "$AWARENESS_REPO_PATH/pyproject.toml" ]; then
   log "installing awareness in editable mode from $AWARENESS_REPO_PATH"
   if [ "$USE_UV" = "1" ]; then
-    uv pip install -e "$AWARENESS_REPO_PATH" --quiet || warn "awareness install failed (continuing — fusion_stack reads JSONL directly)"
+    uv pip install -e "$AWARENESS_REPO_PATH" --quiet || warn "awareness install failed (continuing — catchem reads JSONL directly)"
   else
-    pip install --quiet -e "$AWARENESS_REPO_PATH" || warn "awareness install failed (continuing — fusion_stack reads JSONL directly)"
+    pip install --quiet -e "$AWARENESS_REPO_PATH" || warn "awareness install failed (continuing — catchem reads JSONL directly)"
   fi
 else
-  warn "awareness repo not at $AWARENESS_REPO_PATH — fusion_stack will still run via JSONL replay"
+  warn "awareness repo not at $AWARENESS_REPO_PATH — catchem will still run via JSONL replay"
 fi
 
 # ── 5. verify paths ──────────────────────────────────────────────────────────
@@ -128,19 +128,19 @@ fi
 
 # ── 6. NewsImpact governance guard ──────────────────────────────────────────
 log "verifying NewsImpact quarantine state"
-if ! python "$FUSION_ROOT/scripts/verify_newsimpact_guard.py" "$NEWSIMPACT_REPO_PATH"; then
+if ! python "$CATCHEM_ROOT/scripts/verify_newsimpact_guard.py" "$NEWSIMPACT_REPO_PATH"; then
   fail "NewsImpact guard check failed — refusing to proceed"
 fi
 
 # ── 7. optional HF warm ──────────────────────────────────────────────────────
 if [ "$WITH_ML" = "1" ]; then
   log "warming Hugging Face model caches (this may take several minutes)"
-  python "$FUSION_ROOT/scripts/warm_hf_models.py" || warn "warm-cache had issues; pipeline will fall back to stubs"
+  python "$CATCHEM_ROOT/scripts/warm_hf_models.py" || warn "warm-cache had issues; pipeline will fall back to stubs"
 fi
 
 # ── 8. optional Kaggle ───────────────────────────────────────────────────────
 log "checking for Kaggle credentials (optional)"
-bash "$FUSION_ROOT/scripts/download_optional_kaggle_assets.sh" || true
+bash "$CATCHEM_ROOT/scripts/download_optional_kaggle_assets.sh" || true
 
 # ── 9. frontend ──────────────────────────────────────────────────────────────
 if [ "$DEV_UI" = "1" ]; then
@@ -149,7 +149,7 @@ if [ "$DEV_UI" = "1" ]; then
   echo "It will proxy /ui/* to the FastAPI server on 127.0.0.1:8087."
 fi
 
-BUNDLE_INDEX="$FUSION_ROOT/src/fusion_stack/static/app/index.html"
+BUNDLE_INDEX="$CATCHEM_ROOT/src/catchem/static/app/index.html"
 NEED_BUILD=1
 if [ "$SKIP_FRONTEND_BUILD" = "1" ] && [ -f "$BUNDLE_INDEX" ]; then
   log "skipping frontend build (--skip-frontend-build, bundle exists)"
@@ -158,13 +158,13 @@ fi
 
 if [ "$NEED_BUILD" = "1" ]; then
   if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-    if [ ! -d "$FUSION_ROOT/frontend/node_modules" ]; then
+    if [ ! -d "$CATCHEM_ROOT/frontend/node_modules" ]; then
       log "installing frontend npm dependencies (one-time, ~30s)"
-      (cd "$FUSION_ROOT/frontend" && npm install --silent --no-audit --no-fund) || warn "npm install failed; UI will fall back to placeholder page"
+      (cd "$CATCHEM_ROOT/frontend" && npm install --silent --no-audit --no-fund) || warn "npm install failed; UI will fall back to placeholder page"
     fi
-    log "building premium UI bundle into src/fusion_stack/static/app"
-    if (cd "$FUSION_ROOT/frontend" && npm run build 2>&1 | tail -10); then
-      log "UI bundle ready ($(du -sh "$FUSION_ROOT/src/fusion_stack/static/app" | cut -f1))"
+    log "building premium UI bundle into src/catchem/static/app"
+    if (cd "$CATCHEM_ROOT/frontend" && npm run build 2>&1 | tail -10); then
+      log "UI bundle ready ($(du -sh "$CATCHEM_ROOT/src/catchem/static/app" | cut -f1))"
     else
       warn "UI build failed — / will serve the placeholder page; /legacy is still available"
     fi
@@ -175,22 +175,22 @@ if [ "$NEED_BUILD" = "1" ]; then
 fi
 
 # ── 10. init storage and verify ──────────────────────────────────────────────
-log "initializing fusion_stack storage + sanity checks"
-export FUSION_MODE="$MODE"
+log "initializing catchem storage + sanity checks"
+export CATCHEM_MODE="$MODE"
 if [ "$WITH_ML" != "1" ]; then
-  export FUSION_MODELS__USE_ML_STUBS=true
+  export CATCHEM_MODELS__USE_ML_STUBS=true
 fi
-python -m fusion_stack.cli bootstrap-init --skip-warm
+python -m catchem.cli bootstrap-init --skip-warm
 
 # ── 11. optionally run the pipeline ─────────────────────────────────────────
 if [ "$SKIP_BOOTSTRAP_RUN" != "1" ] && [ "$MODE" != "live_tail" ]; then
-  log "running fusion-stack in mode=$MODE (max=$MAX_RECORDS)"
-  python -m fusion_stack.cli run --mode "$MODE" --max-records "$MAX_RECORDS" || warn "run returned non-zero"
+  log "running catchem in mode=$MODE (max=$MAX_RECORDS)"
+  python -m catchem.cli run --mode "$MODE" --max-records "$MAX_RECORDS" || warn "run returned non-zero"
 fi
 
 # ── 12. background API server ────────────────────────────────────────────────
-PID_FILE="$FUSION_ROOT/data/logs/api.pid"
-mkdir -p "$FUSION_ROOT/data/logs"
+PID_FILE="$CATCHEM_ROOT/data/logs/api.pid"
+mkdir -p "$CATCHEM_ROOT/data/logs"
 if [ "$NO_API" != "1" ]; then
   if [ -f "$PID_FILE" ]; then
     OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -202,11 +202,11 @@ if [ "$NO_API" != "1" ]; then
   fi
   if [ ! -f "$PID_FILE" ]; then
     log "starting API in background"
-    nohup python -m fusion_stack.cli serve >"$FUSION_ROOT/data/logs/api.out" 2>&1 &
+    nohup python -m catchem.cli serve >"$CATCHEM_ROOT/data/logs/api.out" 2>&1 &
     echo $! >"$PID_FILE"
     sleep 1
     if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-      log "API up. PID=$(cat "$PID_FILE")  logs=$FUSION_ROOT/data/logs/api.out"
+      log "API up. PID=$(cat "$PID_FILE")  logs=$CATCHEM_ROOT/data/logs/api.out"
     else
       warn "API failed to start; check data/logs/api.out"
     fi
@@ -217,16 +217,16 @@ fi
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
-fusion_stack bootstrap complete
+catchem bootstrap complete
 
   mode:               $MODE
-  fusion root:        $FUSION_ROOT
-  outputs:            $FUSION_ROOT/data/results
-  sqlite:             $FUSION_ROOT/data/db/fusion.sqlite3
-  logs:               $FUSION_ROOT/data/logs/
-  api log:            $FUSION_ROOT/data/logs/api.out
+  catchem root:        $CATCHEM_ROOT
+  outputs:            $CATCHEM_ROOT/data/results
+  sqlite:             $CATCHEM_ROOT/data/db/catchem.sqlite3
+  logs:               $CATCHEM_ROOT/data/logs/
+  api log:            $CATCHEM_ROOT/data/logs/api.out
   awareness data:     $AWARENESS_REPO_PATH/data/jsonl
-  ui bundle:          $FUSION_ROOT/src/fusion_stack/static/app
+  ui bundle:          $CATCHEM_ROOT/src/catchem/static/app
   guard:              OK (NewsImpact still quarantined)
 
 Open:

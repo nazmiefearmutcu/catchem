@@ -9,8 +9,8 @@ from threading import Event, Thread
 
 import pytest
 
-from fusion_stack.settings import load_settings, reload_settings
-from fusion_stack.supervisor import Supervisor
+from catchem.settings import load_settings, reload_settings
+from catchem.supervisor import Supervisor
 
 
 @pytest.mark.smoke
@@ -18,10 +18,10 @@ def test_tail_picks_up_new_files(tmp_path: Path, synth_capture, monkeypatch: pyt
     aware_dir = tmp_path / "aw"
     captures_dir = aware_dir / "jsonl" / "captures" / "2026" / "05" / "16"
     captures_dir.mkdir(parents=True)
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(aware_dir))
-    monkeypatch.setenv("FUSION_MODE", "live_tail")
-    monkeypatch.setenv("FUSION_LIVE__POLL_SECONDS", "0.1")
-    monkeypatch.setenv("FUSION_LIVE__TAIL_MAX_PER_TICK", "10")
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(aware_dir))
+    monkeypatch.setenv("CATCHEM_MODE", "live_tail")
+    monkeypatch.setenv("CATCHEM_LIVE__POLL_SECONDS", "0.1")
+    monkeypatch.setenv("CATCHEM_LIVE__TAIL_MAX_PER_TICK", "10")
     reload_settings()
 
     # Stage the first committed file BEFORE the tail starts. This guarantees the

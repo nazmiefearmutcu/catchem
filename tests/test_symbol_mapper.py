@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fusion_stack.symbol_mapper import SymbolMapper
+from catchem.symbol_mapper import SymbolMapper
 
 
 def test_internal_registry_resolves_majors() -> None:

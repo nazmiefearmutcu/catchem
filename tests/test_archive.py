@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.archive import (
+from catchem.archive import (
     CSV_COLUMNS,
     DriveArchiver,
     csv_path_for_today,
@@ -157,13 +157,13 @@ def archiver_with_records(tmp_path, monkeypatch):
     """Build a real Supervisor on a temp SQLite, ingest 250 demo records,
     and return (archiver, supervisor, drive_dir)."""
     # Point storage at the temp dir.
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FUSION_MODELS__USE_ML_STUBS", "true")
-    monkeypatch.setenv("FUSION_NEWS__POLLER_ENABLED", "false")
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "true")
+    monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "false")
 
-    from fusion_stack.demo import build_capture
-    from fusion_stack.settings import load_settings, reload_settings
-    from fusion_stack.supervisor import Supervisor
+    from catchem.demo import build_capture
+    from catchem.settings import load_settings, reload_settings
+    from catchem.supervisor import Supervisor
 
     reload_settings()
     settings = load_settings()
@@ -240,7 +240,7 @@ def test_archive_once_appends_across_runs(archiver_with_records, monkeypatch) ->
     """A second sweep should APPEND to the same daily CSV, not overwrite it."""
     archiver, sup, drive_dir = archiver_with_records
 
-    from fusion_stack.demo import build_capture
+    from catchem.demo import build_capture
 
     # First sweep: 150 archived.
     first = archiver._archive_once()
@@ -290,7 +290,7 @@ def test_archive_once_does_not_delete_locally_if_csv_write_fails(
     # monkeypatching fallback_drive_dir to point at another blocking file.
     blocked_fallback = tmp_path / "blocked_fallback"
     blocked_fallback.write_text("blocking file")
-    import fusion_stack.archive as archive_mod
+    import catchem.archive as archive_mod
     monkeypatch.setattr(archive_mod, "fallback_drive_dir", lambda: blocked_fallback)
 
     pre_count = None
@@ -327,7 +327,7 @@ def test_archive_once_auto_falls_back_to_documents_when_primary_unwritable(
     # Redirect fallback to a writable temp path so we don't actually
     # touch the real ~/Documents/Catchem.
     fallback_path = tmp_path / "fallback" / "Catchem"
-    import fusion_stack.archive as archive_mod
+    import catchem.archive as archive_mod
     monkeypatch.setattr(archive_mod, "fallback_drive_dir", lambda: fallback_path)
 
     result = archiver._archive_once()

@@ -1,4 +1,4 @@
-"""Canonical fusion_stack output schemas.
+"""Canonical catchem output schemas.
 
 `FinancialImpactRecord` is the single durable artifact this stack produces. Every
 downstream consumer (API, dashboard, exports) reads exactly this shape.
@@ -30,7 +30,7 @@ class SentimentLabel(str, Enum):
 
 
 class AwarenessCaptureView(BaseModel):
-    """Subset of Awareness DocCapture that fusion_stack needs.
+    """Subset of Awareness DocCapture that catchem needs.
 
     Mirrors `awareness.schemas.doc.DocCapture` post-commit. We don't import the
     Awareness type directly here so this module is consumable without an editable
@@ -68,7 +68,7 @@ class AwarenessCaptureView(BaseModel):
 
 
 class FinancialImpactRecord(BaseModel):
-    """The canonical output of fusion_stack for one upstream capture."""
+    """The canonical output of catchem for one upstream capture."""
 
     model_config = ConfigDict(extra="forbid")
 

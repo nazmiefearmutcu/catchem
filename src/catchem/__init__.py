@@ -1,7 +1,7 @@
-"""fusion_stack — sidecar workspace that fuses Awareness ingestion with a guarded
+"""catchem — sidecar workspace that fuses Awareness ingestion with a guarded
 finance-relevance layer.
 
-Architectural invariant: Awareness is the upstream system of record. fusion_stack
+Architectural invariant: Awareness is the upstream system of record. catchem
 consumes JSONL captures after they are durably committed. NewsImpact is treated
 as a quarantined research artifact and is only loaded in research_diagnostic mode.
 """

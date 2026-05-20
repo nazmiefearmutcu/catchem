@@ -1,6 +1,6 @@
 //! Path resolution for dev + release builds.
 //!
-//! Dev build: the fusion_stack repo is the workspace 5 levels above the
+//! Dev build: the catchem repo is the workspace 5 levels above the
 //! Tauri binary. The sidecar uses `.venv/bin/python` from that repo.
 //!
 //! Release build: a PyInstaller-built sidecar binary ships inside
@@ -37,9 +37,9 @@ pub fn dev_python() -> Option<PathBuf> {
 
 /// Resolve a sidecar that ships inside the .app bundle. Returns the path if
 /// it exists. The PyInstaller build places it at
-/// `<resources>/sidecar/fusion-stack-sidecar`.
+/// `<resources>/sidecar/catchem-sidecar`.
 pub fn bundled_sidecar(resource_dir: &PathBuf) -> Option<PathBuf> {
-    let p = resource_dir.join("sidecar").join("fusion-stack-sidecar");
+    let p = resource_dir.join("sidecar").join("catchem-sidecar");
     if p.exists() {
         Some(p)
     } else {
@@ -74,7 +74,7 @@ pub fn sidecar_log_path() -> PathBuf {
 /// On macOS: `~/Library/Application Support/Catchem/`. Created on first use.
 ///
 /// Layout:
-///   data/              — fusion_stack output (SQLite, parquet, dlq, live-news)
+///   data/              — catchem output (SQLite, parquet, dlq, live-news)
 ///   awareness-data/    — Awareness JSONL inbox (when present)
 ///
 /// Dev builds also call this — it's a no-op for them because lib.rs uses
@@ -90,10 +90,10 @@ pub fn app_data_dir() -> PathBuf {
     dir
 }
 
-/// `<app_data_dir>/data` — set as `FUSION_PATHS__FUSION_OUTPUT_DIR` for the
+/// `<app_data_dir>/data` — set as `CATCHEM_PATHS__CATCHEM_OUTPUT_DIR` for the
 /// release sidecar so SQLite, parquet flushes, and live-news archives all
 /// land under Application Support.
-pub fn release_fusion_output_dir() -> PathBuf {
+pub fn release_catchem_output_dir() -> PathBuf {
     let dir = app_data_dir().join("data");
     let _ = std::fs::create_dir_all(&dir);
     dir
@@ -122,9 +122,9 @@ mod tests {
     #[test]
     fn release_subdirs_live_under_app_data_dir() {
         let parent = app_data_dir();
-        let out = release_fusion_output_dir();
+        let out = release_catchem_output_dir();
         let aw = release_awareness_data_dir();
-        assert!(out.starts_with(&parent), "fusion_output_dir not under app_data_dir: {out:?}");
+        assert!(out.starts_with(&parent), "catchem_output_dir not under app_data_dir: {out:?}");
         assert!(aw.starts_with(&parent), "awareness_data_dir not under app_data_dir: {aw:?}");
         assert_eq!(out.file_name().and_then(|s| s.to_str()), Some("data"));
         assert_eq!(aw.file_name().and_then(|s| s.to_str()), Some("awareness-data"));

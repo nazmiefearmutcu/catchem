@@ -1,6 +1,6 @@
 # Catchem Architecture
 
-Catchem is a local-first macOS desktop wrapper around the fusion_stack pipeline. The whole system runs on the analyst's laptop: a Rust shell, a Python sidecar, a React UI, and a local SQLite store. No outbound data leaves the machine unless the analyst clicks a news link (which opens in the system browser, not the webview).
+Catchem is a local-first macOS desktop wrapper around the catchem pipeline. The whole system runs on the analyst's laptop: a Rust shell, a Python sidecar, a React UI, and a local SQLite store. No outbound data leaves the machine unless the analyst clicks a news link (which opens in the system browser, not the webview).
 
 ## Component map
 
@@ -11,7 +11,7 @@ flowchart LR
     S --> C[FastAPI sidecar<br/>127.0.0.1:8087]
     B --> |"window.location.replace once /healthz is 200"| C
     C --> D[React premium UI<br/>frontend/dist served from /static/app]
-    C --> E[fusion_stack Supervisor]
+    C --> E[catchem Supervisor]
     E --> F[Local storage<br/>SQLite + parquet + JSONL]
     E -.->|"guarded, read-only"| G[NewsImpact governance snapshot]
     H[Kaggle assets<br/>optional, offline] --> I[Golden + extended bench data]
@@ -82,10 +82,10 @@ flowchart TD
 
 | Layer            | Dev build                                          | Release build (.app)                                    |
 |------------------|----------------------------------------------------|---------------------------------------------------------|
-| Sidecar python   | `<repo>/.venv/bin/python`                          | `Catchem.app/Contents/Resources/sidecar/fusion-stack-sidecar` |
+| Sidecar python   | `<repo>/.venv/bin/python`                          | `Catchem.app/Contents/Resources/sidecar/catchem-sidecar` |
 | Sidecar cwd      | repo root                                          | `~/Library/Application Support/Catchem/`                |
 | Output dir       | `<repo>/data/`                                     | `~/Library/Application Support/Catchem/data/`           |
-| Awareness inbox  | `FUSION_PATHS__AWARENESS_DATA_DIR` env, default off| `~/Library/Application Support/Catchem/awareness-data/` |
+| Awareness inbox  | `CATCHEM_PATHS__AWARENESS_DATA_DIR` env, default off| `~/Library/Application Support/Catchem/awareness-data/` |
 | Logs             | `<repo>/data/logs/api.out` + sidecar.log           | `~/Library/Logs/Catchem/sidecar.log`                    |
 | Config (yaml)    | `<repo>/configs/`                                  | shipped inside the PyInstaller bundle                   |
 
@@ -93,7 +93,7 @@ Release-mode env vars are set by `sidecar.rs:start()` when `cfg.release_mode == 
 
 ## Static assets
 
-The React premium UI is built once into `frontend/dist`, then copied to `src/fusion_stack/static/app/` by `scripts/fusion_bootstrap_and_run.sh`. The FastAPI app mounts that directory under `/`. `importlib.resources` is used wherever the path crosses an install boundary, so the bundle survives `pip install` into a fresh venv.
+The React premium UI is built once into `frontend/dist`, then copied to `src/catchem/static/app/` by `scripts/catchem_bootstrap_and_run.sh`. The FastAPI app mounts that directory under `/`. `importlib.resources` is used wherever the path crosses an install boundary, so the bundle survives `pip install` into a fresh venv.
 
 The boot shim is a separate, much smaller Vite project under `desktop/catchem/web/`. It builds to `desktop/catchem/web/dist/` which `tauri.conf.json` references as `frontendDist`.
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 
-const KEY = "fusion.theme";
+const KEY = "catchem.theme";
 
 export type Theme = "dark" | "light";
 

@@ -1,0 +1,22 @@
+Nvidia (NVDA) reported fourth-quarter results on Wednesday that easily
+beat Wall Street expectations and raised its outlook for the current
+quarter, sending shares up more than 7% in extended trading.
+
+Revenue came in at $26.4 billion, against consensus estimates near
+$24.6 billion. Data-center revenue, the segment that includes the H200
+and Blackwell accelerator families, rose 92% year over year to
+$19.8 billion. Gaming revenue grew 14% to $2.9 billion.
+
+Chief Executive Jensen Huang said demand for accelerated computing
+"continues to outstrip what we can deliver" and reaffirmed that
+Blackwell shipments are now ramping in volume. Guidance for the next
+quarter implied roughly $30 billion in revenue, well above analyst
+forecasts.
+
+Operating margin expanded to 65.5% from 58.2% a year ago. Free cash
+flow nearly doubled to $15.5 billion. The company also announced a
+$50 billion share-repurchase authorization.
+
+Suppliers and adjacent names rallied with NVDA in after-hours trade.
+AMD added 3.1%, Broadcom (AVGO) was up 2.4%, and TSMC ADRs (TSM) gained
+1.9%. The S&P 500 futures pointed roughly +0.5% higher on the print.

@@ -116,3 +116,72 @@ def test_diagnostic_allowed_only_in_research_mode(monkeypatch: pytest.MonkeyPatc
     reload_settings()
     s = load_settings()
     assert s.diagnostic_allowed() is True
+
+
+# ── Catchem release-mode env contract ───────────────────────────────────────
+#
+# The Tauri shell (`desktop/catchem/src-tauri/src/sidecar.rs`) injects
+# `FUSION_PATHS__FUSION_OUTPUT_DIR` and `FUSION_PATHS__AWARENESS_DATA_DIR`
+# when `SidecarConfig.release_mode == true`, pointing at
+# `~/Library/Application Support/Catchem/{data,awareness-data}/`.
+#
+# These tests pin the Python side of that contract. If pydantic-settings'
+# `env_nested_delimiter='__'` is ever flipped or `Paths.fusion_output_dir`
+# is renamed, the Rust shell's release build would silently fall through
+# to the default `project_root() / data` and start writing inside the .app
+# bundle again. We want a CI-visible failure in that case, not a runtime
+# write attempt to a Gatekeeper-protected directory.
+
+
+def test_fusion_paths_fusion_output_dir_env_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Rust release-mode contract: FUSION_PATHS__FUSION_OUTPUT_DIR wins."""
+    target = tmp_path / "Library" / "Application Support" / "Catchem" / "data"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(target))
+    reload_settings()
+    s = load_settings()
+    assert str(s.paths.fusion_output_dir) == str(target), (
+        "FUSION_PATHS__FUSION_OUTPUT_DIR did not override Paths.fusion_output_dir. "
+        "The Rust shell's release-mode env injection (sidecar.rs cfg.release_mode) "
+        "depends on this contract."
+    )
+
+
+def test_fusion_paths_awareness_data_dir_env_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Rust release-mode contract: FUSION_PATHS__AWARENESS_DATA_DIR wins."""
+    target = tmp_path / "Library" / "Application Support" / "Catchem" / "awareness-data"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(target))
+    reload_settings()
+    s = load_settings()
+    assert str(s.paths.awareness_data_dir) == str(target), (
+        "FUSION_PATHS__AWARENESS_DATA_DIR did not override Paths.awareness_data_dir. "
+        "Rust shell relies on this in release mode."
+    )
+
+
+def test_catchem_release_mode_both_paths_together(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Both Catchem release-mode paths are read independently in the same boot."""
+    out_dir = tmp_path / "AppSupport" / "Catchem" / "data"
+    aw_dir = tmp_path / "AppSupport" / "Catchem" / "awareness-data"
+    out_dir.mkdir(parents=True)
+    aw_dir.mkdir(parents=True)
+    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(out_dir))
+    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(aw_dir))
+    # Plus the production_safe + stubs combination the shell always pins.
+    monkeypatch.setenv("FUSION_MODE", "production_safe")
+    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "false")
+    monkeypatch.setenv("FUSION_USE_ML_STUBS", "true")
+    reload_settings()
+    s = load_settings()
+    assert str(s.paths.fusion_output_dir) == str(out_dir)
+    assert str(s.paths.awareness_data_dir) == str(aw_dir)
+    assert s.mode == "production_safe"
+    assert s.diagnostic_allowed() is False
+    assert s.use_ml_stubs is True

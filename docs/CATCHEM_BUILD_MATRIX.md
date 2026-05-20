@@ -58,10 +58,13 @@ If `APPLE_DEVELOPER_IDENTITY` is not set, the release script still produces an u
 
 | Layer            | Command                                                  | Expected         |
 |------------------|----------------------------------------------------------|------------------|
-| Python contracts | `pytest tests -q`                                        | 222 passed, 1 skipped |
+| Python contracts | `pytest tests -q`                                        | 225 passed, 1 skipped |
 | Rust shell       | `(cd desktop/catchem/src-tauri && cargo test --lib -q)`  | 8 passed         |
 | Frontend         | `(cd frontend && npm test)`                              | 31 passed        |
+| Boot shim        | `(cd desktop/catchem/web && npm test)`                   | 15 passed        |
 | Smoke flow       | `bash scripts/fusion_bootstrap_and_run.sh --skip-frontend-build --no-api --max=20` | exits 0         |
 | Dev window       | `bash desktop/catchem/scripts/build_catchem_dev.sh`      | Window opens, boot stages animate, UI loads after /healthz |
 
 The 1-skip in pytest is `tests/test_existing_repo_regressions.py:51` — gated on `final_best.pt` being present; the prompt forbids touching that file, so the skip is permanent.
+
+**Boot-shim vitest** (added in `e3ba902`) drives `startBootShim()` with mocked `fetch` + a controlled clock so the 5-stage state machine, transient-error retry, deadline timeout, and stage-progression invariants are all exercisable from CI in <100 ms. No GUI needed — the test mounts the production `index.html` body fragment in jsdom.

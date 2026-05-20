@@ -12,6 +12,10 @@ guard and leave `final_best.pt`, `awareness/`, and `merged_news/` untouched.
 | `954ae89` | fix(catchem-security): tighten webview CSP, navigation guard, withGlobalTauri off    | desktop     |
 | `21dfd7f` | fix(catchem-runtime): release sidecar writes under Application Support, not bundle   | desktop     |
 | `b01d80f` | feat(catchem-ux): wire boot shim back in with 5-stage startup state machine          | desktop+ux  |
+| `88c843d` | docs(catchem): architecture diagrams, build matrix, hardening summary, samples       | docs        |
+| `07e6f2e` | test+docs(catchem): release-mode env contract + 4 mockup SVGs + release-build verified | docs+tests |
+| `e3ba902` | test(catchem-boot): extract boot shim into testable module + 15 vitest cases         | tests       |
+| `4146fc6` | fix(catchem-security): narrow capabilities/default.json — 16 perms → 3               | security    |
 
 ## What changed by severity
 
@@ -116,14 +120,17 @@ guard and leave `final_best.pt`, `awareness/`, and `merged_news/` untouched.
 
 ## Test counts
 
-| Suite                                 | Before     | After       | Delta            |
-|---------------------------------------|------------|-------------|------------------|
-| `pytest tests -q`                     | 192 passed | 222 passed  | +30 (with 1 skip — final_best.pt) |
-| `cargo test --lib --quiet`            | 3 passed   | 8 passed    | +5               |
-| `(cd frontend && npm test)`           | 13 passed  | 31 passed   | +18              |
+| Suite                                       | Before     | After       | Delta            |
+|---------------------------------------------|------------|-------------|------------------|
+| `pytest tests -q`                           | 192 passed | 225 passed  | +33 (with 1 skip — final_best.pt) |
+| `cargo test --lib --quiet`                  | 3 passed   | 8 passed    | +5               |
+| `(cd frontend && npm test)`                 | 13 passed  | 31 passed   | +18              |
+| `(cd desktop/catchem/web && npm test)`      | —          | 15 passed   | +15 (new suite)  |
+|                                       total | 208        | **279**     | **+71**          |
 
 (Frontend +18 came from PR #3's prior session and ships unchanged in
-this branch; pytest +30 and cargo +5 are this branch's own additions.)
+this branch; pytest +33, cargo +5, and the entire boot-shim vitest
+suite are this branch's own additions.)
 
 ## What this branch does NOT change
 

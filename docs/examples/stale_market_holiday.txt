@@ -1,0 +1,26 @@
+Major U.S. equity markets were closed on Monday in observance of a
+federal holiday. The New York Stock Exchange and Nasdaq remained dark,
+along with the bond market, which closed early on Friday.
+
+European trading was light. The FTSE 100 finished essentially flat at
+7,612, while the DAX gained 0.1% and the CAC 40 slipped 0.2%. Volumes
+across all three exchanges were less than half of recent twenty-day
+averages, traders said, with the U.S. session offline.
+
+Asian markets had closed mostly mixed in earlier trading. The Nikkei
+225 ended down 0.4%, the Hang Seng was little changed, and Shanghai's
+composite added 0.1%. The yen drifted toward 158 per dollar on thin
+flows.
+
+Crude oil edged lower in electronic trading, with Brent settling near
+$82 a barrel. Gold traded around $2,360. Bitcoin held above $66,000
+on light overnight volume.
+
+Markets reopen Tuesday with U.S. retail-sales data and producer-price
+revisions on the morning calendar.
+
+Note: this is included as a deliberate "low-importance, no actionable
+catalysts" control sample. The pipeline should still classify it as
+finance-related (it is — equity, FX, commodities, crypto, calendar
+data) but assign a much lower finance-relevance score than the Fed or
+Nvidia samples, and produce a thinner evidence list.

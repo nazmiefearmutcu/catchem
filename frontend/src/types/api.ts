@@ -220,3 +220,9 @@ export interface ArchiveNowResponse {
   error: string | null;
   total_archived: number;
 }
+
+/** Result of POST /replay — single pass over the awareness JSONL dir. */
+export interface ReplayRunResponse {
+  processed: number;
+  skipped: number;
+}

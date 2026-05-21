@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api } from "@/lib/api";
+import { resolveShortcut } from "@/lib/nav-shortcuts";
 import { useTheme } from "@/hooks/useTheme";
 import { useLiveStream } from "@/hooks/useLiveStream";
 import { useDesktopAlerts } from "@/hooks/useDesktopAlerts";
@@ -50,17 +51,11 @@ export function Shell() {
       }
       waiting = false;
       if (timer) window.clearTimeout(timer);
-      const k = e.key.toLowerCase();
-      if (k === "o") nav("/");
-      else if (k === "f") nav("/feed");
-      else if (k === "r") nav("/replay");
-      else if (k === "a" || k === "m") nav("/map");
-      else if (k === "s") nav("/symbols");
-      else if (k === "b") nav("/benchmark");
-      else if (k === "c") nav("/model-controls");
-      else if (k === "x") nav("/ops");
-      else if (k === "h") nav("/help");
-      else if (k === ",") nav("/settings");
+      // Canonical key→path lookup. Adding/renaming a chord lives in
+      // lib/nav-shortcuts.ts; the test in tests/navShortcuts.test.ts
+      // cross-checks the doc surfaces against that registry.
+      const route = resolveShortcut(e.key);
+      if (route) nav(route);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

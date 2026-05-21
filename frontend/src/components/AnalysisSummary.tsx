@@ -18,7 +18,10 @@ export function AnalysisSummary({ result }: { result: DemoRunResponse }) {
       <header className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
         <h2 className="text-base font-semibold">Analysis result</h2>
         <div className="flex items-center gap-2 text-[10px] text-[color:var(--fg-dim)]">
-          <span>capture_id <code className="font-mono">{r.capture_id.slice(0, 16)}…</code></span>
+          {/* Truncated visually; full id available on hover + via copy JSON. */}
+          <span title={r.capture_id} data-testid="capture-id-display">
+            capture_id <code className="font-mono">{r.capture_id.slice(0, 16)}…</code>
+          </span>
           <span>·</span>
           <span>jsonl <code className="font-mono">{result.jsonl_basename}</code></span>
         </div>

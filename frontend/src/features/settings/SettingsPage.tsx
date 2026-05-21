@@ -1,17 +1,16 @@
 import { useTheme } from "@/hooks/useTheme";
+import { NAV_SHORTCUTS, chordLabel } from "@/lib/nav-shortcuts";
 
-const SHORTCUTS: { keys: string; description: string }[] = [
+/**
+ * Settings-surface shortcut docs. Built from the canonical NAV_SHORTCUTS
+ * registry. Round 7 canonicalized Analysis on `g a`; the previous
+ * `g m → Market Map` entry conflicted with the palette + HelpPage which
+ * both used `g a`. `m` still works in the handler as an alias for
+ * pre-Round-7 muscle memory, but the docs no longer advertise it.
+ */
+export const SHORTCUTS: { keys: string; description: string }[] = [
   { keys: "⌘K  /  Ctrl+K", description: "Open the command palette" },
-  { keys: "g o", description: "Go to Overview" },
-  { keys: "g f", description: "Go to Live Feed" },
-  { keys: "g r", description: "Go to Replay" },
-  { keys: "g m", description: "Go to Market Map" },
-  { keys: "g s", description: "Go to Symbols" },
-  { keys: "g b", description: "Go to Benchmark Lab" },
-  { keys: "g c", description: "Go to Model Controls" },
-  { keys: "g x", description: "Go to System / Ops" },
-  { keys: "g h", description: "Go to Help" },
-  { keys: "g ,", description: "Go to Settings" },
+  ...NAV_SHORTCUTS.map((s) => ({ keys: chordLabel(s), description: `Go to ${s.label}` })),
   { keys: "Esc", description: "Close drawer / palette" },
 ];
 

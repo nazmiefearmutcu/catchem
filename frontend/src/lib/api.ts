@@ -25,7 +25,7 @@ import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot,
   DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
-  ArchiveStatus, ArchiveNowResponse,
+  ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
 } from "@/types/api";
 
 export const api = {
@@ -79,6 +79,16 @@ export const api = {
   archiveStatus: () => request<ArchiveStatus>("/ui/archive-status"),
   archiveNow: () =>
     request<ArchiveNowResponse>("/ui/archive-now", { method: "POST" }),
+
+  // Run one pass of the supervisor over the configured Awareness JSONL
+  // directory. Used by the Replay tab on /replay so the page name no
+  // longer lies about the surface it exposes.
+  replay: (maxRecords: number = 50) =>
+    request<ReplayRunResponse>("/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_records: maxRecords }),
+    }),
 };
 
 // Safe URL filter for outbound links. Blocks javascript:/data:/file: schemes.

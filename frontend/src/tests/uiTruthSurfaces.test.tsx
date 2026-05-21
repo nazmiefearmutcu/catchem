@@ -24,6 +24,7 @@ vi.mock("@/lib/api", async () => {
       byReason: vi.fn(),
       bySymbol: vi.fn(),
       topSymbols: vi.fn(),
+      quotes: vi.fn(),
       summary: vi.fn(),
       config: vi.fn(),
       metrics: vi.fn(),
@@ -110,6 +111,11 @@ function jsonDefaults() {
   });
   apiMock.recent.mockResolvedValue({ items: [] });
   apiMock.topSymbols.mockResolvedValue({ items: [] });
+  apiMock.quotes.mockResolvedValue({
+    items: [],
+    provider: "local_fixture",
+    generated_at: "2026-05-21T12:00:00+00:00",
+  });
   apiMock.summary.mockResolvedValue(summary());
   apiMock.config.mockResolvedValue({});
   apiMock.metrics.mockResolvedValue({});
@@ -236,6 +242,95 @@ describe("UI truth regressions", () => {
 
     expect(screen.getByText("No matching symbol mentions")).toBeInTheDocument();
     expect(screen.getByText("Clear or change the symbol mention filter.")).toBeInTheDocument();
+  });
+
+  it("Symbols labels fixture quotes as stale local data with provider and timestamp", async () => {
+    apiMock.topSymbols.mockResolvedValue({ items: [{ symbol: "AAPL", count: 4 }] });
+    apiMock.quotes.mockResolvedValue({
+      provider: "local_fixture",
+      generated_at: "2026-05-21T12:00:00+00:00",
+      items: [{
+        symbol: "AAPL",
+        provider: "local_fixture",
+        as_of: "2024-01-02T21:00:00+00:00",
+        retrieved_at: "2026-05-21T12:00:00+00:00",
+        currency: "USD",
+        last: 189.98,
+        prev_close: 188.85,
+        change_abs: 1.13,
+        change_pct: 0.0059846,
+        market_state: "fixture_snapshot",
+        stale_after: "2024-01-02T21:15:00+00:00",
+        freshness_status: "stale",
+        error_code: null,
+      }],
+    });
+
+    renderWithProviders(createElement(SymbolsPage), ["/symbols"]);
+
+    expect(await screen.findByText("stale local fixture")).toBeInTheDocument();
+    expect(screen.getAllByText("local_fixture").length).toBeGreaterThan(0);
+    expect(screen.getByText(/fixture last 189\.98 USD/)).toBeInTheDocument();
+    expect(screen.getByText(/as of/)).toBeInTheDocument();
+    expect(apiMock.quotes).toHaveBeenCalledWith(["AAPL"]);
+  });
+
+  it("Symbols renders unavailable quote contract rows without inventing prices", async () => {
+    apiMock.topSymbols.mockResolvedValue({ items: [{ symbol: "NOPE", count: 2 }] });
+    apiMock.quotes.mockResolvedValue({
+      provider: "local_fixture",
+      generated_at: "2026-05-21T12:00:00+00:00",
+      items: [{
+        symbol: "NOPE",
+        provider: "local_fixture",
+        as_of: null,
+        retrieved_at: "2026-05-21T12:00:00+00:00",
+        currency: null,
+        last: null,
+        prev_close: null,
+        change_abs: null,
+        change_pct: null,
+        market_state: "unavailable",
+        stale_after: null,
+        freshness_status: "unavailable",
+        error_code: "quote_unavailable",
+      }],
+    });
+
+    renderWithProviders(createElement(SymbolsPage), ["/symbols"]);
+
+    expect(await screen.findByText("quote unavailable")).toBeInTheDocument();
+    expect(screen.getByText("quote_unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/fixture last/i)).not.toBeInTheDocument();
+  });
+
+  it("Symbols does not present quote rows as live prices", async () => {
+    apiMock.topSymbols.mockResolvedValue({ items: [{ symbol: "AAPL", count: 4 }] });
+    apiMock.quotes.mockResolvedValue({
+      provider: "local_fixture",
+      generated_at: "2026-05-21T12:00:00+00:00",
+      items: [{
+        symbol: "AAPL",
+        provider: "local_fixture",
+        as_of: "2024-01-02T21:00:00+00:00",
+        retrieved_at: "2026-05-21T12:00:00+00:00",
+        currency: "USD",
+        last: 189.98,
+        prev_close: 188.85,
+        change_abs: 1.13,
+        change_pct: 0.0059846,
+        market_state: "fixture_snapshot",
+        stale_after: "2024-01-02T21:15:00+00:00",
+        freshness_status: "stale",
+        error_code: null,
+      }],
+    });
+
+    renderWithProviders(createElement(SymbolsPage), ["/symbols"]);
+
+    await screen.findByText("stale local fixture");
+    expect(screen.queryByText(/live price/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^live$/i)).not.toBeInTheDocument();
   });
 
   it("Ops shows /ui/guards query errors instead of a permanent skeleton", async () => {

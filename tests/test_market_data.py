@@ -66,6 +66,15 @@ def test_batched_quotes_endpoint_returns_known_and_unavailable_items() -> None:
     assert body["items"][2]["error_code"] == "quote_unavailable"
 
 
+def test_tauri_boot_origin_can_fetch_healthz() -> None:
+    app = create_app(load_settings())
+    with TestClient(app) as client:
+        r = client.get("/healthz", headers={"Origin": "tauri://localhost"})
+
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == "tauri://localhost"
+
+
 def test_single_quote_endpoint_does_not_500_for_unknown_symbol() -> None:
     app = create_app(load_settings())
     with TestClient(app) as client:

@@ -1,15 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { NAV_SHORTCUTS, chordLabel } from "@/lib/nav-shortcuts";
 
-const SHORTCUTS = [
+/**
+ * Help-surface shortcut docs. Built from the canonical NAV_SHORTCUTS
+ * registry so future renames or additions don't drift. Round 7 found
+ * this list previously claimed `g m → Model Controls` and `g s → Settings`
+ * — both wrong; the handler routed those keys to /map and /symbols
+ * respectively.
+ */
+export const SHORTCUTS: { keys: string; description: string }[] = [
   { keys: "⌘K / Ctrl+K", description: "Open the command palette" },
-  { keys: "g o", description: "Overview" },
-  { keys: "g f", description: "Live Feed" },
-  { keys: "g r", description: "Replay/Upload" },
-  { keys: "g a", description: "Analysis" },
-  { keys: "g m", description: "Model Controls" },
-  { keys: "g s", description: "Settings" },
-  { keys: "g h", description: "Help" },
+  ...NAV_SHORTCUTS.map((s) => ({ keys: chordLabel(s), description: s.label })),
   { keys: "Esc", description: "Close drawer / palette" },
 ];
 

@@ -18,6 +18,11 @@ REPO_ROOT="$(cd "$CATCHEM_DIR/../.." && pwd)"
 
 cd "$CATCHEM_DIR"
 
+cleanup_staged_sidecar() {
+  rm -rf "$CATCHEM_DIR/src-tauri/resources"
+}
+trap cleanup_staged_sidecar EXIT
+
 # 1. Build the catchem React bundle into src/catchem/static/app
 (cd "$REPO_ROOT/frontend" && npm install --silent --no-audit --no-fund && npm run build)
 
@@ -33,13 +38,14 @@ rm -rf src-tauri/resources/sidecar/*
 cp -R sidecar-out/catchem-sidecar/* src-tauri/resources/sidecar/
 
 # 5. Patch tauri.conf.json `resources` at build time (without editing the
-#    checked-in file) by passing -c '{"bundle":{"resources":[...]}}'.
+#    checked-in file). Use map syntax so runtime `resource_dir/sidecar`
+#    matches src-tauri/src/paths.rs.
 RES_PATCH=$(cat <<'JSON'
 {
   "bundle": {
-    "resources": [
-      "resources/sidecar/**/*"
-    ]
+    "resources": {
+      "resources/sidecar/": "sidecar"
+    }
   }
 }
 JSON
@@ -66,6 +72,7 @@ cargo-tauri build "${SIGN_FLAGS[@]}"
 # (modifying the plist invalidates any prior signature).
 APP_BUNDLE="$CATCHEM_DIR/src-tauri/target/release/bundle/macos/Catchem.app"
 bash "$CATCHEM_DIR/scripts/inject_info_plist.sh" "$APP_BUNDLE"
+bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_BUNDLE"
 
 echo
 echo "Release build complete:"

@@ -207,6 +207,58 @@ def test_sidecar_status_shape(client: TestClient) -> None:
     assert body["uptime_seconds"] >= 0
 
 
+def test_sidecar_status_reports_actual_bind_not_settings_default() -> None:
+    """`/ui/sidecar-status` MUST surface the host/port we actually bound
+    on, not the value baked into `configs/catchem.yaml`. The Tauri shell's
+    Model Controls page renders `s.api_host:s.api_port` directly as the
+    sidecar connection address — if this drifts from the real bind the
+    operator sees a confidently-wrong number (e.g. "127.0.0.1:8087" when
+    the process is actually serving :9090).
+
+    Recorded via api.record_bind(host, port) which cli.py:serve() calls
+    right before uvicorn.run(). This test pins the contract directly,
+    without spinning up uvicorn — bind a TestClient against a freshly
+    recorded port and confirm the endpoint echoes it back.
+    """
+    from catchem.api import record_bind, create_app
+    from catchem.settings import load_settings, reload_settings
+    reload_settings()
+    record_bind("127.0.0.1", 9090)
+    app = create_app(load_settings())
+    with TestClient(app) as c:
+        body = c.get("/ui/sidecar-status").json()
+        assert body["api_host"] == "127.0.0.1"
+        assert body["api_port"] == 9090, (
+            f"expected the actual bind port (9090) to win over settings "
+            f"default; got {body['api_port']}"
+        )
+    # Reset for downstream tests that depend on the settings fallback.
+    record_bind("__reset__", 0)
+    # Direct hit to the module to wipe the recorded values.
+    import catchem.api as _api
+    _api._BIND_HOST = None
+    _api._BIND_PORT = None
+
+
+def test_sidecar_status_falls_back_to_settings_when_bind_unrecorded() -> None:
+    """If record_bind was never called (e.g. the API was created by a
+    test harness that didn't run uvicorn), `/ui/sidecar-status` must
+    fall back to settings.api.host/port rather than expose `None`.
+    """
+    import catchem.api as _api
+    _api._BIND_HOST = None
+    _api._BIND_PORT = None
+    from catchem.api import create_app
+    from catchem.settings import load_settings, reload_settings
+    reload_settings()
+    s = load_settings()
+    app = create_app(s)
+    with TestClient(app) as c:
+        body = c.get("/ui/sidecar-status").json()
+        assert body["api_host"] == s.api.host
+        assert body["api_port"] == s.api.port
+
+
 # ── /ui/log-tail ────────────────────────────────────────────────────────────
 
 def test_log_tail_empty_when_no_log_yet(client: TestClient) -> None:

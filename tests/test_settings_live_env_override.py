@@ -164,6 +164,55 @@ def test_catchem_paths_awareness_data_dir_env_override(
     )
 
 
+def test_catchem_api_host_and_port_use_nested_delim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rust shell contract: `CATCHEM_API__HOST` / `CATCHEM_API__PORT`
+    (DOUBLE underscore) configures the bind, not `CATCHEM_API_HOST` /
+    `CATCHEM_API_PORT` (single).
+
+    The Tauri shell (desktop/catchem/src-tauri/src/sidecar.rs) passes
+    these env vars to the spawned Python sidecar. With the single-
+    underscore variant pydantic-settings can't navigate into ApiConfig
+    and silently keeps the YAML/default value — which broke any
+    attempt to move the port (multiple sidecar instances, port-
+    conflict avoidance, test isolation).
+
+    Pin both directions so a future contributor renaming or flipping
+    the delimiter sees the test fail in CI before the runtime
+    regression hits an operator.
+    """
+    monkeypatch.setenv("CATCHEM_API__HOST", "127.0.0.99")
+    monkeypatch.setenv("CATCHEM_API__PORT", "58088")
+    reload_settings()
+    s = load_settings()
+    assert s.api.host == "127.0.0.99"
+    assert s.api.port == 58088
+
+
+def test_catchem_api_single_underscore_is_silently_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The single-underscore form is NOT honored by pydantic-settings
+    when the field lives under a nested model. This test exists so a
+    future contributor who notices both forms in env-var lists doesn't
+    'fix' it by adding alias support — that would mask the contract
+    the Rust shell now follows.
+    """
+    monkeypatch.setenv("CATCHEM_API_HOST", "127.0.0.99")
+    monkeypatch.setenv("CATCHEM_API_PORT", "58088")
+    reload_settings()
+    s = load_settings()
+    # Defaults from configs/catchem.yaml (or ApiConfig defaults) win —
+    # the single-underscore env vars do nothing for nested models.
+    assert s.api.host != "127.0.0.99", (
+        "single-underscore CATCHEM_API_HOST was honored — that breaks the "
+        "Rust shell's contract and means the regression that motivated "
+        "this test has been re-introduced."
+    )
+    assert s.api.port != 58088
+
+
 def test_catchem_release_mode_both_paths_together(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

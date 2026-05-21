@@ -145,13 +145,20 @@ def serve(
     import uvicorn
 
     s = load_settings()
-    from .api import create_app
+    from .api import create_app, record_bind
+
+    # Resolve the actual host/port FIRST, then record it so /ui/sidecar-status
+    # reports the bind truth rather than the static settings value. Without
+    # this, `--port 9090` still surfaces as `:8087` in the Tauri shell.
+    bind_host = host or s.api.host
+    bind_port = int(port or s.api.port)
+    record_bind(bind_host, bind_port)
 
     app_ = create_app(s)
     uvicorn.run(
         app_,
-        host=host or s.api.host,
-        port=int(port or s.api.port),
+        host=bind_host,
+        port=bind_port,
         log_level=s.logging_.level.lower(),
     )
 

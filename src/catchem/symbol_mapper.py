@@ -24,10 +24,27 @@ from .logging import get_logger
 logger = get_logger("catchem.symbol_mapper")
 
 
-_PAREN_TICKER_RE = re.compile(r"\(([A-Z]{1,6}(?:\.[A-Z])?)\)")
+# Match either a bare-paren ticker like `(AAPL)` or `(BRK.B)` OR an
+# exchange-prefixed form like `(NASDAQ: AAPL)`, `(NYSE: BRK.B)`, `(LSE:HSBA)`.
+# Benzinga, CNBC, MarketWatch, Yahoo, Reuters and Bloomberg all use the
+# prefixed form in body copy, and the previous bare-paren-only regex was
+# silently missing the actual article subject — e.g. a piece about Li Auto
+# would surface candidate_symbols = ["TSLA", "MS", "^IXIC"] (all picked up
+# from background mentions) and entirely omit the subject "LI".
+#
+# Anchored exchanges: NASDAQ, NYSE, NYSEAMERICAN, AMEX, OTC, LSE, TSX, HKEX,
+# SSE, SZSE, FRA, ETR, BIT, BME, EPA, BIST. The whitespace after the colon
+# is optional so `(NASDAQ:LI)` works too. We capture group 1 as the ticker.
+_PAREN_TICKER_RE = re.compile(
+    r"\(\s*(?:(?:NASDAQ|NYSE(?:AMERICAN)?|AMEX|OTC|LSE|TSX|HKEX|SSE|SZSE|FRA|ETR|BIT|BME|EPA|BIST)\s*:\s*)?"
+    r"([A-Z]{1,6}(?:\.[A-Z])?)\s*\)"
+)
 _TICKER_DENYLIST = {
     "CEO", "CFO", "COO", "CTO", "IPO", "ETF", "ETFS", "GDP", "CPI", "PPI",
     "SEC", "FTC", "FDA", "FOMC", "ECB", "BOJ", "BOE", "PBOC", "RBA",
+    # Common false matches inside the exchange-prefixed form when the
+    # regex doesn't bind to a real exchange but to a bare paren with the
+    # acronym alone, e.g. "Filed with the SEC (SEC)" → drop.
 }
 
 

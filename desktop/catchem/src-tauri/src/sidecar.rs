@@ -67,8 +67,16 @@ impl SidecarState {
         // never be enabled from the desktop shell.
         cmd.env("CATCHEM_MODE", "production_safe");
         cmd.env("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "false");
-        cmd.env("CATCHEM_API_HOST", &cfg.host);
-        cmd.env("CATCHEM_API_PORT", cfg.port.to_string());
+        // The Python settings layer keys host/port under `api.host` and
+        // `api.port`, so the env override has to use pydantic-settings'
+        // nested delimiter (`__`). Without the double underscore the
+        // sidecar would silently ignore us and bind whatever
+        // `configs/catchem.yaml` says (default 8087), which in turn
+        // breaks the Tauri shell's polling URL the moment anyone tries
+        // to move the port (e.g. avoid a conflict with another local
+        // service or run a second sidecar for testing).
+        cmd.env("CATCHEM_API__HOST", &cfg.host);
+        cmd.env("CATCHEM_API__PORT", cfg.port.to_string());
         // Stub default — the user can opt into HF via a separate setup script.
         cmd.env("CATCHEM_USE_ML_STUBS", "true");
         // Force unbuffered Python output so errors surface immediately.

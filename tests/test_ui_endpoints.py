@@ -181,3 +181,50 @@ def test_production_safe_summary_refuses_diagnostic(monkeypatch: pytest.MonkeyPa
         data = r.json()
         assert data["is_production_safe"] is True
         assert data["diagnostic_allowed"] is False
+
+
+# -------------------------------------------------------------------------
+# _display_path / /ui/archive-status redaction (Round 6 Bug 1)
+# Guards against re-leaking `/Users/<name>/...` into user-facing JSON.
+# -------------------------------------------------------------------------
+
+def test_display_path_redacts_home_to_tilde(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Paths under $HOME render as `~/...`; paths outside $HOME pass through."""
+    from catchem.api import _display_path
+    fake_home = tmp_path / "Users" / "fake-user"
+    fake_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    inside = fake_home / "Documents" / "Catchem"
+    assert _display_path(inside) == "~/Documents/Catchem"
+    assert _display_path(fake_home) == "~"
+    assert _display_path(None) is None
+    # Outside $HOME (e.g. mounted drive, /tmp in CI) → pass through unchanged.
+    outside = Path("/var/empty/somewhere")
+    assert _display_path(outside) == "/var/empty/somewhere"
+
+
+def test_archive_status_redacts_paths_to_tilde(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """/ui/archive-status must not leak absolute /Users/... paths."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    drive = fake_home / "Documents" / "Catchem"
+    drive.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_ARCHIVE__DRIVE_DIR", str(drive))
+    reload_settings()
+    s = load_settings()
+    app = create_app(s)
+    with TestClient(app) as c:
+        r = c.get("/ui/archive-status")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["enabled"] is True
+        assert data["drive_dir"] == "~/Documents/Catchem", data
+        # current_csv_path may be None until a sweep runs, but if set must
+        # also be tilde-redacted.
+        if data.get("current_csv_path"):
+            assert data["current_csv_path"].startswith("~/")

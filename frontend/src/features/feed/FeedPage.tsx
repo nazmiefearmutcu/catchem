@@ -72,9 +72,10 @@ export function FeedPage() {
       return api.recent(200, filters.relevant !== "all");
     },
     staleTime: 3_000,
-    // Polling fallback: even with SSE up, the news poller runs every 20s,
-    // and this guarantees the feed redraws within ~5s of a new ingest if
-    // SSE is dropped or the browser tab is throttled.
+    // Polling fallback: even with SSE up, the news poller runs every 10s
+    // (NewsPollerConfig.poll_interval_seconds), and this guarantees the
+    // feed redraws within ~5s of a new ingest if SSE is dropped or the
+    // browser tab is throttled.
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
   });
@@ -286,7 +287,7 @@ export function FeedPage() {
               </span>
             </span>
             <span>
-              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 15))}s
+              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 10))}s
             </span>
             <span>
               last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>

@@ -195,6 +195,8 @@ export interface NewsStatus {
   last_avg_publisher_lag_seconds: number | null;
   /** Median seconds. More honest than the avg when a few backfill items skew it. */
   last_median_publisher_lag_seconds: number | null;
+  /** Number of configured feeds with the latest health check failing. */
+  unhealthy_feeds?: number;
 }
 
 export interface NewsPollNowResponse {

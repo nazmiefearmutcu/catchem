@@ -194,8 +194,11 @@ export function FeedPage() {
     return items;
   }, [stableRows, filters]);
 
+  const unhealthyFeeds = news.data?.unhealthy_feeds ?? 0;
   const newsStatus = news.data?.last_error
     ? { color: "bg-bad", label: "error" }
+    : unhealthyFeeds > 0
+      ? { color: "bg-warn", label: "degraded" }
     : news.data?.is_polling
       ? { color: "bg-accent", label: "fetching" }
       : (news.data?.empty_ticks ?? 0) >= 5
@@ -293,6 +296,11 @@ export function FeedPage() {
             <span>
               {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 10))}s
             </span>
+            {unhealthyFeeds > 0 && (
+              <span className="text-warn">
+                {unhealthyFeeds} source{unhealthyFeeds === 1 ? "" : "s"} with latest fetch issue
+              </span>
+            )}
             <span>
               last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>
               {news.data.last_ingested > 0 && (

@@ -68,6 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   // @ts-expect-error allow next test to install its own
   delete globalThis.EventSource;
 });
@@ -79,12 +80,37 @@ describe("useLiveStream", () => {
     expect(FakeEventSource.last().url).toBe("/ui/stream");
   });
 
-  it("transitions to 'open' when the stream fires open", () => {
+  it("stays connecting on socket open until the first data beat arrives", () => {
     const { result } = renderHook(() => useLiveStream(), { wrapper });
     act(() => {
       FakeEventSource.last().onopen?.();
     });
+    expect(result.current.status).toBe("connecting");
+    expect(result.current.lastBeatAt).toBeNull();
+
+    act(() => {
+      FakeEventSource.last().emit("summary");
+    });
     expect(result.current.status).toBe("open");
+    expect(result.current.lastBeatAt).not.toBeNull();
+  });
+
+  it("invalidates symbol queries when live summary or tick events arrive", () => {
+    const spy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+
+    renderHook(() => useLiveStream(), { wrapper });
+    act(() => {
+      FakeEventSource.last().emit("summary");
+    });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["top-symbols"] });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ predicate: expect.any(Function) }));
+
+    spy.mockClear();
+    act(() => {
+      FakeEventSource.last().emit("tick");
+    });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["top-symbols"] });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ predicate: expect.any(Function) }));
   });
 
   it("switches to polling and schedules a reconnect after onerror", () => {

@@ -164,8 +164,17 @@ class Storage:
                 conn.close()
 
     # ── record write ---------------------------------------------------------
-    def insert_record(self, rec: FinancialImpactRecord) -> None:
+    def insert_record(self, rec: FinancialImpactRecord) -> bool:
+        """Insert or replace a record.
+
+        Returns True when the capture_id was new to the SQLite truth store,
+        False when an existing record was replaced.
+        """
         with self._lock, self._connection() as conn:
+            existed = conn.execute(
+                "SELECT 1 FROM records WHERE capture_id = ?",
+                (rec.capture_id,),
+            ).fetchone() is not None
             conn.execute(
                 """
                 INSERT OR REPLACE INTO records (
@@ -238,6 +247,7 @@ class Storage:
             self._pending_rows.append(_record_to_row(rec))
             if len(self._pending_rows) >= self.rotate_parquet_records:
                 self._flush_parquet_locked()
+            return not existed
 
     def flush(self) -> None:
         with self._lock:

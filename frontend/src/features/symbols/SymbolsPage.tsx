@@ -7,6 +7,9 @@ import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
 export function SymbolsPage() {
   const top = useQuery({ queryKey: ["top-symbols"], queryFn: () => api.topSymbols(100) });
   const [q, setQ] = useState("");
+  const filteredItems = (top.data?.items ?? []).filter((it) =>
+    !q || it.symbol.toLowerCase().includes(q.toLowerCase()),
+  );
 
   return (
     <div className="grid gap-3">
@@ -22,11 +25,10 @@ export function SymbolsPage() {
       </div>
       {top.isLoading ? <Skeleton className="h-72" /> :
         top.error ? <ErrorBox err={top.error} /> :
-        !top.data || top.data.items.length === 0 ? <EmptyState title="No symbols found" hint="Run a replay first." /> : (
+        !top.data || top.data.items.length === 0 ? <EmptyState title="No symbols found" hint="Run a replay first." /> :
+        filteredItems.length === 0 ? <EmptyState title="No matching symbols" hint="Clear or change the symbol filter." /> : (
           <ul className="grid gap-1 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {top.data.items
-              .filter((it) => !q || it.symbol.toLowerCase().includes(q.toLowerCase()))
-              .map((it) => (
+            {filteredItems.map((it) => (
                 <li key={it.symbol}>
                   <Link
                     to={`/symbols/${encodeURIComponent(it.symbol)}`}

@@ -52,19 +52,39 @@ class Supervisor:
         return rec
 
     # ── replay ───────────────────────────────────────────────────────────
-    def run_replay(self, max_records: int | None = None) -> dict[str, int]:
+    def run_replay(self, max_records: int | None = None) -> dict[str, Any]:
         root = discover_awareness_jsonl_root(self.settings.paths.awareness_data_dir)
         runner = ReplayRunner(root=root, storage=self.storage, offset_persist_seconds=self.settings.replay.offset_persist_seconds)
+        records_before = self.storage.count_records()
+        dlq_before = self.storage.dlq_count()
+        inserted = 0
+        replaced = 0
 
         def handle(cap: AwarenessCaptureView) -> None:
-            try:
-                self.process_capture(cap)
-            except Exception as exc:
-                self.storage.record_failure(cap.capture_id, str(exc), (cap.text or "")[:2000])
+            nonlocal inserted, replaced
+            rec = self.service.process(cap)
+            was_inserted = self.storage.insert_record(rec)
+            if was_inserted:
+                inserted += 1
+            else:
+                replaced += 1
 
         counts = runner.run_once(handle, max_records=max_records)
         self.storage.flush()
-        return counts
+        records_after = self.storage.count_records()
+        dlq_after = self.storage.dlq_count()
+        dlq_delta = max(0, dlq_after - dlq_before)
+        return {
+            **counts,
+            "failed": counts.get("failed", dlq_delta),
+            "dlq": dlq_after,
+            "dlq_delta": dlq_delta,
+            "records_before": records_before,
+            "records_after": records_after,
+            "inserted": inserted,
+            "replaced": replaced,
+            "net_new_records": max(0, records_after.get("total", 0) - records_before.get("total", 0)),
+        }
 
     # ── live tail ────────────────────────────────────────────────────────
     def run_tail(self, stop: Any = None) -> None:

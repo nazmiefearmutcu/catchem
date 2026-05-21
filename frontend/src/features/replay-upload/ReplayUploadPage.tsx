@@ -229,6 +229,16 @@ function ReplayForm() {
   // accepts any positive integer. We clamp client-side to keep the UI
   // honest about what we'll ask for — a 0 or negative value would no-op.
   const ready = Number.isFinite(maxRecords) && maxRecords > 0;
+  const replayNetNew = result?.net_new_records ?? (
+    result ? Math.max(0, result.processed - result.skipped) : 0
+  );
+  const replayFailed = result?.failed ?? 0;
+  const replayDlq = result?.dlq ?? 0;
+  const replayDlqDelta = result?.dlq_delta ?? replayFailed;
+  const replayInserted = result?.inserted ?? replayNetNew;
+  const replayReplaced = result?.replaced ?? 0;
+  const replayBeforeTotal = result?.records_before?.total;
+  const replayAfterTotal = result?.records_after?.total;
 
   return (
     <>
@@ -291,7 +301,7 @@ function ReplayForm() {
             <h2 className="text-base font-semibold">Replay result</h2>
             <span className="text-[10px] text-[color:var(--fg-dim)]">max scanned: {maxRecords.toLocaleString()}</span>
           </header>
-          <div className="grid gap-3 grid-cols-2 md:grid-cols-3">
+          <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
             <div className="card">
               <div className="label">processed</div>
               <div className="mt-1 text-xl font-semibold tabular-nums text-good" data-testid="replay-processed">
@@ -305,16 +315,49 @@ function ReplayForm() {
               </div>
             </div>
             <div className="card">
-              <div className="label">net new</div>
-              <div className="mt-1 text-xl font-semibold tabular-nums">
-                {(result.processed - result.skipped).toLocaleString()}
+              <div className="label">failed</div>
+              <div className={`mt-1 text-xl font-semibold tabular-nums ${replayFailed > 0 ? "text-bad" : ""}`} data-testid="replay-failed">
+                {replayFailed.toLocaleString()}
               </div>
             </div>
+            <div className="card">
+              <div className="label">DLQ</div>
+              <div className={`mt-1 text-xl font-semibold tabular-nums ${replayDlqDelta > 0 ? "text-bad" : ""}`} data-testid="replay-dlq">
+                {replayDlq.toLocaleString()}
+                {replayDlqDelta > 0 && <span className="ml-1 text-xs">+{replayDlqDelta.toLocaleString()}</span>}
+              </div>
+            </div>
+            <div className="card">
+              <div className="label">net new records</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums text-good" data-testid="replay-net-new">
+                {replayNetNew.toLocaleString()}
+              </div>
+            </div>
+            <div className="card">
+              <div className="label">inserted</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums" data-testid="replay-inserted">
+                {replayInserted.toLocaleString()}
+              </div>
+            </div>
+            <div className="card">
+              <div className="label">replaced</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums" data-testid="replay-replaced">
+                {replayReplaced.toLocaleString()}
+              </div>
+            </div>
+            {replayBeforeTotal !== undefined && replayAfterTotal !== undefined && (
+              <div className="card">
+                <div className="label">records total</div>
+                <div className="mt-1 text-xl font-semibold tabular-nums" data-testid="replay-records-total">
+                  {replayBeforeTotal.toLocaleString()} → {replayAfterTotal.toLocaleString()}
+                </div>
+              </div>
+            )}
           </div>
           <p className="mt-3 text-[10px] text-[color:var(--fg-muted)]">
-            Newly-materialized records appear in the Live Feed automatically. If <code className="font-mono">processed</code> is
-            zero, either the awareness data directory is empty or all captures up to <code className="font-mono">max</code> were
-            already in storage.
+            Newly-inserted records appear in the Live Feed automatically. <code className="font-mono">net_new_records</code> comes
+            from storage before/after totals; <code className="font-mono">processed</code>, <code className="font-mono">skipped</code>,
+            and <code className="font-mono">failed</code> describe the replay pass itself.
           </p>
         </article>
       )}

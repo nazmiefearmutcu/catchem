@@ -72,3 +72,62 @@ def test_replay_idempotent(tmp_path: Path, write_jsonl, synth_capture, monkeypat
         assert c2["processed"] == 0
     finally:
         sup.close()
+
+
+@pytest.mark.integration
+def test_replay_reports_storage_truth_fields(
+    tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cap = synth_capture(capture_id="c-truth", doc_id="d-truth")
+    write_jsonl([json.loads(cap.model_dump_json())])
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    from catchem.settings import reload_settings
+    reload_settings()
+    sup = Supervisor(load_settings())
+    try:
+        c1 = sup.run_replay()
+        assert c1["processed"] == 1
+        assert c1["failed"] == 0
+        assert c1["inserted"] == 1
+        assert c1["replaced"] == 0
+        assert c1["net_new_records"] == 1
+        assert c1["records_before"]["total"] == 0
+        assert c1["records_after"]["total"] == 1
+        assert c1["dlq_delta"] == 0
+
+        c2 = sup.run_replay()
+        assert c2["processed"] == 0
+        assert c2["failed"] == 0
+        assert c2["inserted"] == 0
+        assert c2["replaced"] == 0
+        assert c2["net_new_records"] == 0
+    finally:
+        sup.close()
+
+
+@pytest.mark.integration
+def test_replay_reports_handler_failures_as_failed_and_dlq(
+    tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cap = synth_capture(capture_id="c-fail", doc_id="d-fail")
+    write_jsonl([json.loads(cap.model_dump_json())])
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    from catchem.settings import reload_settings
+    reload_settings()
+    sup = Supervisor(load_settings())
+    try:
+        def boom(_cap: AwarenessCaptureView):
+            raise RuntimeError("synthetic process failure")
+
+        monkeypatch.setattr(sup.service, "process", boom)
+        counts = sup.run_replay()
+        assert counts["processed"] == 0
+        assert counts["skipped"] == 1
+        assert counts["failed"] == 1
+        assert counts["dlq_delta"] == 1
+        assert counts["dlq"] == 1
+        assert counts["inserted"] == 0
+        assert counts["replaced"] == 0
+        assert counts["net_new_records"] == 0
+    finally:
+        sup.close()

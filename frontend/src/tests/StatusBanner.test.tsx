@@ -48,4 +48,16 @@ describe("StatusBanner", () => {
     );
     expect(screen.getByText(/missing governance_index/)).toBeInTheDocument();
   });
+
+  it("shows guard error code when raw error is redacted", () => {
+    render(
+      <StatusBanner
+        mode="production_safe"
+        diagnosticAllowed={false}
+        useMlStubs={true}
+        guards={{ ok: false, error_code: "missing_governance_index" }}
+      />
+    );
+    expect(screen.getByText(/missing_governance_index/)).toBeInTheDocument();
+  });
 });

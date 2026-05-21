@@ -142,12 +142,16 @@ export function FeedPage() {
       return;
     }
     if (!isFrozen) {
+      const shouldSeedFirstNonEmptySnapshot =
+        !firstSnapshotApplied.current ||
+        (incoming.length > 0 && stableRows.length === 0 && seenIds.current.size === 0);
+
       // Free viewport — merge in place, sorted, deduped.
       setStableRows((prev) => mergeByCaptureId(prev, incoming));
       setBuffered([]);
       // Detect genuinely new items vs the seen-set and flash them.
       // Skip the very first snapshot (the initial backfill is not "new").
-      if (firstSnapshotApplied.current) {
+      if (!shouldSeedFirstNonEmptySnapshot) {
         const newOnes = incoming
           .map((i) => i.capture_id)
           .filter((id) => !seenIds.current.has(id));
@@ -189,6 +193,14 @@ export function FeedPage() {
     }
     return items;
   }, [stableRows, filters]);
+
+  const newsStatus = news.data?.last_error
+    ? { color: "bg-bad", label: "error" }
+    : news.data?.is_polling
+      ? { color: "bg-accent", label: "fetching" }
+      : (news.data?.empty_ticks ?? 0) >= 5
+        ? { color: "bg-warn", label: "quiet" }
+        : { color: "bg-good", label: "live" };
 
   return (
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
@@ -270,20 +282,12 @@ export function FeedPage() {
             <span className="inline-flex items-center gap-1.5">
               <span
                 className={`inline-block h-1.5 w-1.5 rounded-full animate-pulse-dot ${
-                  news.data.is_polling
-                    ? "bg-accent"
-                    : news.data.empty_ticks >= 5
-                      ? "bg-warn"
-                      : "bg-good"
+                  newsStatus.color
                 }`}
                 aria-hidden="true"
               />
               <span className="uppercase tracking-wider">
-                {news.data.is_polling
-                  ? "fetching"
-                  : news.data.empty_ticks >= 5
-                    ? "quiet"
-                    : "live"}
+                {newsStatus.label}
               </span>
             </span>
             <span>
@@ -363,7 +367,7 @@ export function FeedPage() {
               </button>
             </span>
             {news.data.last_error && (
-              <span className="text-warn" title={news.data.last_error}>· error</span>
+              <span className="text-bad" title={news.data.last_error}>· {news.data.last_error}</span>
             )}
           </div>
         )}
@@ -392,7 +396,7 @@ export function FeedPage() {
                   ?? "—"}
               </span>
             </span>
-            <span>cap {archive.data.local_cap_rows}</span>
+            <span>cap {archive.data.local_cap_rows == null ? "—" : archive.data.local_cap_rows}</span>
             <span>every {Math.round(archive.data.interval_seconds ?? 30)}s</span>
             {archive.data.last_run_at && (
               <span>last drain <span className="text-[color:var(--fg)]">{fmtRel(archive.data.last_run_at) || "—"}</span></span>

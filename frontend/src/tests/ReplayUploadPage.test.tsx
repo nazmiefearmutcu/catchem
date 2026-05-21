@@ -68,7 +68,18 @@ describe("ReplayUploadPage", () => {
   });
 
   it("Run replay posts to /replay with clamped max_records and shows the result", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ processed: 7, skipped: 3 }));
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      processed: 7,
+      skipped: 3,
+      failed: 1,
+      dlq: 5,
+      dlq_delta: 1,
+      records_before: { total: 20, finance_relevant: 12 },
+      records_after: { total: 22, finance_relevant: 13 },
+      inserted: 2,
+      replaced: 4,
+      net_new_records: 2,
+    }));
 
     render(createElement(ReplayUploadPage), { wrapper });
     fireEvent.click(screen.getByTestId("tab-replay"));
@@ -91,6 +102,12 @@ describe("ReplayUploadPage", () => {
 
     expect(screen.getByTestId("replay-processed")).toHaveTextContent("7");
     expect(screen.getByTestId("replay-skipped")).toHaveTextContent("3");
+    expect(screen.getByTestId("replay-failed")).toHaveTextContent("1");
+    expect(screen.getByTestId("replay-dlq")).toHaveTextContent("5+1");
+    expect(screen.getByTestId("replay-net-new")).toHaveTextContent("2");
+    expect(screen.getByTestId("replay-inserted")).toHaveTextContent("2");
+    expect(screen.getByTestId("replay-replaced")).toHaveTextContent("4");
+    expect(screen.getByTestId("replay-records-total")).toHaveTextContent("20 → 22");
   });
 
   it("Run replay clamps the max input above 5000", () => {

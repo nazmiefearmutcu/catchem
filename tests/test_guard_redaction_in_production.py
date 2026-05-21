@@ -119,6 +119,7 @@ def test_safe_guard_view_classifies_errors_without_leaking() -> None:
     out = safe_guard_view(snap)
     assert out["ok"] is False
     assert out["error_code"] == "missing_governance_index"
+    assert "error" not in out
     # No path leak
     assert "/Users" not in str(out)
 
@@ -213,6 +214,21 @@ def test_ui_guards_endpoint_does_not_leak_path(prod_safe_app) -> None:
         if isinstance(v, str):
             assert "/Users/" not in v
             assert "/etc/" not in v
+
+
+def test_ui_guards_failure_contract_uses_error_code_not_error(prod_safe_app) -> None:
+    client, _ = prod_safe_app
+    with patch(
+        "catchem.api._guard_snapshot",
+        return_value={"ok": False, "error": "/Users/secret/governance_index.json missing"},
+    ):
+        r = client.get("/ui/guards")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "missing_governance_index"
+    assert "error" not in body
+    assert "/Users" not in str(body)
 
 
 def test_metrics_diagnostic_pinned_false_in_production_safe(prod_safe_app) -> None:

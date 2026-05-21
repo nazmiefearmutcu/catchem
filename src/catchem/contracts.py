@@ -181,6 +181,34 @@ class LogTailResponse(_CompactBase):
     truncated: bool
 
 
+class MarketQuote(_CompactBase):
+    """Local market quote contract.
+
+    Fixture-backed quotes are explicitly stale; this model is a UI-safe shape,
+    not a live-price promise.
+    """
+
+    symbol: str
+    provider: str
+    as_of: str | None = None
+    retrieved_at: str
+    currency: str | None = None
+    last: float | None = None
+    prev_close: float | None = None
+    change_abs: float | None = None
+    change_pct: float | None = None
+    market_state: str
+    stale_after: str | None = None
+    freshness_status: str
+    error_code: str | None = None
+
+
+class MarketQuoteBatchResponse(_CompactBase):
+    items: list[MarketQuote]
+    provider: str
+    generated_at: str
+
+
 __all__ = [
     "FinancialImpactSummary",
     "FinancialImpactDetail",
@@ -191,4 +219,6 @@ __all__ = [
     "AppInfoResponse",
     "SidecarStatusResponse",
     "LogTailResponse",
+    "MarketQuote",
+    "MarketQuoteBatchResponse",
 ]

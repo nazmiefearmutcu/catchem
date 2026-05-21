@@ -1,0 +1,11 @@
+{
+  "$schema": "../../../../../../../../.schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Catchem default capability set — narrowed to what JS actually invokes. Audit grep before adding: no @tauri-apps imports, no invoke() calls, no window.__TAURI access anywhere in frontend/ or desktop/catchem/web/ (2026-05-20). All sidecar lifecycle + external-link hand-off happens in Rust, not JS, so the JS-callable surface is intentionally tiny.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:event:default"
+  ]
+}

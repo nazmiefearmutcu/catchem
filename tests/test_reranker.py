@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fusion_stack.reranker import RerankerStub
+from catchem.reranker import RerankerStub
 
 
 def test_rerank_prefers_exact_match() -> None:

@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.awareness_reader import parse_capture_line
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.storage import Storage
+from catchem.awareness_reader import parse_capture_line
+from catchem.schemas import AwarenessCaptureView
+from catchem.storage import Storage
 
 
 def test_capture_view_coerces_naive_datetime_to_utc() -> None:
@@ -47,8 +47,8 @@ def test_capture_view_accepts_missing_published_ts() -> None:
 
 
 def test_storage_serializes_published_ts_as_iso_string(tmp_path: Path) -> None:
-    from fusion_stack.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-    s = Storage(db_path=tmp_path / "fusion.sqlite3",
+    from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
+    s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     pub = datetime(2026, 5, 16, 10, 0, 0, tzinfo=timezone.utc)
     rec = FinancialImpactRecord(
@@ -73,8 +73,8 @@ def test_storage_serializes_published_ts_as_iso_string(tmp_path: Path) -> None:
 
 
 def test_storage_handles_record_with_no_published_ts(tmp_path: Path) -> None:
-    from fusion_stack.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-    s = Storage(db_path=tmp_path / "fusion.sqlite3",
+    from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
+    s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     rec = FinancialImpactRecord(
         capture_id="ts2", doc_id="d", title="t", text_excerpt="x",

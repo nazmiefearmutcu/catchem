@@ -1,4 +1,4 @@
-# fusion_stack
+# catchem
 
 A local-first sidecar workspace that fuses two existing systems:
 
@@ -6,7 +6,7 @@ A local-first sidecar workspace that fuses two existing systems:
 - **NewsImpact** — multimodal candidate that is **currently quarantined** and
   permitted only as a read-only diagnostic.
 
-`fusion_stack` consumes Awareness JSONL captures **after** they are durably
+`catchem` consumes Awareness JSONL captures **after** they are durably
 committed and emits one `FinancialImpactRecord` per capture: a multi-label
 classification of asset class / impact reason / symbols / sentiment / evidence,
 together with the component scores that produced the decision.
@@ -14,25 +14,47 @@ together with the component scores that produced the decision.
 It ships with a premium analyst UI (React + TypeScript) served from the same
 FastAPI process — no separate frontend runtime.
 
+It also ships with **Catchem**, a Tauri 2 macOS desktop wrapper that gives
+the analyst experience native menus, drag-and-drop file analysis, sidecar
+lifecycle controls, and a notarizable `.app`/`.dmg` distribution path. See
+[`docs/CATCHEM_APP.md`](docs/CATCHEM_APP.md).
+
 This repo never modifies Awareness or NewsImpact source. It is reversible:
 deleting it has zero effect on either upstream system.
 
-## One-command bootstrap
+## Catchem (macOS desktop)
 
 ```bash
-bash scripts/fusion_bootstrap_and_run.sh
+# Once
+bash scripts/catchem_bootstrap_and_run.sh                       # creates .venv + bundle
+cargo install create-tauri-app tauri-cli --version '^2.0' --locked
+
+# Run
+bash desktop/catchem/scripts/build_catchem_dev.sh              # dev (Cmd+R restarts sidecar)
+bash desktop/catchem/scripts/build_catchem_release.sh          # .app + .dmg
+```
+
+Catchem boots, spawns the local FastAPI sidecar, waits on `/healthz`, then
+loads the existing React UI in a native macOS window. Production-safe is the
+only mode the shell ever launches in. See [`docs/CATCHEM_RELEASE.md`](docs/CATCHEM_RELEASE.md)
+for signing and notarization.
+
+## One-command bootstrap (web only)
+
+```bash
+bash scripts/catchem_bootstrap_and_run.sh
 ```
 
 What it does (idempotent):
 
 1. creates `.venv` via `uv` (falls back to `python -m venv`)
-2. installs `fusion_stack[dev]` editable
+2. installs `catchem[dev]` editable
 3. installs `awareness` editable if available
 4. verifies both repo paths
 5. runs the NewsImpact guard verifier — **aborts** if the release gate flipped
 6. (optional) warms HF model caches when `--with-ml` is set
 7. (optional) attempts Kaggle dataset downloads if credentials exist
-8. installs frontend `npm` deps + builds the SPA into `src/fusion_stack/static/app`
+8. installs frontend `npm` deps + builds the SPA into `src/catchem/static/app`
 9. initializes `data/{results,db,logs,cache,vector_index,...}`
 10. runs replay mode against Awareness JSONL (default `--max=50`)
 11. starts the local API on `127.0.0.1:8087` in the background
@@ -111,13 +133,13 @@ Local-only, binds to `127.0.0.1:8087`.
 ## CLI
 
 ```bash
-fusion-stack run --mode replay_existing
-fusion-stack replay --path data/awareness/jsonl/captures/.../X.jsonl
-fusion-stack inspect --capture-id <id>
-fusion-stack benchmark --golden
-fusion-stack validate-guards
-fusion-stack status
-fusion-stack serve
+catchem run --mode replay_existing
+catchem replay --path data/awareness/jsonl/captures/.../X.jsonl
+catchem inspect --capture-id <id>
+catchem benchmark --golden
+catchem validate-guards
+catchem status
+catchem serve
 ```
 
 ## Tests
@@ -133,13 +155,13 @@ make test-smoke        # end-to-end + bootstrap shell
 ## Layout
 
 ```
-fusion_stack/
-├── configs/                  fusion.yaml, taxonomy.yaml, source_of_truth.yaml
+catchem/
+├── configs/                  catchem.yaml, taxonomy.yaml, source_of_truth.yaml
 ├── docs/                     SYSTEM_OVERVIEW, RUNBOOK, TEST_MATRIX, SOURCE_OF_TRUTH,
 │                             UI_OVERVIEW, FRONTEND_ARCHITECTURE, KEYBOARD_SHORTCUTS
 ├── frontend/                 React + TypeScript + Vite source
 ├── scripts/                  bootstrap + HF warm + Kaggle + guard verifier
-├── src/fusion_stack/
+├── src/catchem/
 │   ├── settings.py · schemas.py · taxonomy.py
 │   ├── storage.py · awareness_reader.py · awareness_replay.py
 │   ├── finance_filter.py · zero_shot_classifier.py · sentiment.py

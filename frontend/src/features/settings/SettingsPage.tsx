@@ -1,14 +1,16 @@
 import { useTheme } from "@/hooks/useTheme";
+import { NAV_SHORTCUTS, chordLabel } from "@/lib/nav-shortcuts";
 
-const SHORTCUTS: { keys: string; description: string }[] = [
+/**
+ * Settings-surface shortcut docs. Built from the canonical NAV_SHORTCUTS
+ * registry. Round 7 canonicalized Analysis on `g a`; the previous
+ * `g m → Market Map` entry conflicted with the palette + HelpPage which
+ * both used `g a`. `m` still works in the handler as an alias for
+ * pre-Round-7 muscle memory, but the docs no longer advertise it.
+ */
+export const SHORTCUTS: { keys: string; description: string }[] = [
   { keys: "⌘K  /  Ctrl+K", description: "Open the command palette" },
-  { keys: "g o", description: "Go to Overview" },
-  { keys: "g f", description: "Go to Live Feed" },
-  { keys: "g m", description: "Go to Market Map" },
-  { keys: "g s", description: "Go to Symbols" },
-  { keys: "g b", description: "Go to Benchmark Lab" },
-  { keys: "g x", description: "Go to System / Ops" },
-  { keys: "g ,", description: "Go to Settings" },
+  ...NAV_SHORTCUTS.map((s) => ({ keys: chordLabel(s), description: `Go to ${s.label}` })),
   { keys: "Esc", description: "Close drawer / palette" },
 ];
 
@@ -28,7 +30,7 @@ export function SettingsPage() {
           <span className="text-xs text-[color:var(--fg-dim)]">current: {theme}</span>
         </div>
         <p className="mt-2 text-[10px] text-[color:var(--fg-muted)]">
-          Stored in <code>localStorage["fusion.theme"]</code>. Respects <em>prefers-reduced-motion</em> globally.
+          Stored in <code>localStorage["catchem.theme"]</code>. Respects <em>prefers-reduced-motion</em> globally.
         </p>
       </section>
 

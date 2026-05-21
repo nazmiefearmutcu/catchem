@@ -19,6 +19,8 @@ interface Props {
  * warning yellow. Guard failures show as red.
  */
 export function StatusBanner({ mode, diagnosticAllowed, guards, useMlStubs }: Props) {
+  const guardError = guards.error_code ?? guards.error ?? "unknown_guard_failure";
+
   const tone =
     !guards.ok ? "bad"
     : diagnosticAllowed ? "warn"
@@ -48,7 +50,7 @@ export function StatusBanner({ mode, diagnosticAllowed, guards, useMlStubs }: Pr
           )}
         </>
       ) : (
-        <span><b>guard error</b> {guards.error}</span>
+        <span><b>guard error</b> {guardError}</span>
       )}
       {diagnosticAllowed && (
         <>

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fusion_stack.schemas import SentimentLabel
-from fusion_stack.sentiment import SentimentStub
+from catchem.schemas import SentimentLabel
+from catchem.sentiment import SentimentStub
 
 
 def test_positive_terms_yield_positive(synth_capture) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fusion_stack.entity_linker import EntityLinker
+from catchem.entity_linker import EntityLinker
+from catchem.evidence import clean_boilerplate_text
 
 
 def test_cashtag_detected() -> None:
@@ -27,6 +28,26 @@ def test_company_alias_maps_to_ticker() -> None:
     h = e.extract(title="Apple unveils new chip", text="Apple held an event.")
     assert "AAPL" in h.tickers
     assert "Apple" in h.by_kind("company")
+
+
+def test_company_alias_does_not_match_inside_words() -> None:
+    e = EntityLinker(company_aliases={"Ford": "F", "gold": "GC=F"})
+    h = e.extract(
+        title="5 money moves that made this dad a millionaire",
+        text="A low starting salary and an unaffordable housing market did not stop him.",
+    )
+    assert "Ford" not in h.by_kind("company")
+    assert "F" not in h.tickers
+    assert "gold" not in h.by_kind("company")
+
+
+def test_boilerplate_cleaner_removes_social_cta_before_entity_linking() -> None:
+    text = "The health agency reported an outbreak. Follow us on Facebook and Twitter for updates."
+    cleaned = clean_boilerplate_text(text)
+    e = EntityLinker(company_aliases={"Facebook": "META"})
+    h = e.extract(title="Health agency reports outbreak", text=cleaned)
+    assert "Facebook" not in h.by_kind("company")
+    assert "META" not in h.tickers
 
 
 def test_empty_text_returns_no_hits() -> None:

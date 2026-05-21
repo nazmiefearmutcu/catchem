@@ -22,6 +22,8 @@ data/kaggle/
 data/replay/
 data/demo-input/
 data/golden/extended.jsonl
+data/live-news/
+data/jsonl/
 
 # Node / frontend
 node_modules/
@@ -41,5 +43,15 @@ frontend/node_modules/
 .env.local
 
 # Generated bundle (built into src for runtime serving)
-src/fusion_stack/static/app/
-!src/fusion_stack/static/app/.gitkeep
+src/catchem/static/app/
+!src/catchem/static/app/.gitkeep
+.claude/
+
+# Catchem build artifacts
+desktop/catchem/src-tauri/target/
+desktop/catchem/web/dist/
+desktop/catchem/web/node_modules/
+desktop/catchem/sidecar-out/
+desktop/catchem/_sidecar_build/
+desktop/catchem/_sidecar_entry.py
+desktop/catchem/src-tauri/Cargo.lock

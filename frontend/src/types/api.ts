@@ -16,6 +16,7 @@ export interface GuardSnapshot {
   safe_to_publish?: boolean;
   safe_to_promote?: boolean;
   governance_index_sha256?: string;
+  error_code?: string | null;
   error?: string;
 }
 
@@ -134,4 +135,103 @@ export interface UIMetrics {
   records: Totals;
   dlq: number;
   model_versions: Record<string, string>;
+}
+
+// ── Catchem desktop additions ──────────────────────────────────────────────
+
+export interface DemoRunResponse {
+  capture_id: string;
+  jsonl_basename: string;
+  processed: number;
+  skipped: number;
+  record: FinancialRecord;
+}
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  commit_sha: string | null;
+  branch: string | null;
+  mode: Mode;
+  use_ml_stubs: boolean;
+  diagnostic_allowed: boolean;
+  static_bundle_present: boolean;
+  model_versions: Record<string, string>;
+  generated_at: string;
+}
+
+export interface SidecarStatus {
+  healthy: boolean;
+  api_host: string;
+  api_port: number;
+  pid: number;
+  uptime_seconds: number;
+  records: Totals;
+  dlq: number;
+  diagnostic_enabled: boolean;
+  generated_at: string;
+}
+
+export interface LogTail {
+  lines: string[];
+  truncated: boolean;
+}
+
+export interface NewsStatus {
+  enabled: boolean;
+  feeds: number;
+  interval_seconds: number | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_ingested: number;
+  total_ingested: number;
+  last_error: string | null;
+  is_polling: boolean;
+  /** When did the poller most recently ingest at least one NEW item? */
+  last_new_at: string | null;
+  /** Consecutive ticks where last_ingested was 0. >0 means "publishers quiet". */
+  empty_ticks: number;
+  /** Avg seconds between item.published_ts and ingest time, over the last poll. */
+  last_avg_publisher_lag_seconds: number | null;
+  /** Median seconds. More honest than the avg when a few backfill items skew it. */
+  last_median_publisher_lag_seconds: number | null;
+}
+
+export interface NewsPollNowResponse {
+  ingested: number;
+  total_ingested: number;
+}
+
+export interface ArchiveStatus {
+  enabled: boolean;
+  drive_dir: string | null;
+  interval_seconds: number | null;
+  local_cap_rows: number | null;
+  last_run_at: string | null;
+  last_archived_count: number;
+  total_archived: number;
+  last_error: string | null;
+  is_archiving: boolean;
+  current_csv_path: string | null;
+}
+
+export interface ArchiveNowResponse {
+  archived: number;
+  csv_path: string | null;
+  error: string | null;
+  total_archived: number;
+}
+
+/** Result of POST /replay — single pass over the awareness JSONL dir. */
+export interface ReplayRunResponse {
+  processed: number;
+  skipped: number;
+  failed: number;
+  dlq: number;
+  dlq_delta: number;
+  records_before: Totals;
+  records_after: Totals;
+  inserted: number;
+  replaced: number;
+  net_new_records: number;
 }

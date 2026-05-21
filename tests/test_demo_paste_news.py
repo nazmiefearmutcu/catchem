@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.demo import build_capture, render_demo_report, run_demo, write_jsonl
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.demo import build_capture, render_demo_report, run_demo, write_jsonl
+from catchem.settings import load_settings, reload_settings
 
 
 FED_ARTICLE = (
@@ -31,7 +31,7 @@ SPORTS_ARTICLE = (
 
 @pytest.fixture
 def isolated_demo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "out"))
     reload_settings()
 
 
@@ -99,7 +99,7 @@ def test_demo_is_idempotent_on_repeat(isolated_demo) -> None:
 
 
 def test_render_demo_report_handles_empty_record() -> None:
-    from fusion_stack.demo import DemoResult
+    from catchem.demo import DemoResult
     r = DemoResult(capture_id="missing", record={}, jsonl_path=Path("/tmp/x.jsonl"), processed=0, skipped=0)
     report = render_demo_report(r)
     assert "no record materialized" in report

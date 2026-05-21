@@ -18,13 +18,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.api import create_app
+from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
+from catchem.settings import load_settings, reload_settings
 
 
 REPO = Path(__file__).resolve().parents[1]
-LEGACY_DASHBOARD = REPO / "src" / "fusion_stack" / "static" / "dashboard.html"
+LEGACY_DASHBOARD = REPO / "src" / "catchem" / "static" / "dashboard.html"
 
 # Risky sink names. Built from parts so the lint hook in this repo
 # does not false-positive on the literals appearing in this test file.
@@ -71,7 +71,7 @@ def test_legacy_dashboard_external_links_have_noopener() -> None:
 
 @pytest.fixture
 def hardened_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
     reload_settings()
     app = create_app(load_settings())
     client = TestClient(app)
@@ -123,7 +123,7 @@ def _malicious_record() -> FinancialImpactRecord:
 def test_malicious_record_round_trips_as_json_not_html(hardened_client: TestClient) -> None:
     """The API preserves untrusted strings verbatim (so the FRONTEND can
     apply safeHref filtering). It also returns JSON, never HTML."""
-    from fusion_stack import api as api_mod
+    from catchem import api as api_mod
     storage = api_mod._SUPERVISOR.storage  # type: ignore[union-attr]
     storage.insert_record(_malicious_record())
     r = hardened_client.get("/record/xss-1")

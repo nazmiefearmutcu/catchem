@@ -24,6 +24,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot,
+  DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
+  ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
 } from "@/types/api";
 
 export const api = {
@@ -52,6 +54,41 @@ export const api = {
     request<{ items: FinancialRecord[] }>(`/records/by-asset-class/${encodeURIComponent(ac)}?limit=${limit}`),
   byReason: (rc: string, limit = 50) =>
     request<{ items: FinancialRecord[] }>(`/records/by-reason/${encodeURIComponent(rc)}?limit=${limit}`),
+
+  // ── Catchem desktop endpoints ──────────────────────────────────────────
+  demoPaste: (payload: { title: string; text: string; domain?: string; url?: string }) =>
+    request<DemoRunResponse>("/ui/demo/paste", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  demoUpload: (file: File, opts: { title?: string; domain?: string; url?: string } = {}) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.title) form.append("title", opts.title);
+    form.append("domain", opts.domain ?? "demo.local");
+    if (opts.url) form.append("url", opts.url);
+    return request<DemoRunResponse>("/ui/demo/upload", { method: "POST", body: form });
+  },
+  appInfo: () => request<AppInfo>("/ui/app-info"),
+  sidecarStatus: () => request<SidecarStatus>("/ui/sidecar-status"),
+  logTail: (lines = 200) => request<LogTail>(`/ui/log-tail?lines=${lines}`),
+  newsStatus: () => request<NewsStatus>("/ui/news-status"),
+  newsPollNow: () =>
+    request<NewsPollNowResponse>("/ui/news-poll-now", { method: "POST" }),
+  archiveStatus: () => request<ArchiveStatus>("/ui/archive-status"),
+  archiveNow: () =>
+    request<ArchiveNowResponse>("/ui/archive-now", { method: "POST" }),
+
+  // Run one pass of the supervisor over the configured Awareness JSONL
+  // directory. Used by the Replay tab on /replay so the page name no
+  // longer lies about the surface it exposes.
+  replay: (maxRecords: number = 50) =>
+    request<ReplayRunResponse>("/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_records: maxRecords }),
+    }),
 };
 
 // Safe URL filter for outbound links. Blocks javascript:/data:/file: schemes.
@@ -84,6 +121,44 @@ export function fmtDate(iso: string | null | undefined): string {
       year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit",
     });
+  } catch {
+    return iso;
+  }
+}
+
+/**
+ * Relative-time formatter: "12s ago", "5m ago", "3h ago", "2d ago".
+ *
+ * Behaviour:
+ *  - Floors at "just now" for anything < 5s in the past.
+ *  - Future timestamps render as "in Xm" (rare — happens when the user
+ *    pastes an article with a published_ts ahead of system clock, or
+ *    when small clock skew makes a fresh ingest read as +1s).
+ *  - Beyond 14 days, falls back to an absolute YYYY-MM-DD date so the
+ *    UI doesn't accumulate "364d ago" oddities.
+ *
+ * The {@link nowMs} parameter is for unit tests; production callers
+ * omit it and we read Date.now() per call.
+ */
+export function fmtRel(iso: string | null | undefined, nowMs: number = Date.now()): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const delta = nowMs - t;
+  const absDelta = Math.abs(delta);
+  const sign = delta >= 0 ? "ago" : "in";
+  const value = (n: number, unit: string) =>
+    delta >= 0 ? `${n}${unit} ${sign}` : `${sign} ${n}${unit}`;
+
+  if (absDelta < 5_000) return "just now";
+  if (absDelta < 60_000) return value(Math.max(1, Math.floor(absDelta / 1_000)), "s");
+  if (absDelta < 3_600_000) return value(Math.floor(absDelta / 60_000), "m");
+  if (absDelta < 86_400_000) return value(Math.floor(absDelta / 3_600_000), "h");
+  if (absDelta < 14 * 86_400_000) return value(Math.floor(absDelta / 86_400_000), "d");
+  // Old item — show the date so the analyst doesn't see "92d ago".
+  try {
+    const d = new Date(t);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   } catch {
     return iso;
   }

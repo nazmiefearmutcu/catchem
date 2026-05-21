@@ -16,17 +16,17 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.redaction import (
+from catchem.api import create_app
+from catchem.redaction import (
     PRODUCTION_SAFE_DIAGNOSTIC_FIELDS,
     SAFE_GUARD_KEYS,
     redact_record_for_mode,
     redact_records_for_mode,
     safe_guard_view,
 )
-from fusion_stack.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-from fusion_stack.settings import load_settings, reload_settings
-from fusion_stack.storage import Storage
+from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
+from catchem.settings import load_settings, reload_settings
+from catchem.storage import Storage
 
 
 def _record_with_diagnostic_truthy(capture_id: str = "diag-leak") -> FinancialImpactRecord:
@@ -119,6 +119,7 @@ def test_safe_guard_view_classifies_errors_without_leaking() -> None:
     out = safe_guard_view(snap)
     assert out["ok"] is False
     assert out["error_code"] == "missing_governance_index"
+    assert "error" not in out
     # No path leak
     assert "/Users" not in str(out)
 
@@ -127,8 +128,8 @@ def test_safe_guard_view_classifies_errors_without_leaking() -> None:
 
 @pytest.fixture
 def prod_safe_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Storage]:
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
     reload_settings()
     s = load_settings()
     app = create_app(s)
@@ -138,7 +139,7 @@ def prod_safe_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Test
     # service layer's safety. The API surface must still scrub.
     sup = client.app.state if hasattr(client.app, "state") else None  # type: ignore[attr-defined]
     # We need the live supervisor; it was created by lifespan.
-    from fusion_stack import api as api_mod
+    from catchem import api as api_mod
     storage = api_mod._SUPERVISOR.storage  # type: ignore[union-attr]
     storage.insert_record(_record_with_diagnostic_truthy("diag-leak-1"))
     storage.insert_record(_record_with_diagnostic_truthy("diag-leak-2"))
@@ -215,6 +216,21 @@ def test_ui_guards_endpoint_does_not_leak_path(prod_safe_app) -> None:
             assert "/etc/" not in v
 
 
+def test_ui_guards_failure_contract_uses_error_code_not_error(prod_safe_app) -> None:
+    client, _ = prod_safe_app
+    with patch(
+        "catchem.api._guard_snapshot",
+        return_value={"ok": False, "error": "/Users/secret/governance_index.json missing"},
+    ):
+        r = client.get("/ui/guards")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "missing_governance_index"
+    assert "error" not in body
+    assert "/Users" not in str(body)
+
+
 def test_metrics_diagnostic_pinned_false_in_production_safe(prod_safe_app) -> None:
     client, _ = prod_safe_app
     r = client.get("/metrics")
@@ -225,11 +241,11 @@ def test_metrics_diagnostic_pinned_false_in_production_safe(prod_safe_app) -> No
 
 
 def test_diagnostic_env_flag_cannot_force_diagnostic_in_production_safe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Even setting FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=true does not
+    """Even setting CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=true does not
     enable diagnostic when mode is production_safe."""
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
     reload_settings()
     s = load_settings()
     assert s.diagnostic_allowed() is False
@@ -247,14 +263,14 @@ def test_service_in_production_safe_does_not_construct_diagnostic_adapter(monkey
     """The diagnostic adapter must not even be constructed in production_safe.
     We patch it to raise on construction and confirm the service still works.
     """
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
     reload_settings()
     s = load_settings()
 
-    with patch("fusion_stack.service.NewsImpactGuardedAdapter") as patched:
+    with patch("catchem.service.NewsImpactGuardedAdapter") as patched:
         patched.side_effect = AssertionError("must not be constructed in production_safe")
-        from fusion_stack.service import build_service
+        from catchem.service import build_service
         svc = build_service(s)
         assert svc.diagnostic_enabled is False
         # The adapter must not have been called

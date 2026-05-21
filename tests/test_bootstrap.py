@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.bootstrap import bootstrap
+from catchem.bootstrap import bootstrap
 
 
 @pytest.mark.guard
 def test_bootstrap_creates_required_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from fusion_stack.settings import reload_settings
+    from catchem.settings import reload_settings
 
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "out"))
     reload_settings()
     summary = bootstrap(skip_warm=True)
     out = tmp_path / "out"

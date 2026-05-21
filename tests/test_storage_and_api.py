@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.schemas import (
+from catchem.schemas import (
     FinancialImpactRecord,
     ProcessingMode,
     SentimentLabel,
 )
-from fusion_stack.settings import load_settings, reload_settings
-from fusion_stack.storage import Storage
+from catchem.settings import load_settings, reload_settings
+from catchem.storage import Storage
 
 
 def _record(capture_id: str = "c1") -> FinancialImpactRecord:
@@ -45,12 +45,13 @@ def _record(capture_id: str = "c1") -> FinancialImpactRecord:
 
 
 def test_storage_round_trip(tmp_path: Path) -> None:
-    s = Storage(db_path=tmp_path / "fusion.sqlite3",
+    s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     rec = _record("c-rt")
     s.insert_record(rec)
     fetched = s.get_record("c-rt")
     assert fetched is not None
+    assert fetched["text_excerpt"] == "example body"
     assert fetched["candidate_symbols"] == ["AAPL"]
     by_sym = s.by_label("symbol", "AAPL")
     assert len(by_sym) == 1
@@ -63,9 +64,9 @@ def test_storage_round_trip(tmp_path: Path) -> None:
 
 
 def test_api_healthz_and_recent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
     reload_settings()
-    from fusion_stack.api import create_app
+    from catchem.api import create_app
 
     s = load_settings()
     app = create_app(s)
@@ -86,9 +87,9 @@ def test_api_healthz_and_recent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_api_process_one_and_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, synth_capture) -> None:
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
     reload_settings()
-    from fusion_stack.api import create_app
+    from catchem.api import create_app
 
     app = create_app(load_settings())
     with TestClient(app) as client:

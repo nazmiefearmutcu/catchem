@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.golden import (
+from catchem.golden import (
     GOLDEN_SCHEMA_VERSION,
     REQUIRED_GOLDEN_FIELDS,
     BenchmarkReport,

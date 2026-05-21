@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, fmtDate, fmtScore, safeHref } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, fmtRel, fmtScore, safeHref } from "@/lib/api";
 import { mergeByCaptureId, newCaptureIds } from "@/lib/feedMerge";
 import { Pill } from "@/components/Pill";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
 import { useUrlFilters } from "@/hooks/useUrlFilters";
 import { RecordDrawer } from "@/features/record-detail/RecordDrawer";
+import { getAlertThreshold, setAlertThreshold, useDesktopAlertState } from "@/hooks/useDesktopAlerts";
 import type { FinancialRecord } from "@/types/api";
 
 export function FeedPage() {
@@ -14,7 +15,53 @@ export function FeedPage() {
   const { captureId } = useParams();
   const nav = useNavigate();
 
+  const qc = useQueryClient();
   const facets = useQuery({ queryKey: ["facets"], queryFn: () => api.facets(500), staleTime: 10_000 });
+  const news = useQuery({
+    queryKey: ["news-status"],
+    queryFn: api.newsStatus,
+    // Poll more often than the backend ticks so the "fetching now" badge
+    // and the next-poll countdown stay visibly fresh.
+    refetchInterval: 2_000,
+    staleTime: 1_000,
+  });
+  const pollNow = useMutation({
+    mutationFn: api.newsPollNow,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["news-status"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({
+        predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "feed-list",
+      });
+    },
+  });
+
+  // Drive archiver — every 30s the backend drains old rows to a CSV on
+  // the user's cloud-sync folder; the UI shows where + the running total.
+  const archive = useQuery({
+    queryKey: ["archive-status"],
+    queryFn: api.archiveStatus,
+    refetchInterval: 4_000,
+    staleTime: 2_000,
+  });
+  const archiveNow = useMutation({
+    mutationFn: api.archiveNow,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["archive-status"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({
+        predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "feed-list",
+      });
+    },
+  });
+
+  // In-app toast on/off (defaults on; persisted in localStorage).
+  const [alertState, setAlertEnabled] = useDesktopAlertState();
+  // Threshold knob — defaults to 0.65 (calibrated against the real
+  // scoring distribution; the older default of 0.85 was higher than any
+  // item ever scored, which is why the alarm never fired).
+  const [alertThreshold, setAlertThresholdState] = useState<number>(() => getAlertThreshold());
+
 
   const list = useQuery<{ items: FinancialRecord[] }>({
     queryKey: ["feed-list", filters.ac, filters.rc, filters.sym, filters.relevant],
@@ -24,7 +71,13 @@ export function FeedPage() {
       if (filters.sym) return api.bySymbol(filters.sym, 200);
       return api.recent(200, filters.relevant !== "all");
     },
-    staleTime: 5_000,
+    staleTime: 3_000,
+    // Polling fallback: even with SSE up, the news poller runs every 10s
+    // (NewsPollerConfig.poll_interval_seconds), and this guarantees the
+    // feed redraws within ~5s of a new ingest if SSE is dropped or the
+    // browser tab is throttled.
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
   });
 
   // ── live-polling buffer ─────────────────────────────────────────────────
@@ -37,20 +90,79 @@ export function FeedPage() {
   // The last query key that fed `stableRows` — change → reset snapshot.
   const prevQueryKey = useRef<string>("");
 
+  // ── freshness tracking ──────────────────────────────────────────────────
+  // The user shouldn't need to count records to know the poller is working.
+  // We keep a per-session Set of capture_ids we've seen since the page
+  // mounted; any row not in that set is "fresh" and gets a brief CSS flash
+  // (`animate-feed-flash`). Tracked in refs so updates don't re-render.
+  const seenIds = useRef<Set<string>>(new Set());
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+  const firstSnapshotApplied = useRef(false);
+  const freshTimers = useRef<Map<string, number>>(new Map());
+
+  function markFresh(ids: string[]) {
+    if (ids.length === 0) return;
+    setFreshIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    for (const id of ids) {
+      // Clear after the CSS animation finishes so the row settles into
+      // its normal background.
+      const t = window.setTimeout(() => {
+        setFreshIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        freshTimers.current.delete(id);
+      }, 4_800);
+      freshTimers.current.set(id, t);
+    }
+  }
+  useEffect(() => () => {
+    freshTimers.current.forEach((t) => window.clearTimeout(t));
+    freshTimers.current.clear();
+  }, []);
+
   useEffect(() => {
     const key = JSON.stringify([filters.ac, filters.rc, filters.sym, filters.relevant]);
     const incoming = list.data?.items ?? [];
     if (key !== prevQueryKey.current) {
-      // Filter changed — always replace, drop any buffer.
+      // Filter changed — always replace, drop any buffer + freshness
+      // (the user is asking for a different cut, not for live deltas).
       prevQueryKey.current = key;
       setStableRows(incoming);
       setBuffered([]);
+      seenIds.current = new Set(incoming.map((i) => i.capture_id));
+      firstSnapshotApplied.current = true;
+      setFreshIds(new Set());
       return;
     }
     if (!isFrozen) {
+      const shouldSeedFirstNonEmptySnapshot =
+        !firstSnapshotApplied.current ||
+        (incoming.length > 0 && stableRows.length === 0 && seenIds.current.size === 0);
+
       // Free viewport — merge in place, sorted, deduped.
       setStableRows((prev) => mergeByCaptureId(prev, incoming));
       setBuffered([]);
+      // Detect genuinely new items vs the seen-set and flash them.
+      // Skip the very first snapshot (the initial backfill is not "new").
+      if (!shouldSeedFirstNonEmptySnapshot) {
+        const newOnes = incoming
+          .map((i) => i.capture_id)
+          .filter((id) => !seenIds.current.has(id));
+        if (newOnes.length > 0) {
+          newOnes.forEach((id) => seenIds.current.add(id));
+          markFresh(newOnes);
+        }
+      } else {
+        incoming.forEach((i) => seenIds.current.add(i.capture_id));
+        firstSnapshotApplied.current = true;
+      }
       return;
     }
     // Drawer open — buffer only what's NEW relative to current snapshot.
@@ -81,6 +193,14 @@ export function FeedPage() {
     }
     return items;
   }, [stableRows, filters]);
+
+  const newsStatus = news.data?.last_error
+    ? { color: "bg-bad", label: "error" }
+    : news.data?.is_polling
+      ? { color: "bg-accent", label: "fetching" }
+      : (news.data?.empty_ticks ?? 0) >= 5
+        ? { color: "bg-warn", label: "quiet" }
+        : { color: "bg-good", label: "live" };
 
   return (
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
@@ -154,6 +274,156 @@ export function FeedPage() {
 
       {/* Results */}
       <section>
+        {news.data?.enabled && (
+          <div
+            className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-[11px] text-[color:var(--fg-dim)]"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full animate-pulse-dot ${
+                  newsStatus.color
+                }`}
+                aria-hidden="true"
+              />
+              <span className="uppercase tracking-wider">
+                {newsStatus.label}
+              </span>
+            </span>
+            <span>
+              {news.data.feeds} source{news.data.feeds === 1 ? "" : "s"} · every {Math.round((news.data.interval_seconds ?? 10))}s
+            </span>
+            <span>
+              last fetch <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_run_at) || "—"}</span>
+              {news.data.last_ingested > 0 && (
+                <span
+                  key={news.data.last_run_at ?? "0"}
+                  className="text-good inline-block animate-count-pulse"
+                > · +{news.data.last_ingested}</span>
+              )}
+            </span>
+            {news.data.last_new_at && (
+              <span
+                title="The poller's last successful ingest of a NEW article. When this is recent, you're getting fresh news; when it's far back, publishers are quiet (this is normal — RSS doesn't publish on a fixed schedule)."
+              >
+                last new <span className="text-[color:var(--fg)]">{fmtRel(news.data.last_new_at) || "—"}</span>
+              </span>
+            )}
+            {news.data.last_median_publisher_lag_seconds != null && news.data.last_median_publisher_lag_seconds > 0 && (
+              <span
+                title={`Median time between when each item was published by its source and when Catchem ingested it, over the last poll. Pipeline cost is ~4 ms/item in stub mode — anything above that is publisher-side RSS lag, not Catchem. Mean: ${Math.round(news.data.last_avg_publisher_lag_seconds ?? 0)}s.`}
+              >
+                pub→ingest <span className={news.data.last_median_publisher_lag_seconds > 600 ? "text-warn" : "text-[color:var(--fg)]"}>
+                  ~{news.data.last_median_publisher_lag_seconds < 60
+                    ? `${Math.round(news.data.last_median_publisher_lag_seconds)}s`
+                    : `${Math.round(news.data.last_median_publisher_lag_seconds / 60)}m`}
+                </span>
+              </span>
+            )}
+            {news.data.next_run_at && !news.data.is_polling && (
+              <span>next {fmtRel(news.data.next_run_at) || "soon"}</span>
+            )}
+            <span className="ml-auto inline-flex items-center gap-3">
+              <span>{news.data.total_ingested.toLocaleString()} ingested this session</span>
+              <button
+                type="button"
+                className={`chip text-[11px] ${alertState === "on" ? "chip-active" : ""}`}
+                onClick={() => setAlertEnabled(alertState !== "on")}
+                title={
+                  alertState === "on"
+                    ? `Toasts active for arrivals with score ≥ ${alertThreshold.toFixed(2)}. Click to mute.`
+                    : "Toasts muted. Click to fire a top-right notification for each high-relevance arrival."
+                }
+              >
+                {alertState === "on" ? "🔔 alerts on" : "🔕 alerts off"}
+              </button>
+              {alertState === "on" && (
+                <button
+                  type="button"
+                  className="chip text-[11px]"
+                  onClick={() => {
+                    // Cycle through preset thresholds: 0.50 → 0.60 → 0.70 → 0.80 → back.
+                    // 0.50 is permissive (~50% of items), 0.80 is aggressive
+                    // (~top 2-3%). The empirical max on this scorer is ~0.80,
+                    // so anything above leaves the user with no toasts at all.
+                    const presets = [0.50, 0.60, 0.65, 0.70, 0.80];
+                    const idx = presets.findIndex((p) => p >= alertThreshold - 0.001);
+                    const next = presets[(idx + 1) % presets.length];
+                    setAlertThresholdState(setAlertThreshold(next));
+                  }}
+                  title={`Alert threshold: ${alertThreshold.toFixed(2)} (max observed ≈ 0.80). Click to cycle through 0.50 → 0.60 → 0.65 → 0.70 → 0.80.`}
+                >
+                  ≥{alertThreshold.toFixed(2)}
+                </button>
+              )}
+              <button
+                type="button"
+                className="chip text-[11px]"
+                onClick={() => pollNow.mutate()}
+                disabled={pollNow.isPending || news.data.is_polling}
+                title="Trigger an immediate poll across all sources"
+              >
+                {pollNow.isPending || news.data.is_polling ? "polling…" : "poll now"}
+              </button>
+            </span>
+            {news.data.last_error && (
+              <span className="text-bad" title={news.data.last_error}>· {news.data.last_error}</span>
+            )}
+          </div>
+        )}
+        {archive.data?.enabled && (
+          <div
+            className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-[11px] text-[color:var(--fg-dim)]"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  archive.data.last_error
+                    ? "bg-warn"
+                    : archive.data.is_archiving
+                      ? "bg-accent animate-pulse-dot"
+                      : "bg-good"
+                }`}
+                aria-hidden="true"
+              />
+              <span className="uppercase tracking-wider">drive</span>
+            </span>
+            <span title={archive.data.drive_dir ?? ""}>
+              → <span className="text-[color:var(--fg)]">
+                {archive.data.current_csv_path?.split("/").slice(-1)[0]
+                  ?? archive.data.drive_dir?.split("/").slice(-2).join("/")
+                  ?? "—"}
+              </span>
+            </span>
+            <span>cap {archive.data.local_cap_rows == null ? "—" : archive.data.local_cap_rows}</span>
+            <span>every {Math.round(archive.data.interval_seconds ?? 30)}s</span>
+            {archive.data.last_run_at && (
+              <span>last drain <span className="text-[color:var(--fg)]">{fmtRel(archive.data.last_run_at) || "—"}</span></span>
+            )}
+            {archive.data.last_archived_count > 0 && (
+              <span
+                key={archive.data.last_run_at ?? "0"}
+                className="text-good inline-block animate-count-pulse"
+              >+{archive.data.last_archived_count}</span>
+            )}
+            <span className="ml-auto inline-flex items-center gap-3">
+              <span>{archive.data.total_archived.toLocaleString()} archived this session</span>
+              <button
+                type="button"
+                className="chip text-[11px]"
+                onClick={() => archiveNow.mutate()}
+                disabled={archiveNow.isPending || archive.data.is_archiving}
+                title={`Trigger an immediate archive sweep. Drive dir: ${archive.data.drive_dir ?? "—"}`}
+              >
+                {archiveNow.isPending || archive.data.is_archiving ? "archiving…" : "archive now"}
+              </button>
+            </span>
+            {archive.data.last_error && (
+              <span className="text-warn" title={archive.data.last_error}>· error</span>
+            )}
+          </div>
+        )}
         <div className="flex items-baseline gap-3 mb-2 text-xs text-[color:var(--fg-dim)]">
           <span>{filtered.length} record{filtered.length === 1 ? "" : "s"}</span>
           {list.isFetching && <span>(refreshing…)</span>}
@@ -184,7 +454,12 @@ export function FeedPage() {
           filtered.length === 0 ? <EmptyState title="No matches" hint="Try clearing filters." /> : (
             <ul className="divide-y divide-[color:var(--border)] rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)]">
               {filtered.map((r) => (
-                <FeedRow key={r.capture_id} r={r} onOpen={() => nav(`/feed/${encodeURIComponent(r.capture_id)}`)} />
+                <FeedRow
+                  key={r.capture_id}
+                  r={r}
+                  isFresh={freshIds.has(r.capture_id)}
+                  onOpen={() => nav(`/feed/${encodeURIComponent(r.capture_id)}`)}
+                />
               ))}
             </ul>
           )}
@@ -228,14 +503,24 @@ function FacetGroup({
   );
 }
 
-function FeedRow({ r, onOpen }: { r: FinancialRecord; onOpen: () => void }) {
+function FeedRow({ r, onOpen, isFresh = false }: { r: FinancialRecord; onOpen: () => void; isFresh?: boolean }) {
   const href = safeHref(r.url);
   return (
-    <li className="px-3 py-2 hover:bg-[color:var(--bg-elev2)]">
-      <div className="grid grid-cols-[80px_1fr_auto] gap-3 items-start">
-        <div className="grid">
-          <span className="text-[10px] text-[color:var(--fg-dim)]">{fmtDate(r.published_ts).split(",")[0]}</span>
-          <span className="text-[10px] text-[color:var(--fg-muted)] truncate" title={r.domain ?? ""}>{r.domain ?? ""}</span>
+    <li
+      className={`px-3 py-2 hover:bg-[color:var(--bg-elev2)] ${isFresh ? "animate-feed-flash" : ""}`}
+      data-fresh={isFresh ? "true" : undefined}
+    >
+      <div className="grid grid-cols-[90px_1fr_auto] gap-3 items-start">
+        <div className="grid" title={r.published_ts ?? ""}>
+          <span className="text-[11px] text-[color:var(--fg-dim)]">
+            {fmtRel(r.published_ts)}
+            {isFresh && (
+              <span className="ml-1 text-good text-[9px] uppercase tracking-wider" aria-label="freshly arrived">
+                new
+              </span>
+            )}
+          </span>
+          <span className="text-[10px] text-[color:var(--fg-muted)] truncate">{r.domain ?? ""}</span>
         </div>
         <div className="min-w-0">
           <div className="text-sm">

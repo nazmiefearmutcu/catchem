@@ -12,6 +12,9 @@ const SymbolDetail = lazy(() => import("@/features/symbols/SymbolDetailPage").th
 const Benchmark = lazy(() => import("@/features/benchmark/BenchmarkPage").then(m => ({ default: m.BenchmarkPage })));
 const Ops = lazy(() => import("@/features/ops/OpsPage").then(m => ({ default: m.OpsPage })));
 const Settings = lazy(() => import("@/features/settings/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const ReplayUpload = lazy(() => import("@/features/replay-upload/ReplayUploadPage").then(m => ({ default: m.ReplayUploadPage })));
+const ModelControls = lazy(() => import("@/features/model-controls/ModelControlsPage").then(m => ({ default: m.ModelControlsPage })));
+const Help = lazy(() => import("@/features/help/HelpPage").then(m => ({ default: m.HelpPage })));
 
 function RouteFallback() {
   return (
@@ -36,6 +39,12 @@ export function App() {
         <Route path="benchmark" element={<Suspense fallback={<RouteFallback />}><Benchmark /></Suspense>} />
         <Route path="ops" element={<Suspense fallback={<RouteFallback />}><Ops /></Suspense>} />
         <Route path="settings" element={<Suspense fallback={<RouteFallback />}><Settings /></Suspense>} />
+        {/* Catchem tabs */}
+        <Route path="replay" element={<Suspense fallback={<RouteFallback />}><ReplayUpload /></Suspense>} />
+        <Route path="model-controls" element={<Suspense fallback={<RouteFallback />}><ModelControls /></Suspense>} />
+        <Route path="help" element={<Suspense fallback={<RouteFallback />}><Help /></Suspense>} />
+        {/* Analysis tab is a portmanteau: route to /map by default */}
+        <Route path="analysis" element={<Navigate to="/map" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

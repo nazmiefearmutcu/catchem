@@ -1,6 +1,6 @@
 # SOURCE OF TRUTH
 
-This document defines the canonical, non-negotiable invariants for the fusion
+This document defines the canonical, non-negotiable invariants for the catchem
 stack. It is the authority any reviewer should cite when something below it in
 the hierarchy contradicts it.
 
@@ -8,25 +8,25 @@ the hierarchy contradicts it.
 
 When in doubt, resolve conflicts in this order:
 
-1. The **fusion_stack mission prompt** (the spec under which this stack was built).
+1. The **catchem mission prompt** (the spec under which this stack was built).
 2. The current contents of:
    - `awareness/src/awareness/schemas/doc.py` (DocCapture contract)
    - `awareness/src/awareness/storage/jsonl.py` (durability semantics)
    - `merged_news/models/governance_index/governance_index.json` (quarantine state)
    - `merged_news/governance/preflight.py` (preflight policy)
-   - `fusion_stack/configs/source_of_truth.yaml` (machine-readable form of this doc)
+   - `catchem/configs/source_of_truth.yaml` (machine-readable form of this doc)
 3. Historical docs and READMEs, for context only. **Do not override safety rules with stale docs.**
 
 ## Awareness
 
 - **Role:** stable upstream system of record.
-- **Consumption strategy:** post-commit. fusion_stack reads JSONL files that the
+- **Consumption strategy:** post-commit. catchem reads JSONL files that the
   Awareness writer has already atomically renamed from `.tmp` to `.jsonl`.
 - **Do not modify** the `DocCapture` schema (it uses `extra="forbid"` — additions
   are explicit and break compatibility with the Iceberg projection).
 - **Do not inject** finance logic into the Awareness worker engine. The decoupling
   is what allows independent releases of each system.
-- **State / tasks / dedup** semantics are owned by Awareness. fusion_stack only
+- **State / tasks / dedup** semantics are owned by Awareness. catchem only
   *reads* through the JSONL surface.
 
 ## NewsImpact
@@ -47,7 +47,7 @@ When in doubt, resolve conflicts in this order:
   - `models/governance_index/**`
   - `governance/**`
 
-The fusion_stack code path that reads these files is strictly read-only and
+The catchem code path that reads these files is strictly read-only and
 runs only when the operator explicitly opts into `research_diagnostic` mode.
 
 ## Mode invariants
@@ -70,7 +70,7 @@ A destructive splice of the two repos was rejected because:
 3. Independent test suites and CI are easier to keep green when each repo can
    be installed and tested in isolation.
 
-The sibling-workspace approach is reversible: `rm -rf fusion_stack` is a no-op
+The sibling-workspace approach is reversible: `rm -rf catchem` is a no-op
 on Awareness and NewsImpact.
 
 ## How this document is enforced
@@ -80,7 +80,7 @@ on Awareness and NewsImpact.
 - Pytest markers `guard` and `regression` enumerate tests that pin these rules.
 - `configs/source_of_truth.yaml` carries the same statements in machine form;
   the test `test_source_of_truth_matches_doc.py` keeps them in lockstep.
-- `src/fusion_stack/redaction.py` enforces production-safe diagnostic scrubbing
+- `src/catchem/redaction.py` enforces production-safe diagnostic scrubbing
   at the API surface. `tests/test_guard_redaction_in_production.py` pins that
   every record-returning endpoint runs the redactor.
 - `tests/test_settings_live_env_override.py` pins env > YAML > defaults

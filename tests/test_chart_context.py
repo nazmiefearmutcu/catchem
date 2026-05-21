@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fusion_stack.chart_context import ChartContextReader
+from catchem.chart_context import ChartContextReader
 
 
 def test_missing_root_returns_unavailable(tmp_path: Path) -> None:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from fusion_stack.finance_filter import FastPrefilter
-from fusion_stack.taxonomy import default_taxonomy_path, load_taxonomy
+from catchem.finance_filter import FastPrefilter
+from catchem.taxonomy import default_taxonomy_path, load_taxonomy
 
 
 @pytest.fixture

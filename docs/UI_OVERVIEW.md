@@ -1,7 +1,7 @@
 # UI Overview
 
 The premium analyst interface lives in `frontend/` (TypeScript + React + Vite)
-and is bundled into `src/fusion_stack/static/app/` at build time. The same
+and is bundled into `src/catchem/static/app/` at build time. The same
 FastAPI process serves it at `/` — there is no second runtime.
 
 ## Routes
@@ -48,7 +48,7 @@ polling every 12s.
 
 - **URL state** drives all feed filters (`?ac=`, `?rc=`, `?sym=`, `?q=`,
   `?relevant=`, `?sentiment=`). Copy-link works out of the box.
-- **localStorage** stores the theme preference (`fusion.theme`).
+- **localStorage** stores the theme preference (`catchem.theme`).
 - **React Query cache** holds API responses; the SSE hook invalidates them.
 
 ## Theme

@@ -22,7 +22,7 @@ beyond Tailwind + a handful of `@layer components` primitives in
 frontend/
 ├── index.html               # SPA shell, theme bootstrap script
 ├── package.json
-├── vite.config.ts           # build target → ../src/fusion_stack/static/app
+├── vite.config.ts           # build target → ../src/catchem/static/app
 ├── tailwind.config.js
 ├── postcss.config.js
 ├── tsconfig.json
@@ -103,7 +103,7 @@ plus a shared `charts` chunk and `query` chunk. Initial page weight is small
 ```bash
 cd frontend
 npm install                  # one-time
-npm run build                # → ../src/fusion_stack/static/app/
+npm run build                # → ../src/catchem/static/app/
 npm test                     # vitest unit + component
 npm run dev                  # vite dev server on :5173, proxies API to :8087
 ```
@@ -116,7 +116,7 @@ Run two processes when working on the UI:
 
 ```bash
 # Terminal 1: API
-fusion-stack serve
+catchem serve
 
 # Terminal 2: Vite dev server
 cd frontend

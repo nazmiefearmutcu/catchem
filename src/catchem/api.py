@@ -29,6 +29,29 @@ from sse_starlette.sse import EventSourceResponse
 
 _PROCESS_STARTED_AT = _dt.now(timezone.utc)
 
+# Actual bind host/port observed at uvicorn startup, OR None if create_app
+# was called without `record_bind` being invoked yet. Settings defaults
+# (`s.api.host` / `s.api.port`) are NOT the truth — the CLI / Tauri shell
+# can pin a different port via `--port` or env, and `/ui/sidecar-status`
+# must report what we ACTUALLY bound, not what the config file says.
+#
+# Updated by `record_bind(host, port)` which the CLI calls right before
+# `uvicorn.run(...)`. The Tauri shell hits `/ui/sidecar-status` to drive
+# its connection details — surfacing a stale port from settings would
+# mislead the operator the first time they ever changed the bind.
+_BIND_HOST: str | None = None
+_BIND_PORT: int | None = None
+
+
+def record_bind(host: str, port: int) -> None:
+    """Pin the host/port the process is actually serving on.
+
+    Called from cli.py:serve() right before uvicorn.run().
+    """
+    global _BIND_HOST, _BIND_PORT
+    _BIND_HOST = host
+    _BIND_PORT = int(port)
+
 from .contracts import (
     AppInfoResponse,
     DemoRunResponse,
@@ -446,8 +469,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         uptime = (_dt.now(timezone.utc) - _PROCESS_STARTED_AT).total_seconds()
         return SidecarStatusResponse(
             healthy=True,
-            api_host=s.api.host,
-            api_port=s.api.port,
+            # Prefer the actual bind recorded at startup over the static
+            # settings value. Without this the UI claims `:8087` even when
+            # the operator launched with `--port 9090`.
+            api_host=_BIND_HOST if _BIND_HOST is not None else s.api.host,
+            api_port=_BIND_PORT if _BIND_PORT is not None else s.api.port,
             pid=_os_for_pid.getpid(),
             uptime_seconds=uptime,
             records=counts,

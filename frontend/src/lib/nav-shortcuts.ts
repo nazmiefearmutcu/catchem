@@ -20,8 +20,8 @@ export interface NavShortcut {
   label: string;
   /**
    * Optional second key that triggers the same action. We keep `m` aliased
-   * to `a` so older muscle memory ("Market Map") still routes correctly
-   * after the canonical chord moved to `g a` ("Analysis").
+   * to `a` so older muscle memory still routes to the analysis map after
+   * the canonical chord moved to `g a`.
    */
   alias?: string;
 }
@@ -30,7 +30,7 @@ export const NAV_SHORTCUTS: NavShortcut[] = [
   { key: "o", path: "/",                label: "Overview" },
   { key: "f", path: "/feed",            label: "Live Feed" },
   { key: "r", path: "/replay",          label: "Replay/Upload" },
-  { key: "a", path: "/map",             label: "Analysis (Market Map)", alias: "m" },
+  { key: "a", path: "/map",             label: "Analysis Map", alias: "m" },
   { key: "s", path: "/symbols",         label: "Symbols" },
   { key: "b", path: "/benchmark",       label: "Benchmark" },
   { key: "c", path: "/model-controls",  label: "Model Controls" },

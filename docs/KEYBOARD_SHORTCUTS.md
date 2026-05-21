@@ -5,10 +5,14 @@
 | `⌘K` / `Ctrl+K` | Open the command palette |
 | `g o` | Go to Overview |
 | `g f` | Go to Live Feed |
-| `g m` | Go to Market Map |
-| `g s` | Go to Symbols |
-| `g b` | Go to Benchmark Lab |
+| `g r` | Go to Replay/Upload |
+| `g a` | Go to Analysis Map |
+| `g m` | Legacy alias for Analysis Map |
+| `g s` | Go to Symbol Mentions |
+| `g b` | Go to Benchmark |
+| `g c` | Go to Model Controls |
 | `g x` | Go to System / Ops |
+| `g h` | Go to Help |
 | `g ,` | Go to Settings |
 | `Esc` | Close drawer / palette |
 | `Tab` | Move focus (visible ring on every focusable element) |
@@ -19,8 +23,8 @@ Open with `⌘K` and search for:
 
 - **Pages** — every primary route, plus `/legacy`.
 - **Theme** — toggle between dark and light without leaving your current view.
-- **Symbol lookup** — type a ticker like `AAPL` or `BTC-USD` and press Enter
-  to jump to that symbol's detail page.
+- **Find symbol mentions** — type a ticker like `AAPL` or `BTC-USD` and press
+  Enter to jump to news records mentioning that symbol.
 
 The palette filters via `cmdk` so partial matches work (`bench` matches
 "Benchmark Lab").

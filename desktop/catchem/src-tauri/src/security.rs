@@ -18,16 +18,23 @@ pub enum NavigationDecision {
 
 /// True if the URL is safe to hand to the system browser (http/https).
 pub fn is_safe_external_url(url: &str) -> bool {
-    let lower = url.trim().to_lowercase();
-    lower.starts_with("http://") || lower.starts_with("https://")
+    match tauri::Url::parse(url.trim()) {
+        Ok(parsed) => matches!(parsed.scheme(), "http" | "https"),
+        Err(_) => false,
+    }
 }
 
 /// True if the URL is an allowed in-app navigation target.
 pub fn is_allowed_internal_url(url: &str, host: &str, port: u16) -> bool {
-    let lower = url.trim().to_lowercase();
-    let local_a = format!("http://{host}:{port}");
-    let local_b = format!("http://localhost:{port}");
-    lower.starts_with(&local_a) || lower.starts_with(&local_b)
+    let Ok(parsed) = tauri::Url::parse(url.trim()) else {
+        return false;
+    };
+    parsed.scheme() == "http"
+        && parsed.port_or_known_default() == Some(port)
+        && matches!(
+            parsed.host_str(),
+            Some(candidate) if candidate == host || candidate == "localhost"
+        )
 }
 
 /// True if the URL is a Tauri-internal scheme the webview needs to load for
@@ -73,22 +80,69 @@ mod tests {
 
     #[test]
     fn accepts_http_and_https() {
-        for ok in ["http://example.com", "https://example.com", "HTTPS://Example.com/path"] {
+        for ok in [
+            "http://example.com",
+            "https://example.com",
+            "HTTPS://Example.com/path",
+        ] {
             assert!(is_safe_external_url(ok), "should accept: {ok}");
         }
     }
 
     #[test]
     fn internal_navigation_locked_to_local_api() {
-        assert!(is_allowed_internal_url("http://127.0.0.1:8087/feed", "127.0.0.1", 8087));
-        assert!(is_allowed_internal_url("http://localhost:8087/help", "127.0.0.1", 8087));
-        assert!(!is_allowed_internal_url("http://example.com", "127.0.0.1", 8087));
-        assert!(!is_allowed_internal_url("http://127.0.0.1:9999", "127.0.0.1", 8087));
+        assert!(is_allowed_internal_url(
+            "http://127.0.0.1:8087/feed",
+            "127.0.0.1",
+            8087
+        ));
+        assert!(is_allowed_internal_url(
+            "http://localhost:8087/help",
+            "127.0.0.1",
+            8087
+        ));
+        assert!(!is_allowed_internal_url(
+            "http://example.com",
+            "127.0.0.1",
+            8087
+        ));
+        assert!(!is_allowed_internal_url(
+            "http://127.0.0.1:9999",
+            "127.0.0.1",
+            8087
+        ));
+    }
+
+    #[test]
+    fn internal_navigation_rejects_userinfo_and_host_spoofing() {
+        for bad in [
+            "http://127.0.0.1:8087@evil.example/",
+            "http://localhost:8087@evil.example/feed",
+            "http://127.0.0.1:8087.evil.example/feed",
+            "http://localhost:8087.evil.example/feed",
+            "http://evil.example/http://127.0.0.1:8087/feed",
+            "http://127.0.0.1.evil.example:8087/feed",
+        ] {
+            assert!(
+                !is_allowed_internal_url(bad, "127.0.0.1", 8087),
+                "should reject spoofed internal URL: {bad}"
+            );
+            assert_ne!(
+                classify_navigation(bad, "127.0.0.1", 8087),
+                NavigationDecision::AllowInWebview,
+                "spoofed URL should not stay inside webview: {bad}"
+            );
+        }
     }
 
     #[test]
     fn tauri_internal_schemes_recognised() {
-        for ok in ["tauri://localhost", "asset://example/image.png", "about:blank", "TAURI://x"] {
+        for ok in [
+            "tauri://localhost",
+            "asset://example/image.png",
+            "about:blank",
+            "TAURI://x",
+        ] {
             assert!(is_tauri_internal_url(ok), "should accept tauri-internal: {ok}");
         }
         for bad in [

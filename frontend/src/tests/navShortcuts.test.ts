@@ -6,7 +6,12 @@ import {
 } from "@/lib/nav-shortcuts";
 import { SHORTCUTS as HELP_SHORTCUTS } from "@/features/help/HelpPage";
 import { SHORTCUTS as SETTINGS_SHORTCUTS } from "@/features/settings/SettingsPage";
-import { NAV as PALETTE_NAV } from "@/components/CommandPalette";
+import {
+  NAV as PALETTE_NAV,
+  SYMBOL_MENTION_PLACEHOLDER,
+  symbolMentionActionLabel,
+  symbolMentionEmptyText,
+} from "@/components/CommandPalette";
 
 /**
  * Round 7 truth bug pins. Before this round HelpPage advertised
@@ -60,6 +65,12 @@ describe("NAV_SHORTCUTS canonical registry", () => {
     // canonical `g a` but the alias keeps the old chord functional.
     expect(resolveShortcut("m")).toBe("/map");
   });
+
+  it("uses honest analysis-map wording while keeping the legacy map alias", () => {
+    const map = NAV_SHORTCUTS.find((s) => s.path === "/map");
+    expect(map).toMatchObject({ key: "a", alias: "m", label: "Analysis Map" });
+    expect(map?.label).not.toContain("Market Map");
+  });
 });
 
 describe("HelpPage SHORTCUTS docs match the canonical handler", () => {
@@ -89,7 +100,7 @@ describe("HelpPage SHORTCUTS docs match the canonical handler", () => {
     // Regression pin for the two specific Round 7 bugs.
     const findRow = (keys: string) => HELP_SHORTCUTS.find((r) => r.keys === keys);
     const m = findRow("g m");
-    // Either `g m` is gone (preferred) or it correctly labels Analysis/Market Map.
+    // Either `g m` is gone (preferred) or it correctly labels the analysis map.
     if (m) expect(m.description.toLowerCase()).not.toContain("model controls");
     const s = findRow("g s");
     if (s) expect(s.description.toLowerCase()).not.toBe("settings");
@@ -108,7 +119,7 @@ describe("SettingsPage SHORTCUTS docs match the canonical handler", () => {
   });
 
   it("uses the canonical `g a` chord for Analysis (not the old `g m`)", () => {
-    // Before Round 7 the row read `g m → Go to Market Map`. We canonicalize
+    // Before Round 7 the row used the legacy `g m` map chord. We canonicalize
     // on `g a` so the palette/help/settings all agree. `m` still works as
     // an alias in the handler.
     const a = SETTINGS_SHORTCUTS.find((r) => r.keys === "g a");
@@ -129,5 +140,27 @@ describe("CommandPalette NAV matches the canonical registry", () => {
         }
       }
     }
+  });
+
+  it("does not expose the old Market Map label in routed palette entries", () => {
+    expect(PALETTE_NAV.find((entry) => entry.path === "/map")?.label).toBe("Analysis Map");
+    expect(PALETTE_NAV.map((entry) => entry.label).join(" ")).not.toContain("Market Map");
+  });
+
+  it("uses symbol-mention wording instead of quote or price lookup wording", () => {
+    expect(SYMBOL_MENTION_PLACEHOLDER).toContain("symbol mention");
+    expect(symbolMentionEmptyText("aapl")).toBe("No matches - press Enter to find symbol mentions for AAPL");
+    expect(symbolMentionActionLabel("btc-usd")).toBe('Find symbol mentions "BTC-USD"');
+    expect(symbolMentionActionLabel("")).toBe('Find symbol mentions "AAPL"');
+
+    const combined = [
+      SYMBOL_MENTION_PLACEHOLDER,
+      symbolMentionEmptyText("aapl"),
+      symbolMentionActionLabel("aapl"),
+    ].join(" ").toLowerCase();
+    expect(combined).not.toContain("look up symbol");
+    expect(combined).not.toContain("lookup symbol");
+    expect(combined).not.toContain("quote");
+    expect(combined).not.toContain("price");
   });
 });

@@ -14,19 +14,19 @@ export function SymbolsPage() {
   return (
     <div className="grid gap-3">
       <div className="card">
-        <label htmlFor="symq" className="label">filter symbols</label>
+        <label htmlFor="symq" className="label">filter symbol mentions</label>
         <input
           id="symq"
           className="input w-full mt-1"
-          placeholder="AAPL, BTC-USD, ^GSPC…"
+          placeholder="AAPL mentions, BTC-USD news, ^GSPC mentions..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
       </div>
       {top.isLoading ? <Skeleton className="h-72" /> :
         top.error ? <ErrorBox err={top.error} /> :
-        !top.data || top.data.items.length === 0 ? <EmptyState title="No symbols found" hint="Run a replay first." /> :
-        filteredItems.length === 0 ? <EmptyState title="No matching symbols" hint="Clear or change the symbol filter." /> : (
+        !top.data || top.data.items.length === 0 ? <EmptyState title="No symbol mentions found" hint="Run a replay with finance-related news first." /> :
+        filteredItems.length === 0 ? <EmptyState title="No matching symbol mentions" hint="Clear or change the symbol mention filter." /> : (
           <ul className="grid gap-1 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {filteredItems.map((it) => (
                 <li key={it.symbol}>

@@ -11,9 +11,9 @@ FastAPI process serves it at `/` — there is no second runtime.
 | `/` | Overview — cards, distributions, trend, recent relevant items | ✅ |
 | `/feed` | Live Feed — filterable, URL-state, drawer-driven | ✅ |
 | `/feed/:capture_id` | Same feed with the record drawer open on that capture | ✅ |
-| `/map` | Market Map — asset-class × reason-code heatmap + stacked trend | ✅ |
-| `/symbols` | Symbols index | ✅ |
-| `/symbols/:symbol` | Symbol detail — records, reason distribution, sentiment | ✅ |
+| `/map` | Analysis Map — news-impact asset-class × reason-code heatmap + stacked record trend | ✅ |
+| `/symbols` | Symbol mentions index | ✅ |
+| `/symbols/:symbol` | Symbol mention detail — records, reason distribution, sentiment | ✅ |
 | `/benchmark` | Benchmark Lab — precision/recall/F1, per-item table, history | ✅ |
 | `/ops` | System / Ops — guard status, model versions, raw config | ✅ |
 | `/settings` | Theme, keyboard shortcuts, mode docs | ✅ |
@@ -27,7 +27,7 @@ Each route consumes a small number of aggregated `/ui/*` endpoints:
 Overview      → /ui/summary, /ui/trends, /ui/benchmark/latest
 Feed          → /ui/facets, /recent or /records/by-{asset_class|reason|symbol}
 Detail drawer → /record/{capture_id}
-Market Map    → /ui/matrix, /ui/trends
+Analysis Map  → /ui/matrix, /ui/trends
 Symbols       → /ui/top-symbols, /ui/symbol/{sym}
 Benchmark     → /ui/benchmark/latest, /ui/benchmark/history
 Ops           → /ui/summary, /ui/guards, /config, /metrics
@@ -83,7 +83,7 @@ mutated), the banner turns red. Operators see this before any data.
 
 ## Why this matters
 
-The UI never invents intelligence. Every label on screen is either:
+The UI never invents prices, quotes, or market moves. Every label on screen is either:
 
 - A direct field from the `FinancialImpactRecord` produced by `service.py`, or
 - An aggregate the backend computed in a `/ui/*` endpoint.

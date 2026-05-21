@@ -48,6 +48,11 @@ pyinstaller \
   --hidden-import catchem.cli \
   "$CATCHEM_DIR/_sidecar_entry.py"
 
+# The frozen package resolves project-root configs relative to the onedir
+# sidecar root (for example: sidecar/configs/taxonomy.yaml).
+rm -rf "$OUT/catchem-sidecar/configs"
+cp -R "$REPO_ROOT/configs" "$OUT/catchem-sidecar/configs"
+
 echo
 echo "Sidecar built at: $OUT/catchem-sidecar/"
 echo "Quick smoke:"

@@ -30,29 +30,30 @@ CATCHEM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$CATCHEM_DIR/../.." && pwd)"
 PROFILE="debug"
 BUILD_FLAG="--debug"
+RELEASE=0
 if [ "${1:-}" = "--release" ]; then
   PROFILE="release"
   BUILD_FLAG=""
+  RELEASE=1
 fi
 
 cd "$CATCHEM_DIR"
 
-# 1. Build the React bundle (the actual UI — served by FastAPI inside
-#    the .app's spawned sidecar).
-echo "[install_catchem] rebuilding React bundle"
-(cd "$REPO_ROOT/frontend" && npm install --silent --no-audit --no-fund && npm run build)
-
-# 2. Cargo-tauri build the bundle. Skip if the binary is already current
-#    AND the user passed --skip-build (saves ~20s on iteration).
+# 1. Build the bundle. Release installs must go through the release script
+#    because it stages the PyInstaller sidecar into Contents/Resources.
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
-  echo "[install_catchem] cargo-tauri build ($PROFILE)"
-  cd src-tauri
-  if [ -n "$BUILD_FLAG" ]; then
-    cargo-tauri build $BUILD_FLAG
+  if [ "$RELEASE" -eq 1 ]; then
+    echo "[install_catchem] building verified release bundle"
+    bash "$CATCHEM_DIR/scripts/build_catchem_release.sh"
   else
-    cargo-tauri build
+    echo "[install_catchem] rebuilding React bundle"
+    (cd "$REPO_ROOT/frontend" && npm install --silent --no-audit --no-fund && npm run build)
+
+    echo "[install_catchem] cargo-tauri build ($PROFILE)"
+    cd src-tauri
+    cargo-tauri build $BUILD_FLAG
+    cd ..
   fi
-  cd ..
 fi
 
 APP_SRC="$CATCHEM_DIR/src-tauri/target/$PROFILE/bundle/macos/Catchem.app"
@@ -64,6 +65,9 @@ fi
 # 3. Inject the privacy-keys plist + ad-hoc sign + strip quarantine.
 echo "[install_catchem] injecting plist + signing"
 bash "$CATCHEM_DIR/scripts/inject_info_plist.sh" "$APP_SRC"
+if [ "$RELEASE" -eq 1 ]; then
+  bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_SRC"
+fi
 
 # 4. Copy to /Applications. Use ditto (preserves resource forks +
 #    metadata correctly across .app bundles — cp -R is *not* safe for
@@ -71,12 +75,14 @@ bash "$CATCHEM_DIR/scripts/inject_info_plist.sh" "$APP_SRC"
 APP_DST="/Applications/Catchem.app"
 echo "[install_catchem] installing to $APP_DST"
 if [ -d "$APP_DST" ]; then
-  # Don't delete the dest; we want LaunchServices to see this as an
-  # in-place update (preserves TCC entries keyed by inode in some
-  # configurations). `ditto --rsrc` overwrites in place.
-  /usr/bin/ditto --rsrc "$APP_SRC" "$APP_DST"
-else
-  /usr/bin/ditto --rsrc "$APP_SRC" "$APP_DST"
+  BACKUP="/Applications/Catchem.app.backup.$(/bin/date +%Y%m%d-%H%M%S)"
+  echo "[install_catchem] backing up existing app to $BACKUP"
+  /usr/bin/ditto --rsrc "$APP_DST" "$BACKUP"
+  /bin/rm -rf "$APP_DST"
+fi
+/usr/bin/ditto --rsrc "$APP_SRC" "$APP_DST"
+if [ "$RELEASE" -eq 1 ]; then
+  bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_DST"
 fi
 
 # 5. Re-register with LaunchServices so the menu bar + Spotlight pick

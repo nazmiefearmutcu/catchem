@@ -152,6 +152,31 @@ describe("UI truth regressions", () => {
     expect(screen.queryByText("live")).not.toBeInTheDocument();
   });
 
+  it("Feed shows a degraded status when a source health row is unhealthy", async () => {
+    apiMock.newsStatus.mockResolvedValue({
+      enabled: true,
+      feeds: 53,
+      interval_seconds: 10,
+      last_run_at: null,
+      next_run_at: null,
+      last_ingested: 0,
+      total_ingested: 10,
+      last_error: null,
+      is_polling: false,
+      last_new_at: null,
+      empty_ticks: 0,
+      last_avg_publisher_lag_seconds: null,
+      last_median_publisher_lag_seconds: null,
+      unhealthy_feeds: 1,
+    });
+
+    renderWithProviders(createElement(FeedPage), ["/feed"]);
+
+    expect(await screen.findByText("degraded")).toBeInTheDocument();
+    expect(screen.getByText("1 source with latest fetch issue")).toBeInTheDocument();
+    expect(screen.queryByText("live")).not.toBeInTheDocument();
+  });
+
   it("Feed treats the first non-empty snapshot after an empty load as baseline, not new", async () => {
     apiMock.recent
       .mockResolvedValueOnce({ items: [] })

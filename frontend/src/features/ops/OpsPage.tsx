@@ -48,9 +48,7 @@ export function OpsPage() {
               <KVInline label="governance sha256" value={formatGovernanceHash(guards.data.governance_index_sha256)} mono />
             </ul>
           )}
-        <p className="text-[10px] text-[color:var(--fg-muted)] mt-2">
-          The release gate is intentionally <b className="text-good">false</b> — that means the candidate stays quarantined.
-        </p>
+        <GuardExplanation guards={guards.data} />
       </section>
 
       <section className="card">
@@ -83,6 +81,29 @@ function guardErrorText(guards: { error?: string | null; error_code?: string | n
 
 function formatGovernanceHash(hash: string | null | undefined) {
   return hash ? `${hash.slice(0, 16)}…` : "not reported";
+}
+
+function GuardExplanation({ guards }: { guards: { ok: boolean; release_gate_passed?: boolean } | undefined }) {
+  if (!guards) return null;
+  if (!guards.ok) {
+    return (
+      <p className="text-[10px] text-warn mt-2">
+        Guard snapshot unavailable — Catchem cannot prove the release-gate state from governance metadata.
+      </p>
+    );
+  }
+  if (guards.release_gate_passed) {
+    return (
+      <p className="text-[10px] text-bad mt-2">
+        The release gate is <b>true</b> — verify governance before using this candidate outside diagnostics.
+      </p>
+    );
+  }
+  return (
+    <p className="text-[10px] text-[color:var(--fg-muted)] mt-2">
+      The release gate is intentionally <b className="text-good">false</b> — that means the candidate stays quarantined.
+    </p>
+  );
 }
 
 function KV({ label, value, tone, mono }: { label: string; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {

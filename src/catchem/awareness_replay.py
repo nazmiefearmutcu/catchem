@@ -42,6 +42,7 @@ class ReplayRunner:
         """Process one pass over all finalized files. Returns counters."""
         processed = 0
         skipped = 0
+        failed = 0
         for path in self.files():
             offset = self.storage.get_offset(str(path))
             last_persist = time.monotonic()
@@ -52,6 +53,7 @@ class ReplayRunner:
                 except Exception as exc:
                     logger.exception("handler_error", capture_id=cap.capture_id, err=str(exc))
                     self.storage.record_failure(cap.capture_id, str(exc), cap.text[:2000])
+                    failed += 1
                     skipped += 1
 
                 offset = ReplayOffset(
@@ -67,11 +69,11 @@ class ReplayRunner:
 
                 if max_records and processed >= max_records:
                     self.storage.save_offset(offset)
-                    return {"processed": processed, "skipped": skipped}
+                    return {"processed": processed, "skipped": skipped, "failed": failed}
 
             # End of file — persist final offset.
             self.storage.save_offset(offset)
-        return {"processed": processed, "skipped": skipped}
+        return {"processed": processed, "skipped": skipped, "failed": failed}
 
     def tail(
         self,

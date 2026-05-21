@@ -20,6 +20,8 @@ export const SSE_BACKOFF_MAX_MS = 60_000;
  *     fallback and reset the backoff so the next failure restarts cleanly.
  *
  * SSE event 'summary' → refresh; 'tick' → just bump status.
+ * The socket opening alone is not a data beat; keep the UI in "connecting"
+ * until the first event proves the stream is actually moving data.
  */
 export function useLiveStream(): { status: LiveStatus; lastBeatAt: number | null } {
   const [status, setStatus] = useState<LiveStatus>("idle");
@@ -95,14 +97,26 @@ export function useLiveStream(): { status: LiveStatus; lastBeatAt: number | null
         qc.invalidateQueries({ queryKey: ["recent"] });
         qc.invalidateQueries({ queryKey: ["trends"] });
         qc.invalidateQueries({ queryKey: ["news-status"] });
+        qc.invalidateQueries({ queryKey: ["top-symbols"] });
+        qc.invalidateQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) && q.queryKey[0] === "symbol",
+        });
         qc.invalidateQueries({
           predicate: (q) =>
             Array.isArray(q.queryKey) && q.queryKey[0] === "feed-list",
         });
       });
-      es.addEventListener("tick", onLive);
+      es.addEventListener("tick", () => {
+        onLive();
+        qc.invalidateQueries({ queryKey: ["top-symbols"] });
+        qc.invalidateQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) && q.queryKey[0] === "symbol",
+        });
+      });
       es.onopen = () => {
-        setStatus("open");
+        setStatus("connecting");
         stopFallback();
         backoffRef.current = SSE_BACKOFF_MIN_MS;
       };

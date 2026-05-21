@@ -16,6 +16,7 @@ export interface GuardSnapshot {
   safe_to_publish?: boolean;
   safe_to_promote?: boolean;
   governance_index_sha256?: string;
+  error_code?: string | null;
   error?: string;
 }
 
@@ -225,4 +226,12 @@ export interface ArchiveNowResponse {
 export interface ReplayRunResponse {
   processed: number;
   skipped: number;
+  failed: number;
+  dlq: number;
+  dlq_delta: number;
+  records_before: Totals;
+  records_after: Totals;
+  inserted: number;
+  replaced: number;
+  net_new_records: number;
 }

@@ -33,6 +33,7 @@ export function Shell() {
     staleTime: 5_000,
   });
   const { status, lastBeatAt } = useLiveStream();
+  const liveDotStatus = status === "open" && !lastBeatAt ? "idle" : status;
   // App-wide arrival toasts (works from any tab).
   useDesktopAlerts();
 
@@ -91,7 +92,7 @@ export function Shell() {
             </a>
           </nav>
           <div className="ml-auto flex items-center gap-3">
-            <LiveDot status={status} label={lastBeatAt ? status : "idle"} />
+            <LiveDot status={liveDotStatus} />
             {summary && (
               <span className="text-[10px] text-[color:var(--fg-dim)]">
                 {summary.totals.finance_relevant}/{summary.totals.total} relevant

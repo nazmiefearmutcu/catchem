@@ -19,8 +19,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import catchem.api as api_module
 from catchem.api import create_app
 from catchem.demo import build_capture, write_jsonl
+from catchem.schemas import AwarenessCaptureView
 from catchem.settings import load_settings, reload_settings
 
 
@@ -121,3 +123,46 @@ def test_replay_default_body_uses_50(client: TestClient) -> None:
     body = r.json()
     assert "processed" in body
     assert "skipped" in body
+
+
+def test_replay_endpoint_exposes_truthful_storage_and_dlq_fields(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aware_root = tmp_path / "data"
+    _write_capture(
+        aware_root,
+        text="Fed raised rates by 25 bps and Apple (AAPL) reacted.",
+        url="https://example.com/fed-truth",
+    )
+
+    r1 = client.post("/replay", json={"max_records": 50})
+    assert r1.status_code == 200, r1.text
+    body1 = r1.json()
+    assert body1["processed"] >= 1, body1
+    assert body1["failed"] == 0
+    assert body1["dlq_delta"] == 0
+    assert body1["inserted"] >= 1
+    assert body1["net_new_records"] >= 1
+    assert body1["records_after"]["total"] >= body1["records_before"]["total"]
+
+    _write_capture(
+        aware_root,
+        text="This capture will fail inside the service.",
+        url="https://example.com/fed-fail",
+    )
+
+    def boom(_cap: AwarenessCaptureView):
+        raise RuntimeError("synthetic process failure")
+
+    assert api_module._SUPERVISOR is not None
+    monkeypatch.setattr(api_module._SUPERVISOR.service, "process", boom)
+
+    r2 = client.post("/replay", json={"max_records": 50})
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    assert body2["processed"] == 0, body2
+    assert body2["skipped"] == 1, body2
+    assert body2["failed"] == 1, body2
+    assert body2["dlq_delta"] == 1, body2
+    assert body2["inserted"] == 0, body2
+    assert body2["net_new_records"] == 0, body2

@@ -236,6 +236,21 @@ describe("UI truth regressions", () => {
     expect(within(section as HTMLElement).getByText("GOV_HASH_MISSING")).toBeInTheDocument();
     expect(within(section as HTMLElement).queryByText(/undefined/)).not.toBeInTheDocument();
   });
+
+  it("Ops does not claim the release gate is intentionally false when the guard snapshot is unavailable", async () => {
+    apiMock.guards.mockResolvedValue({
+      ok: false,
+      error_code: "missing_governance_index",
+    });
+    renderWithProviders(createElement(OpsPage), ["/ops"]);
+
+    const guardSection = await screen.findByText("NewsImpact guard");
+    const section = guardSection.closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section as HTMLElement).getByText(/missing_governance_index/)).toBeInTheDocument();
+    expect(within(section as HTMLElement).getByText(/cannot prove the release-gate state/)).toBeInTheDocument();
+    expect(within(section as HTMLElement).queryByText(/intentionally/)).not.toBeInTheDocument();
+  });
 });
 
 function guard(): GuardSnapshot {

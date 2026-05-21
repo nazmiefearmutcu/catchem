@@ -59,6 +59,8 @@ from .contracts import (
     FinancialImpactSummary,
     GuardSummary,
     LogTailResponse,
+    MarketQuote,
+    MarketQuoteBatchResponse,
     MetricsSummary,
     RecordListResponse,
     SidecarStatusResponse,
@@ -69,6 +71,7 @@ from .demo import build_capture as _build_capture, run_demo as _run_demo
 from .text_extract import ALLOWED_SUFFIXES, MAX_UPLOAD_BYTES, extract_text
 from .dashboard_data import overview
 from .logging import get_logger
+from .market_data import LocalFixtureMarketDataProvider, parse_symbol_list
 from .newsimpact_guarded_adapter import snapshot_guard_state, NewsImpactGuardError
 from .news_poller import DEFAULT_FEEDS, FeedSpec, NewsPoller
 from .redaction import redact_record_for_mode, redact_records_for_mode, safe_guard_view
@@ -155,6 +158,7 @@ def _git_branch_safe() -> str | None:
 
 
 logger = get_logger("catchem.api")
+_MARKET_DATA = LocalFixtureMarketDataProvider()
 
 _SUPERVISOR: Supervisor | None = None
 _SETTINGS: Settings | None = None
@@ -629,6 +633,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for s in r.get("impact_reason_codes", []):
                 c[s] += 1
         return {"items": [{"reason": k, "count": n} for k, n in c.most_common(limit)]}
+
+    @app.get("/ui/quotes", response_model=MarketQuoteBatchResponse)
+    def ui_quotes(symbols: str = Query("", description="Comma-separated symbols")) -> MarketQuoteBatchResponse:
+        """Batch quote contract.
+
+        Current provider is local fixture-only. Known fixtures return stale
+        snapshots; unknown symbols return typed unavailable items instead of
+        raising 5xx.
+        """
+        parsed = parse_symbol_list(symbols)[:50]
+        return MarketQuoteBatchResponse(
+            items=_MARKET_DATA.quotes(parsed),
+            provider=_MARKET_DATA.provider,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    @app.get("/ui/quote/{symbol}", response_model=MarketQuote)
+    def ui_quote(symbol: str) -> MarketQuote:
+        """Single-symbol quote contract with the same stale/unavailable semantics."""
+        return _MARKET_DATA.quote(symbol)
 
     @app.get("/ui/trends")
     def ui_trends(limit: int = Query(500, ge=10, le=5000)) -> dict[str, Any]:

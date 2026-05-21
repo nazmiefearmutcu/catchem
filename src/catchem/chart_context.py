@@ -1,8 +1,12 @@
-"""Stage G: read-only chart context. Looks up a symbol's recent price/return/vol
-in any chart artifacts NewsImpact may ship under read-only paths.
+"""Stage G: dormant/offline chart metadata reader.
+
+This module can parse historical chart artifacts that NewsImpact may ship under
+read-only paths, but Catchem has no live quote subsystem and production records
+do not emit this context.
 
 **Critical rule:** the values produced here are *metadata only*. In production_safe
-mode the consumer must NOT treat them as causal market impact.
+mode the consumer must NOT treat them as current prices, live quotes, or causal
+market impact.
 
 If no chart resources are available the function returns an empty dict and
 processing continues. We never block on missing data.
@@ -45,7 +49,7 @@ class ChartContext:
 
 
 class ChartContextReader:
-    """Optional reader. If newsimpact_root is None or empty, every lookup is empty."""
+    """Offline metadata reader. If newsimpact_root is None or empty, every lookup is empty."""
 
     def __init__(self, newsimpact_root: Path | None) -> None:
         self.root = newsimpact_root

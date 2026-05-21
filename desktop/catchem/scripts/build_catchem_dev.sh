@@ -32,4 +32,6 @@ command -v cargo-tauri >/dev/null || { echo "ERROR: cargo-tauri not found. cargo
 
 # 5. Run Tauri dev (will spawn the sidecar via lib.rs setup)
 cd src-tauri
+export CATCHEM_DESKTOP_DEV=1
+export CATCHEM_REPO_ROOT="$REPO_ROOT"
 cargo-tauri dev "$@"

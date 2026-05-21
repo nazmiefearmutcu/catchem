@@ -129,7 +129,8 @@ Read `docs/SOURCE_OF_TRUTH.md` for the full statement.
 
 - Awareness not pip-installed → JSONL replay still works.
 - NewsImpact missing entirely → SymbolMapper falls back to the internal
-  registry; ChartContextReader returns "unavailable".
+  registry; ChartContextReader is dormant/offline metadata only and returns
+  "unavailable"; production records do not emit chart context.
 - HF cache empty / no internet → stubs run.
 - Kaggle credentials missing → downloads skipped with status code 0.
 - `final_best.pt` absent → guards still pass because the verifier reads

@@ -8,8 +8,12 @@ A local-first sidecar workspace that fuses two existing systems:
 
 `catchem` consumes Awareness JSONL captures **after** they are durably
 committed and emits one `FinancialImpactRecord` per capture: a multi-label
-classification of asset class / impact reason / symbols / sentiment / evidence,
+classification of asset class / impact reason / symbol mentions / sentiment / evidence,
 together with the component scores that produced the decision.
+
+Catchem does not include a live quote or market-price subsystem. Symbol pages
+and maps summarize finance-related news mentions and classifier outputs, not
+current prices, quotes, or market movement.
 
 It ships with a premium analyst UI (React + TypeScript) served from the same
 FastAPI process — no separate frontend runtime.
@@ -77,14 +81,14 @@ Routes:
 
 - `/` — Overview (cards, distributions, trend, recent flow, benchmark snapshot)
 - `/feed` — Live feed with URL-state filters, drawer-driven detail
-- `/map` — Asset-class × reason-code heatmap + stacked trend
-- `/symbols` and `/symbols/:sym` — Symbols explorer
+- `/map` — Analysis Map: news-impact asset-class × reason-code heatmap + stacked record trend
+- `/symbols` and `/symbols/:sym` — Symbol mentions explorer
 - `/benchmark` — Golden-set precision/recall/F1, per-item, history
 - `/ops` — System health, guard status, model versions, raw config
 - `/settings` — Theme, shortcuts, mode explanations
 - `/legacy` — The original vanilla dashboard (kept until full replacement is proven)
 
-Power-user keys: `⌘K` opens the command palette; `g o`/`g f`/`g m`/`g s`/`g b`/`g x`/`g ,` navigate; `Esc` closes drawers.
+Power-user keys: `⌘K` opens the command palette; `g o`/`g f`/`g r`/`g a`/`g s`/`g b`/`g c`/`g x`/`g h`/`g ,` navigate; `g m` remains a legacy alias for the Analysis Map; `Esc` closes drawers.
 
 ## Modes
 

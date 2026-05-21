@@ -10,7 +10,6 @@ mod security;
 mod sidecar;
 mod state;
 
-use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -47,32 +46,36 @@ pub fn run() {
             // run from the repo so the analyst can `git diff` outputs.
             // Release builds MUST write to ~/Library/Application Support/
             // because the .app bundle is read-only (Gatekeeper + codesign).
-            let dev_root = paths::dev_repo_root();
-            let release_mode = dev_root.is_none();
-            let python_path: PathBuf = paths::dev_python().unwrap_or_else(|| {
-                let resource = app
-                    .path()
-                    .resource_dir()
-                    .expect("resource_dir")
-                    .to_path_buf();
-                paths::bundled_sidecar(&resource).unwrap_or_else(|| PathBuf::from("python3"))
-            });
-            let cwd: PathBuf = dev_root.unwrap_or_else(paths::app_data_dir);
+            let resource_dir = app
+                .path()
+                .resource_dir()
+                .expect("resource_dir")
+                .to_path_buf();
+            let resolved = match paths::resolve_sidecar(
+                &resource_dir,
+                paths::env_flag("CATCHEM_DESKTOP_DEV"),
+            ) {
+                Ok(resolved) => resolved,
+                Err(e) => {
+                    log::error!("sidecar resolution failed: {e}");
+                    return Err(std::io::Error::new(std::io::ErrorKind::NotFound, e).into());
+                }
+            };
 
             let cfg = SidecarConfig {
-                python: python_path.clone(),
-                cwd: cwd.clone(),
+                python: resolved.executable.clone(),
+                cwd: resolved.cwd.clone(),
                 host: DEFAULT_HOST.to_string(),
                 port: DEFAULT_PORT,
-                release_mode,
+                release_mode: resolved.release_mode,
             };
 
             log::info!(
                 "catchem boot: python={} cwd={} endpoint={} release={}",
-                python_path.display(),
-                cwd.display(),
+                cfg.python.display(),
+                cfg.cwd.display(),
                 cfg.endpoint(),
-                release_mode
+                cfg.release_mode
             );
 
             let state = AppState::new(cfg.clone());

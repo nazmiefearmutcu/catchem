@@ -207,10 +207,10 @@ describe("UI truth regressions", () => {
     apiMock.topSymbols.mockResolvedValue({ items: [{ symbol: "AAPL", count: 4 }] });
     renderWithProviders(createElement(SymbolsPage), ["/symbols"]);
 
-    fireEvent.change(await screen.findByLabelText("filter symbols"), { target: { value: "BTC" } });
+    fireEvent.change(await screen.findByLabelText("filter symbol mentions"), { target: { value: "BTC" } });
 
-    expect(screen.getByText("No matching symbols")).toBeInTheDocument();
-    expect(screen.getByText("Clear or change the symbol filter.")).toBeInTheDocument();
+    expect(screen.getByText("No matching symbol mentions")).toBeInTheDocument();
+    expect(screen.getByText("Clear or change the symbol mention filter.")).toBeInTheDocument();
   });
 
   it("Ops shows /ui/guards query errors instead of a permanent skeleton", async () => {

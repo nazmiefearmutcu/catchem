@@ -14,9 +14,16 @@ export const NAV: { label: string; path: string; kbd?: string }[] = [
   { label: "Legacy Dashboard", path: "/legacy" },
 ];
 
+export const SYMBOL_MENTION_PLACEHOLDER = "Type a page, symbol mention, or command...";
+export const symbolMentionEmptyText = (raw: string) =>
+  `No matches - press Enter to find symbol mentions for ${raw.trim().toUpperCase()}`;
+export const symbolMentionActionLabel = (raw: string) =>
+  `Find symbol mentions "${raw.trim().toUpperCase() || "AAPL"}"`;
+
 /**
  * Cmd/Ctrl+K opens the palette. Includes navigation, theme toggle, and
- * symbol/reason quick-jump (typing a known symbol like AAPL routes you).
+ * symbol/reason mention quick-jump (typing a known symbol like AAPL routes you
+ * to matching news records, not to a quote subsystem).
  */
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
@@ -59,12 +66,12 @@ export function CommandPalette() {
           autoFocus
           value={input}
           onValueChange={setInput}
-          placeholder="Type a page, symbol, or command…"
+          placeholder={SYMBOL_MENTION_PLACEHOLDER}
           className="w-full bg-transparent px-4 py-3 text-sm outline-none border-b border-[color:var(--border)]"
         />
         <Command.List className="max-h-96 overflow-auto p-1">
           <Command.Empty className="px-4 py-3 text-xs text-[color:var(--fg-dim)]">
-            No matches — press <span className="kbd">Enter</span> to look up symbol <b className="text-good">{input.trim().toUpperCase()}</b>
+            No matches - press <span className="kbd">Enter</span> to find symbol mentions for <b className="text-good">{input.trim().toUpperCase()}</b>
           </Command.Empty>
           <Command.Group heading="Pages" className="px-2 py-1 text-[10px] uppercase text-[color:var(--fg-dim)]">
             {NAV.map((it) => (
@@ -95,11 +102,11 @@ export function CommandPalette() {
               Toggle theme (currently {theme})
             </Command.Item>
             <Command.Item
-              value="lookup symbol"
+              value="find symbol mentions"
               onSelect={goSymbol}
               className="rounded px-3 py-2 text-sm aria-selected:bg-[color:var(--bg-elev2)] cursor-pointer"
             >
-              Look up symbol "{input.trim().toUpperCase() || "AAPL"}"
+              {symbolMentionActionLabel(input)}
             </Command.Item>
           </Command.Group>
         </Command.List>

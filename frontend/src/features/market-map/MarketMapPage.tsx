@@ -10,7 +10,7 @@ export function MarketMapPage() {
   return (
     <div className="grid gap-4">
       <section className="card">
-        <h2 className="label mb-2">asset class × reason code (co-occurrence)</h2>
+        <h2 className="label mb-2">news-impact map: asset class x reason code</h2>
         {matrix.isLoading ? <Skeleton className="h-72" /> :
           matrix.error ? <ErrorBox err={matrix.error} /> :
           !matrix.data || matrix.data.asset_classes.length === 0 ? <EmptyState title="No matrix yet" hint="Run a replay first." /> : (
@@ -48,7 +48,7 @@ export function MarketMapPage() {
       </section>
 
       <section className="card">
-        <h2 className="label mb-2">stacked trend by asset class</h2>
+        <h2 className="label mb-2">news record trend by asset class</h2>
         {trends.isLoading ? <Skeleton className="h-56" /> :
           trends.error ? <ErrorBox err={trends.error} /> :
           trends.data && trends.data.buckets.length === 0 ? <EmptyState title="No timeline data" /> :

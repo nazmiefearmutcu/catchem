@@ -48,7 +48,7 @@ live:
 api:
   host: "127.0.0.1"
   port: 8087
-  cors_origins: ["http://127.0.0.1:8087", "http://localhost:8087"]
+  cors_origins: ["tauri://localhost", "http://127.0.0.1:8087", "http://localhost:8087"]
   recent_limit_default: 50
   recent_limit_max: 500
 

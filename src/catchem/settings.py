@@ -80,7 +80,9 @@ class ApiConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     host: str = "127.0.0.1"
     port: int = 8087
-    cors_origins: list[str] = Field(default_factory=list)
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["tauri://localhost", "http://127.0.0.1:8087", "http://localhost:8087"]
+    )
     recent_limit_default: int = 50
     recent_limit_max: int = 500
 

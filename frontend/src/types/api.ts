@@ -120,6 +120,28 @@ export interface UISymbol {
   items: FinancialRecord[];
 }
 
+export interface MarketQuote {
+  symbol: string;
+  provider: string;
+  as_of: string | null;
+  retrieved_at: string;
+  currency: string | null;
+  last: number | null;
+  prev_close: number | null;
+  change_abs: number | null;
+  change_pct: number | null;
+  market_state: string;
+  stale_after: string | null;
+  freshness_status: "stale" | "unavailable" | string;
+  error_code: string | null;
+}
+
+export interface MarketQuoteBatchResponse {
+  items: MarketQuote[];
+  provider: string;
+  generated_at: string;
+}
+
 export interface UIConfig {
   mode: Mode;
   use_ml_stubs: boolean;

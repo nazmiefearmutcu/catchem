@@ -23,7 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UISymbol,
-  UIConfig, UIMetrics, FinancialRecord, GuardSnapshot,
+  UIConfig, UIMetrics, FinancialRecord, GuardSnapshot, MarketQuote, MarketQuoteBatchResponse,
   DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
   ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
 } from "@/types/api";
@@ -42,6 +42,12 @@ export const api = {
   topReasons: (limit = 20) => request<{ items: { reason: string; count: number }[] }>(`/ui/top-reasons?limit=${limit}`),
   benchmarkLatest: () => request<UIBenchmark>("/ui/benchmark/latest"),
   benchmarkHistory: () => request<{ history: UIBenchmark[] }>("/ui/benchmark/history"),
+  quotes: (symbols: string[]) => {
+    const params = new URLSearchParams({ symbols: symbols.join(",") });
+    return request<MarketQuoteBatchResponse>(`/ui/quotes?${params.toString()}`);
+  },
+  quote: (sym: string) =>
+    request<MarketQuote>(`/ui/quote/${encodeURIComponent(sym)}`),
   symbol: (sym: string, limit = 50) =>
     request<UISymbol>(`/ui/symbol/${encodeURIComponent(sym)}?limit=${limit}`),
 

@@ -30,15 +30,22 @@ export function OpsPage() {
 
       <section className="card">
         <h2 className="label mb-2">NewsImpact guard</h2>
-        {!guards.data ? <Skeleton className="h-12" /> :
-          !guards.data.ok ? <ErrorBox err={guards.data.error ?? "guard error"} /> : (
+        {guards.isLoading ? <Skeleton className="h-12" /> :
+          guards.error ? <ErrorBox err={guards.error} /> :
+          !guards.data ? <ErrorBox err="guard snapshot unavailable" /> :
+          !guards.data.ok ? <ErrorBox err={guardErrorText(guards.data)} /> : (
             <ul className="text-xs grid sm:grid-cols-2 gap-y-1">
               <KVInline label="release_gate_passed" value={String(guards.data.release_gate_passed)} tone={guards.data.release_gate_passed ? "bad" : "good"} />
               <KVInline label="quarantine_state" value={guards.data.quarantine_state ?? "—"} />
-              <KVInline label="fusion_verdict" value={guards.data.fusion_verdict_class ?? "—"} />
+              <KVInline
+                label="fusion_verdict_class"
+                value={guards.data.fusion_verdict_class ?? "—"}
+                title="External governance contract from merged_news (newsimpact). The 'FUSION_*' prefix is intentionally pinned — Catchem mirrors the upstream class verbatim and does not rename it locally."
+              />
               <KVInline label="safe_to_publish" value={String(guards.data.safe_to_publish)} tone={guards.data.safe_to_publish ? "bad" : "good"} />
               <KVInline label="safe_to_promote" value={String(guards.data.safe_to_promote)} tone={guards.data.safe_to_promote ? "bad" : "good"} />
-              <KVInline label="governance sha256" value={guards.data.governance_index_sha256?.slice(0, 16) + "…"} mono />
+              <KVInline label="error_code" value={guardErrorCode(guards.data)} tone="warn" mono />
+              <KVInline label="governance sha256" value={formatGovernanceHash(guards.data.governance_index_sha256)} mono />
             </ul>
           )}
         <p className="text-[10px] text-[color:var(--fg-muted)] mt-2">
@@ -65,6 +72,19 @@ export function OpsPage() {
   );
 }
 
+function guardErrorCode(guards: { ok: boolean; error_code?: string | null }) {
+  return guards.error_code || "—";
+}
+
+function guardErrorText(guards: { error?: string | null; error_code?: string | null }) {
+  const message = guards.error ?? "guard error";
+  return guards.error_code ? `${guards.error_code}: ${message}` : message;
+}
+
+function formatGovernanceHash(hash: string | null | undefined) {
+  return hash ? `${hash.slice(0, 16)}…` : "not reported";
+}
+
 function KV({ label, value, tone, mono }: { label: string; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {
   const cls = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "";
   return (
@@ -75,10 +95,10 @@ function KV({ label, value, tone, mono }: { label: string; value: string; tone?:
   );
 }
 
-function KVInline({ label, value, tone, mono }: { label: string; value: string; tone?: "good" | "bad"; mono?: boolean }) {
-  const cls = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : "";
+function KVInline({ label, value, tone, mono, title }: { label: string; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean; title?: string }) {
+  const cls = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "";
   return (
-    <li>
+    <li title={title}>
       <span className="text-[color:var(--fg-dim)]">{label}</span>{" "}
       <span className={`${mono ? "font-mono" : ""} ${cls}`}>{value}</span>
     </li>

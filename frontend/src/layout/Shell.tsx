@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api } from "@/lib/api";
+import { resolveShortcut } from "@/lib/nav-shortcuts";
 import { useTheme } from "@/hooks/useTheme";
 import { useLiveStream } from "@/hooks/useLiveStream";
 import { useDesktopAlerts } from "@/hooks/useDesktopAlerts";
@@ -32,6 +33,7 @@ export function Shell() {
     staleTime: 5_000,
   });
   const { status, lastBeatAt } = useLiveStream();
+  const liveDotStatus = status === "open" && !lastBeatAt ? "idle" : status;
   // App-wide arrival toasts (works from any tab).
   useDesktopAlerts();
 
@@ -50,17 +52,11 @@ export function Shell() {
       }
       waiting = false;
       if (timer) window.clearTimeout(timer);
-      const k = e.key.toLowerCase();
-      if (k === "o") nav("/");
-      else if (k === "f") nav("/feed");
-      else if (k === "r") nav("/replay");
-      else if (k === "a" || k === "m") nav("/map");
-      else if (k === "s") nav("/symbols");
-      else if (k === "b") nav("/benchmark");
-      else if (k === "c") nav("/model-controls");
-      else if (k === "x") nav("/ops");
-      else if (k === "h") nav("/help");
-      else if (k === ",") nav("/settings");
+      // Canonical key→path lookup. Adding/renaming a chord lives in
+      // lib/nav-shortcuts.ts; the test in tests/navShortcuts.test.ts
+      // cross-checks the doc surfaces against that registry.
+      const route = resolveShortcut(e.key);
+      if (route) nav(route);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -71,7 +67,7 @@ export function Shell() {
       <header className="border-b border-[color:var(--border)] bg-[color:var(--bg-elev)]">
         <div className="mx-auto max-w-screen-2xl px-4 py-3 flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="font-bold tracking-wide text-sm">fusion_stack</div>
+            <div className="font-bold tracking-wide text-sm">catchem</div>
             <span className="text-[10px] text-[color:var(--fg-dim)]">analyst workstation</span>
           </div>
           <nav className="flex flex-wrap items-center gap-1 text-xs" aria-label="Primary">
@@ -96,7 +92,7 @@ export function Shell() {
             </a>
           </nav>
           <div className="ml-auto flex items-center gap-3">
-            <LiveDot status={status} label={lastBeatAt ? status : "idle"} />
+            <LiveDot status={liveDotStatus} />
             {summary && (
               <span className="text-[10px] text-[color:var(--fg-dim)]">
                 {summary.totals.finance_relevant}/{summary.totals.total} relevant

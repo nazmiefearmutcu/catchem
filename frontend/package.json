@@ -1,9 +1,9 @@
 {
-  "name": "fusion-stack-ui",
+  "name": "catchem-ui",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Premium analyst interface for fusion_stack",
+  "description": "Premium analyst interface for catchem",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

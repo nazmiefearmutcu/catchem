@@ -1,7 +1,7 @@
 """Tests for the background RSS/Atom poller.
 
 We don't make real network calls in CI — the poller is gated by
-FUSION_NEWS__POLLER_ENABLED=false in the test env. These tests pin the
+CATCHEM_NEWS__POLLER_ENABLED=false in the test env. These tests pin the
 pure-function helpers: feed parsing and the small dedup cache.
 """
 
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from fusion_stack.news_poller import (
+from catchem.news_poller import (
     DEFAULT_FEEDS,
     FeedFetchResult,
     FeedSpec,
@@ -211,13 +211,23 @@ def test_default_feeds_have_valid_https_urls() -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def test_default_poll_interval_matches_ui_fallback() -> None:
+    """If this default ever moves, frontend FeedPage interval fallback (?? 10)
+    and the surrounding 'every 10s' comment must move in lockstep — otherwise
+    the UI will silently lie about cadence the first time /ui/news-status is
+    not yet populated (cold boot, brief race).
+    See Round 6 Bug 3."""
+    from catchem.settings import NewsConfig
+    assert NewsConfig().poll_interval_seconds == 10.0
+
+
 def test_news_poller_floors_interval_to_10s() -> None:
     """A misconfigured interval shouldn't hammer publishers."""
     class _StubSupervisor: pass
     class _StubSettings:
         class paths:
             from pathlib import Path
-            fusion_output_dir = Path("/tmp")
+            catchem_output_dir = Path("/tmp")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
         settings=_StubSettings(),  # type: ignore[arg-type]
@@ -232,7 +242,7 @@ def test_news_poller_status_fields_start_zeroed() -> None:
     class _StubSettings:
         class paths:
             from pathlib import Path
-            fusion_output_dir = Path("/tmp")
+            catchem_output_dir = Path("/tmp")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
         settings=_StubSettings(),  # type: ignore[arg-type]
@@ -255,7 +265,7 @@ def test_news_poller_records_per_feed_health() -> None:
     class _StubSettings:
         class paths:
             from pathlib import Path
-            fusion_output_dir = Path("/tmp")
+            catchem_output_dir = Path("/tmp")
     spec = FeedSpec("sample-feed", "https://example.com/rss", "example.com")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]

@@ -6,7 +6,7 @@ the production default.
 
 ## Default (no `--with-ml`)
 
-`fusion_stack[dev]` is small (FastAPI + Pydantic + a handful of helpers).
+`catchem[dev]` is small (FastAPI + Pydantic + a handful of helpers).
 Every model-backed stage in `service.py` ships behind a `make_*(use_stub=...)`
 factory:
 
@@ -23,14 +23,14 @@ sentiment_accuracy=0.67). See `tests/test_golden_benchmark.py` for the pin.
 
 ## `--with-ml` install path
 
-`bash scripts/fusion_bootstrap_and_run.sh --with-ml` runs:
+`bash scripts/catchem_bootstrap_and_run.sh --with-ml` runs:
 
 ```
 uv pip install -e ".[ml]"            # torch + transformers + sentence-transformers + huggingface_hub
 python scripts/warm_hf_models.py     # snapshot_download for the four IDs above
 ```
 
-When this completes, `FUSION_USE_ML_STUBS=false` (or removing the env entirely)
+When this completes, `CATCHEM_USE_ML_STUBS=false` (or removing the env entirely)
 makes `make_*` return the real HF wrappers on next supervisor construction.
 
 ## Known environment limitations on macOS
@@ -49,7 +49,7 @@ hangs silently. Three independent causes:
 
 ## Pragmatic fallback (already in place)
 
-`scripts/fusion_bootstrap_and_run.sh` does **not** fail when `[ml]` install
+`scripts/catchem_bootstrap_and_run.sh` does **not** fail when `[ml]` install
 fails. It prints a yellow warning and continues:
 
 ```

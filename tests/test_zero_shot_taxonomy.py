@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from fusion_stack.taxonomy import default_taxonomy_path, load_taxonomy
-from fusion_stack.zero_shot_classifier import ZeroShotStub, make_zero_shot
+from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+from catchem.zero_shot_classifier import ZeroShotStub, make_zero_shot
 
 
 @pytest.fixture

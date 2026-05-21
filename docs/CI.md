@@ -4,13 +4,13 @@
 `feat/**` / `fix/**`:
 
 ## `backend`
-1. Install `fusion_stack[dev]` + `build`.
+1. Install `catchem[dev]` + `build`.
 2. Synthesize a quarantined `governance_index.json` fixture (CI does not have
    the real `merged_news` repo on disk).
 3. Run `scripts/verify_newsimpact_guard.py` against the fixture — must exit 0.
 4. Run the full `pytest tests` suite.
 5. **Wheel canary**: `python -m build --wheel`, open the resulting `.whl`,
-   assert `fusion_stack/static/dashboard.html` is inside the package payload.
+   assert `catchem/static/dashboard.html` is inside the package payload.
 6. Run the golden benchmark and assert `schema_version == 1` and
    `relevance.f1 >= 0.83`.
 
@@ -19,11 +19,11 @@
 2. `tsc -b --noEmit` typecheck.
 3. `vitest run`.
 4. Production `vite build`.
-5. Assert the built bundle landed at `src/fusion_stack/static/app/index.html`
+5. Assert the built bundle landed at `src/catchem/static/app/index.html`
    + `.../assets/`.
 
 ## `api-smoke` (needs both)
-1. Start `fusion-stack serve` in the background.
+1. Start `catchem serve` in the background.
 2. Poll `/healthz` until it answers.
 3. Assert the security headers are present
    (`Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
@@ -35,7 +35,7 @@
 
 ## Environment
 
-CI runs with `FUSION_MODE=production_safe` and `FUSION_MODELS__USE_ML_STUBS=true`
+CI runs with `CATCHEM_MODE=production_safe` and `CATCHEM_MODELS__USE_ML_STUBS=true`
 — deterministic stubs, no network reaches Hugging Face or Kaggle. Permissions
 are read-only on `contents`. Nothing publishes or promotes.
 
@@ -44,6 +44,6 @@ are read-only on `contents`. Nothing publishes or promotes.
 ```bash
 make test
 (cd frontend && npm test && npm run build)
-fusion-stack serve &
-fusion-stack demo --title "Fed hikes 25 bps" --text-file docs/examples/news_fed.txt
+catchem serve &
+catchem demo --title "Fed hikes 25 bps" --text-file docs/examples/news_fed.txt
 ```

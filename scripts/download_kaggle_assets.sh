@@ -8,7 +8,7 @@
 #
 # Downloads + unzips the catalog into data/kaggle/<slug>/ and optionally
 # emits a normalized data/golden/extended.jsonl that
-# `fusion-stack benchmark --golden --extended <path>` can ingest.
+# `catchem benchmark --golden --extended <path>` can ingest.
 #
 # Dataset URLs (documented for reviewers):
 #   https://www.kaggle.com/datasets/ankurzing/sentiment-analysis-for-financial-news
@@ -21,9 +21,9 @@
 #   https://www.kaggle.com/datasets/borismarjanovic/price-volume-data-for-all-us-stocks-etfs
 
 set -euo pipefail
-FUSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="$FUSION_ROOT/data/kaggle"
-GOLDEN="$FUSION_ROOT/data/golden"
+CATCHEM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="$CATCHEM_ROOT/data/kaggle"
+GOLDEN="$CATCHEM_ROOT/data/golden"
 mkdir -p "$TARGET" "$GOLDEN"
 
 if [ -z "${KAGGLE_USERNAME:-}" ] || [ -z "${KAGGLE_KEY:-}" ]; then
@@ -111,7 +111,7 @@ with open(src, encoding="utf-8", errors="replace") as fh, open(dst, "w", encodin
         n += 1
 print(f"  wrote {n} rows")
 PY
-  echo "[kaggle] run: fusion-stack benchmark --golden --extended $GOLDEN/extended.jsonl"
+  echo "[kaggle] run: catchem benchmark --golden --extended $GOLDEN/extended.jsonl"
 else
   echo "[kaggle] no finance_sentiment CSV found — skipped extended.jsonl synthesis"
 fi

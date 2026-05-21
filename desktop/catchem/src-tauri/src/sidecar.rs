@@ -1,6 +1,6 @@
 //! Sidecar manager.
 //!
-//! Spawns the fusion_stack FastAPI server as a child process, polls
+//! Spawns the catchem FastAPI server as a child process, polls
 //! /healthz until it answers, and exposes start/stop/status to the
 //! Tauri command layer.
 
@@ -24,6 +24,12 @@ pub struct SidecarConfig {
     /// API host + port the server listens on.
     pub host: String,
     pub port: u16,
+    /// `true` for the bundled .app build — sidecar must write all output
+    /// under `~/Library/Application Support/Catchem/`, NOT relative to
+    /// the (read-only, codesigned) bundle. Dev builds keep the repo-local
+    /// `data/` layout so analysts can `git diff` outputs.
+    #[serde(default)]
+    pub release_mode: bool,
 }
 
 impl SidecarConfig {
@@ -55,18 +61,40 @@ impl SidecarState {
             let _ = child.wait();
         }
         let mut cmd = Command::new(&cfg.python);
-        cmd.arg("-m").arg("fusion_stack.cli").arg("serve");
+        cmd.arg("-m").arg("catchem.cli").arg("serve");
         cmd.current_dir(&cfg.cwd);
         // Production-safe is the only acceptable default. Diagnostic must
         // never be enabled from the desktop shell.
-        cmd.env("FUSION_MODE", "production_safe");
-        cmd.env("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "false");
-        cmd.env("FUSION_API_HOST", &cfg.host);
-        cmd.env("FUSION_API_PORT", cfg.port.to_string());
+        cmd.env("CATCHEM_MODE", "production_safe");
+        cmd.env("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "false");
+        // The Python settings layer keys host/port under `api.host` and
+        // `api.port`, so the env override has to use pydantic-settings'
+        // nested delimiter (`__`). Without the double underscore the
+        // sidecar would silently ignore us and bind whatever
+        // `configs/catchem.yaml` says (default 8087), which in turn
+        // breaks the Tauri shell's polling URL the moment anyone tries
+        // to move the port (e.g. avoid a conflict with another local
+        // service or run a second sidecar for testing).
+        cmd.env("CATCHEM_API__HOST", &cfg.host);
+        cmd.env("CATCHEM_API__PORT", cfg.port.to_string());
         // Stub default — the user can opt into HF via a separate setup script.
-        cmd.env("FUSION_USE_ML_STUBS", "true");
+        cmd.env("CATCHEM_USE_ML_STUBS", "true");
         // Force unbuffered Python output so errors surface immediately.
         cmd.env("PYTHONUNBUFFERED", "1");
+        // Release-only: pin the writable data root to Application Support.
+        // Dev builds intentionally inherit the repo-local `data/` layout
+        // so analysts can `git diff` outputs.
+        if cfg.release_mode {
+            let out_dir = paths::release_catchem_output_dir();
+            let aw_dir = paths::release_awareness_data_dir();
+            cmd.env("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", &out_dir);
+            cmd.env("CATCHEM_PATHS__AWARENESS_DATA_DIR", &aw_dir);
+            log::info!(
+                "sidecar release-mode paths: out={} awareness_data={}",
+                out_dir.display(),
+                aw_dir.display()
+            );
+        }
 
         // Redirect stdout+stderr to a log file we can tail. Piped+undrained
         // streams will deadlock the child once the pipe buffer fills, which

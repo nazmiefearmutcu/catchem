@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.api import create_app
+from catchem.settings import load_settings, reload_settings
 
 
 REQUIRED_METRICS_KEYS = {
@@ -29,7 +29,7 @@ REQUIRED_METRICS_KEYS = {
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
     reload_settings()
     app = create_app(load_settings())
     c = TestClient(app)
@@ -67,8 +67,8 @@ def test_ui_summary_contract_keys(client: TestClient) -> None:
 
 
 def test_metrics_diagnostic_always_false_in_production_safe(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
     reload_settings()
     r = client.get("/metrics")
     assert r.json()["diagnostic_enabled"] is False

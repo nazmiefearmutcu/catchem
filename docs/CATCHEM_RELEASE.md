@@ -4,20 +4,20 @@
 
 | Artifact | Path | Built by |
 |---|---|---|
-| `fusion-stack-sidecar/` | `desktop/catchem/sidecar-out/` | `build_sidecar.sh` (PyInstaller --onedir) |
+| `catchem-sidecar/` | `desktop/catchem/sidecar-out/` | `build_sidecar.sh` (PyInstaller --onedir) |
 | `Catchem.app` | `desktop/catchem/src-tauri/target/release/bundle/macos/` | `build_catchem_release.sh` |
 | `Catchem_<ver>_<arch>.dmg` | `desktop/catchem/src-tauri/target/release/bundle/dmg/` | same (Tauri produces it inline) |
 
 ## One-shot release
 
 ```bash
-cd /Users/nazmi/Desktop/Projeler/proje/fusion_stack
+cd /Users/nazmi/Desktop/Projeler/proje/catchem
 bash desktop/catchem/scripts/build_catchem_release.sh
 ```
 
 This runs in order:
 
-1. Build the React bundle into `src/fusion_stack/static/app/`.
+1. Build the React bundle into `src/catchem/static/app/`.
 2. Build the Catchem boot shim.
 3. PyInstaller `--onedir` packages the sidecar into a self-contained binary.
 4. Stage the sidecar under `src-tauri/resources/sidecar/`.
@@ -85,11 +85,11 @@ signed + notarized build.
 
 | Path | What lives there |
 |---|---|
-| `~/Desktop/Projeler/proje/fusion_stack/data/` (dev) | SQLite, parquet exports, vector index, demo input |
+| `~/Desktop/Projeler/proje/catchem/data/` (dev) | SQLite, parquet exports, vector index, demo input |
 | `~/Library/Application Support/Catchem/` (release) | (future) Catchem user preferences |
 | `~/Library/Logs/Catchem/` (release) | (future) Catchem-specific logs |
 | `data/logs/api.out` | sidecar stdout/stderr |
-| `data/logs/fusion_stack.log` | structured log surfaced via `/ui/log-tail` |
+| `data/logs/catchem.log` | structured log surfaced via `/ui/log-tail` |
 
 The release build's sidecar should be reconfigured to write to
 `~/Library/Application Support/Catchem/data/` instead of the repo dir —
@@ -138,7 +138,7 @@ release dry-run).
 The Tauri shell writes the sidecar's stdout+stderr to `~/Library/Logs/Catchem/sidecar.log`. Each launch is delimited by a banner line:
 
 ```
-=== catchem sidecar start 2026-05-17T14:11:57Z python=/.../.venv/bin/python cwd=/.../fusion_stack ===
+=== catchem sidecar start 2026-05-17T14:11:57Z python=/.../.venv/bin/python cwd=/.../catchem ===
 INFO:     Started server process [35012]
 INFO:     Uvicorn running on http://127.0.0.1:8087 (Press CTRL+C to quit)
 ```

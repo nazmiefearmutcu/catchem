@@ -10,14 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.golden import SYNTHETIC, load_extended, run_benchmark
-from fusion_stack.service import build_service
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.golden import SYNTHETIC, load_extended, run_benchmark
+from catchem.service import build_service
+from catchem.settings import load_settings, reload_settings
 
 
 @pytest.fixture
 def svc(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FUSION_MODELS__USE_ML_STUBS", "true")
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "true")
     reload_settings()
     return build_service(load_settings())
 

@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusion_stack.api import create_app
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.api import create_app
+from catchem.schemas import AwarenessCaptureView
+from catchem.settings import load_settings, reload_settings
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def client_with_records(tmp_path: Path, write_jsonl, synth_capture, monkeypatch:
         domain="wsj.com",
     )
     write_jsonl([json.loads(c.model_dump_json()) for c in (cap, cap2)])
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
     reload_settings()
     s = load_settings()
 
@@ -51,7 +51,7 @@ def test_legacy_dashboard_still_served(client_with_records: TestClient) -> None:
     for path in ("/legacy", "/legacy-dashboard"):
         r = client_with_records.get(path)
         assert r.status_code == 200
-        assert "fusion_stack" in r.text
+        assert "catchem" in r.text
         # Confirm it's the vanilla dashboard, not the SPA shell
         assert "<table>" in r.text or "dashboard" in r.text
 
@@ -153,8 +153,8 @@ def test_ui_symbol_aggregation(client_with_records: TestClient) -> None:
 
 def test_diagnostic_flag_in_summary_when_research_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Even with the env flag on, summary's diagnostic_allowed only flips outside production_safe."""
-    monkeypatch.setenv("FUSION_MODE", "research_diagnostic")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_MODE", "research_diagnostic")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
     reload_settings()
     s = load_settings()
     app = create_app(s)
@@ -170,8 +170,8 @@ def test_diagnostic_flag_in_summary_when_research_mode(monkeypatch: pytest.Monke
 
 
 def test_production_safe_summary_refuses_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")  # even with flag on
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")  # even with flag on
     reload_settings()
     s = load_settings()
     app = create_app(s)
@@ -181,3 +181,50 @@ def test_production_safe_summary_refuses_diagnostic(monkeypatch: pytest.MonkeyPa
         data = r.json()
         assert data["is_production_safe"] is True
         assert data["diagnostic_allowed"] is False
+
+
+# -------------------------------------------------------------------------
+# _display_path / /ui/archive-status redaction (Round 6 Bug 1)
+# Guards against re-leaking `/Users/<name>/...` into user-facing JSON.
+# -------------------------------------------------------------------------
+
+def test_display_path_redacts_home_to_tilde(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Paths under $HOME render as `~/...`; paths outside $HOME pass through."""
+    from catchem.api import _display_path
+    fake_home = tmp_path / "Users" / "fake-user"
+    fake_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    inside = fake_home / "Documents" / "Catchem"
+    assert _display_path(inside) == "~/Documents/Catchem"
+    assert _display_path(fake_home) == "~"
+    assert _display_path(None) is None
+    # Outside $HOME (e.g. mounted drive, /tmp in CI) → pass through unchanged.
+    outside = Path("/var/empty/somewhere")
+    assert _display_path(outside) == "/var/empty/somewhere"
+
+
+def test_archive_status_redacts_paths_to_tilde(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """/ui/archive-status must not leak absolute /Users/... paths."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    drive = fake_home / "Documents" / "Catchem"
+    drive.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_ARCHIVE__DRIVE_DIR", str(drive))
+    reload_settings()
+    s = load_settings()
+    app = create_app(s)
+    with TestClient(app) as c:
+        r = c.get("/ui/archive-status")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["enabled"] is True
+        assert data["drive_dir"] == "~/Documents/Catchem", data
+        # current_csv_path may be None until a sweep runs, but if set must
+        # also be tilde-redacted.
+        if data.get("current_csv_path"):
+            assert data["current_csv_path"].startswith("~/")

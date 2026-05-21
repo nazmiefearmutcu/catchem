@@ -6,7 +6,7 @@ use std::time::Duration;
 use tauri::State;
 
 use crate::security::is_safe_external_url;
-use crate::sidecar::{wait_for_health, SidecarConfig, SidecarState, WaitForHealthOutcome};
+use crate::sidecar::{wait_for_health, WaitForHealthOutcome};
 use crate::state::AppState;
 
 #[derive(Serialize)]

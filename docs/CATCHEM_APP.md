@@ -1,6 +1,6 @@
 # Catchem — macOS Desktop App
 
-Catchem is a Tauri 2 + Rust shell that wraps the local `fusion_stack`
+Catchem is a Tauri 2 + Rust shell that wraps the local `catchem`
 FastAPI/React stack into a native macOS application. It exists to make the
 paste-news → analyze flow feel like a real analyst tool, not a developer
 console — without re-implementing the pipeline.
@@ -9,12 +9,12 @@ console — without re-implementing the pipeline.
 
 ```
 Catchem.app (Tauri shell, Rust)
-├── spawns sidecar  →  fusion-stack FastAPI on 127.0.0.1:8087
+├── spawns sidecar  →  catchem FastAPI on 127.0.0.1:8087
 │                       └── serves the React premium UI from /
 └── loads webview pointed at  http://127.0.0.1:8087/
 ```
 
-The webview IS the existing fusion_stack premium UI — same Vite bundle,
+The webview IS the existing catchem premium UI — same Vite bundle,
 same `/feed`, `/replay`, `/model-controls`, `/help` routes. The Tauri shell
 adds:
 
@@ -60,8 +60,8 @@ desktop/catchem/
 
 ```bash
 # Prereqs (once)
-cd ~/Desktop/Projeler/proje/fusion_stack
-bash scripts/fusion_bootstrap_and_run.sh        # creates .venv + builds React bundle
+cd ~/Desktop/Projeler/proje/catchem
+bash scripts/catchem_bootstrap_and_run.sh        # creates .venv + builds React bundle
 cargo install create-tauri-app tauri-cli --version '^2.0' --locked
 
 # Run Catchem
@@ -77,7 +77,7 @@ The Rust shell owns the FastAPI process:
 
 | User action | Rust call | Effect |
 |---|---|---|
-| App launch | `SidecarState::start(&cfg, false)` | spawn `.venv/bin/python -m fusion_stack.cli serve` |
+| App launch | `SidecarState::start(&cfg, false)` | spawn `.venv/bin/python -m catchem.cli serve` |
 | Menu → Sidecar → Restart | `SidecarState::restart(&cfg)` | kill + spawn |
 | Menu → Sidecar → Stop | `SidecarState::stop()` | kill |
 | Window close | `SidecarState::stop()` | no orphan FastAPI |
@@ -85,11 +85,11 @@ The Rust shell owns the FastAPI process:
 The sidecar is always launched with:
 
 ```
-FUSION_MODE=production_safe
-FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=false
-FUSION_USE_ML_STUBS=true
-FUSION_API_HOST=127.0.0.1
-FUSION_API_PORT=8087
+CATCHEM_MODE=production_safe
+CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=false
+CATCHEM_USE_ML_STUBS=true
+CATCHEM_API_HOST=127.0.0.1
+CATCHEM_API_PORT=8087
 ```
 
 The shell **cannot** enable diagnostic mode. There is no UI surface for it.
@@ -114,7 +114,7 @@ outside Catchem.
 cd desktop/catchem/src-tauri && cargo test --lib
 
 # Python backend (192 tests including 17 Catchem-specific)
-cd /Users/nazmi/Desktop/Projeler/proje/fusion_stack && pytest tests
+cd /Users/nazmi/Desktop/Projeler/proje/catchem && pytest tests
 
 # Frontend (13 vitest tests including DropZone-relevant feedMerge logic)
 cd frontend && npm test
@@ -128,7 +128,7 @@ cd frontend && npm test
 | `POST /ui/demo/upload` | upload file → score | `DemoRunResponse` |
 | `GET /ui/app-info` | version, commit, branch, mode, model_versions | `AppInfoResponse` |
 | `GET /ui/sidecar-status` | healthy, pid, uptime, records, dlq | `SidecarStatusResponse` |
-| `GET /ui/log-tail?lines=N` | last N lines of `data/logs/fusion_stack.log` | `LogTailResponse` |
+| `GET /ui/log-tail?lines=N` | last N lines of `data/logs/catchem.log` | `LogTailResponse` |
 | `GET /replay` (SPA fallback) | serves the bundle for the `/replay` client-side route | HTML |
 
 All five preserve the production-safe redaction contract — see

@@ -1,5 +1,5 @@
 [project]
-name = "fusion_stack"
+name = "catchem"
 version = "0.1.0"
 description = "Sidecar workspace that fuses Awareness ingestion with a guarded finance-relevance layer. NewsImpact is consumed in read-only diagnostic mode only."
 requires-python = ">=3.11"
@@ -52,22 +52,22 @@ dev = [
 ]
 
 [project.scripts]
-fusion-stack = "fusion_stack.cli:app"
-fusion-stack-api = "fusion_stack.api:run"
+catchem = "catchem.cli:app"
+catchem-api = "catchem.api:run"
 
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/fusion_stack"]
+packages = ["src/catchem"]
 # Static files (dashboard.html, the built SPA bundle) are part of the package,
-# not "shared data". They must land alongside fusion_stack/ inside the wheel so
+# not "shared data". They must land alongside catchem/ inside the wheel so
 # importlib.resources can find them in a clean install.
-force-include = { "src/fusion_stack/static" = "fusion_stack/static" }
+force-include = { "src/catchem/static" = "catchem/static" }
 
 [tool.hatch.build.targets.sdist]
-include = ["src/fusion_stack/static/**/*", "scripts/**/*", "configs/**/*", "docs/**/*", "tests/**/*"]
+include = ["src/catchem/static/**/*", "scripts/**/*", "configs/**/*", "docs/**/*", "tests/**/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

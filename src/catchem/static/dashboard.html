@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>catchem · dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0e1014; --bg2: #161922; --fg: #e7ebf0; --fg-dim: #9aa3b2;
+    --accent: #5fb3ff; --good: #4ade80; --bad: #f87171; --warn: #fbbf24;
+    --border: #232838; --chip: #1f2531;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+         background: var(--bg); color: var(--fg); line-height: 1.45; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  header h1 { margin: 0; font-size: 17px; letter-spacing: 0.5px; }
+  header h1 .v { color: var(--fg-dim); font-weight: 400; margin-left: 8px; font-size: 12px; }
+  header .right { font-size: 12px; color: var(--fg-dim); }
+  main { padding: 18px 24px 60px; }
+  .row { display: grid; gap: 16px; }
+  .row.cards { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 18px; }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .card .label { font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.7px; }
+  .card .value { font-size: 22px; margin-top: 6px; }
+  .card .value small { font-size: 13px; color: var(--fg-dim); }
+  .row.dist { grid-template-columns: 1fr 1fr 1fr; margin-bottom: 18px; }
+  .dist h2 { margin: 0 0 8px; font-size: 12px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.7px; }
+  .bar { height: 18px; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; display:flex; overflow:hidden; margin-bottom:4px; }
+  .bar > span { background: var(--accent); display:block; height:100%; }
+  .dist .row-item { font-size: 12px; display:flex; justify-content:space-between; margin: 2px 0; gap: 8px; }
+  .filters { display:flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items:center; }
+  .chip { display:inline-flex; gap:6px; align-items:center; background: var(--chip); border:1px solid var(--border);
+          color: var(--fg); padding: 4px 10px; border-radius: 999px; font-size: 12px; cursor:pointer; user-select:none; }
+  .chip.active { background: var(--accent); color: #0b1018; border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align:left; vertical-align:top; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  th { color: var(--fg-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr.relevant td { color: var(--fg); }
+  tr:not(.relevant) td { color: var(--fg-dim); }
+  td .pill { display:inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; margin-right: 4px; background: var(--chip); border:1px solid var(--border); }
+  td .pill.ac { color: var(--accent); }
+  td .pill.rc { color: var(--warn); }
+  td .pill.sym { color: var(--good); }
+  td .sent-pos { color: var(--good); }
+  td .sent-neg { color: var(--bad); }
+  td .sent-neu { color: var(--fg-dim); }
+  td a { color: var(--accent); text-decoration: none; }
+  .evidence { color: var(--fg-dim); font-style: italic; max-width: 540px; }
+  .empty { padding: 28px; text-align:center; color: var(--fg-dim); }
+  .footer { color: var(--fg-dim); font-size: 11px; padding: 18px 24px; border-top: 1px solid var(--border); }
+  .diag-banner { background: rgba(251, 191, 36, 0.08); border: 1px solid var(--warn); color: var(--warn); padding: 8px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 12px; }
+  .err { color: var(--bad); padding: 12px; border: 1px solid var(--bad); border-radius: 6px; background: rgba(248,113,113,0.05); }
+</style>
+</head>
+<body>
+<header>
+  <h1>catchem <span class="v" id="version"></span></h1>
+  <div class="right" id="status">loading…</div>
+</header>
+<main>
+  <div id="diag" style="display:none" class="diag-banner"></div>
+  <div class="row cards" id="cards"></div>
+  <div class="row dist" id="distribution"></div>
+  <div class="filters" id="filters"></div>
+  <div id="results"></div>
+</main>
+<div class="footer">
+  catchem · sidecar to <strong>Awareness</strong> · NewsImpact stays <em>quarantined / read-only</em>
+</div>
+
+<script>
+// All record/text data is treated as untrusted (Awareness captures are scraped
+// from the public web). We *never* assign user-controlled strings to innerHTML.
+// Static structure is built with createElement; text goes through textContent.
+
+const $ = (sel) => document.querySelector(sel);
+let state = { mode: "relevant", ac: null, rc: null };
+
+async function fetchJSON(url) {
+  const r = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!r.ok) throw new Error(url + " → " + r.status);
+  return r.json();
+}
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null) continue;
+      if (k === "class") node.className = v;
+      else if (k === "dataset") for (const [dk, dv] of Object.entries(v)) node.dataset[dk] = String(dv);
+      else if (k === "style") node.setAttribute("style", String(v));
+      else node.setAttribute(k, String(v));
+    }
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    if (typeof c === "string" || typeof c === "number") node.appendChild(document.createTextNode(String(c)));
+    else if (c instanceof Node) node.appendChild(c);
+  }
+  return node;
+}
+
+function safeHref(url) {
+  if (typeof url !== "string") return null;
+  try {
+    const u = new URL(url, "http://localhost");
+    if (u.protocol === "http:" || u.protocol === "https:") return u.toString();
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function pill(text, cls) { return el("span", { class: "pill " + cls }, String(text)); }
+
+function fmtSent(label, score) {
+  if (!label) return null;
+  const cls = label === "positive" ? "sent-pos" : label === "negative" ? "sent-neg" : "sent-neu";
+  return el("span", { class: cls }, label + (score != null ? " " + score.toFixed(2) : ""));
+}
+
+function bars(map) {
+  const wrap = document.createDocumentFragment();
+  const entries = Object.entries(map).slice(0, 12);
+  const max = Math.max(1, ...entries.map(([, n]) => n));
+  for (const [k, n] of entries) {
+    wrap.appendChild(el("div", { class: "row-item" }, el("span", null, k), el("span", { style: "color:var(--fg-dim)" }, String(n))));
+    wrap.appendChild(el("div", { class: "bar" }, el("span", { style: "width:" + (100 * n / max) + "%" })));
+  }
+  return wrap;
+}
+
+function distSection(title, map) {
+  return el("div", { class: "dist" }, el("h2", null, title), bars(map));
+}
+
+function renderCards(dash) {
+  const cards = $("#cards");
+  cards.replaceChildren(
+    el("div", { class: "card" }, el("div", { class: "label" }, "total records"), el("div", { class: "value" }, String(dash.totals.total))),
+    el("div", { class: "card" },
+      el("div", { class: "label" }, "finance relevant"),
+      el("div", { class: "value" }, String(dash.totals.finance_relevant),
+        el("small", null, " " + (dash.totals.total ? Math.round(100 * dash.totals.finance_relevant / dash.totals.total) : 0) + "%"))),
+    el("div", { class: "card" }, el("div", { class: "label" }, "diagnostic stamps"), el("div", { class: "value" }, String(dash.diagnostic_count))),
+    el("div", { class: "card" }, el("div", { class: "label" }, "distinct asset classes"), el("div", { class: "value" }, String(Object.keys(dash.asset_class_distribution).length))),
+    el("div", { class: "card" }, el("div", { class: "label" }, "distinct reason codes"), el("div", { class: "value" }, String(Object.keys(dash.reason_code_distribution).length))),
+  );
+}
+
+function renderDistribution(dash) {
+  $("#distribution").replaceChildren(
+    distSection("asset classes", dash.asset_class_distribution),
+    distSection("reason codes", dash.reason_code_distribution),
+    distSection("sentiment", dash.sentiment_distribution),
+  );
+}
+
+function renderFilters(dash) {
+  const fr = $("#filters");
+  const children = [
+    el("span", { class: "chip" + (state.mode === "all" ? " active" : ""), dataset: { mode: "all" } }, "all"),
+    el("span", { class: "chip" + (state.mode === "relevant" ? " active" : ""), dataset: { mode: "relevant" } }, "finance-relevant only"),
+    el("span", null, " · asset: "),
+  ];
+  for (const k of Object.keys(dash.asset_class_distribution)) {
+    children.push(el("span", { class: "chip ac" + (state.ac === k ? " active" : ""), dataset: { ac: k } }, k));
+  }
+  children.push(el("span", null, " · reason: "));
+  for (const k of Object.keys(dash.reason_code_distribution)) {
+    children.push(el("span", { class: "chip rc" + (state.rc === k ? " active" : ""), dataset: { rc: k } }, k));
+  }
+  fr.replaceChildren(...children);
+}
+
+function renderRow(i) {
+  const tr = el("tr", { class: i.is_finance_relevant ? "relevant" : "" });
+  // published / domain
+  tr.appendChild(el("td", null,
+    el("div", null, i.published_ts ? i.published_ts.slice(0, 16).replace("T", " ") : ""),
+    el("div", { class: "evidence" }, i.domain || ""),
+  ));
+  // title + evidence
+  const titleCell = el("td");
+  const href = safeHref(i.url);
+  if (href) titleCell.appendChild(el("a", { href, target: "_blank", rel: "noopener" }, i.title || "(untitled)"));
+  else titleCell.appendChild(el("span", null, i.title || "(untitled)"));
+  const ev = el("div", { class: "evidence" });
+  for (const s of (i.evidence_sentences || []).slice(0, 2)) {
+    ev.appendChild(el("div", null, "“" + String(s) + "”"));
+  }
+  titleCell.appendChild(ev);
+  tr.appendChild(titleCell);
+  // labels
+  const labels = el("td");
+  for (const x of (i.asset_classes || [])) labels.appendChild(pill(x, "ac"));
+  for (const x of (i.impact_reason_codes || [])) labels.appendChild(pill(x, "rc"));
+  tr.appendChild(labels);
+  // symbols
+  const syms = el("td");
+  for (const x of (i.candidate_symbols || []).slice(0, 5)) syms.appendChild(pill(x, "sym"));
+  tr.appendChild(syms);
+  // sentiment
+  const sent = el("td");
+  const s = fmtSent(i.sentiment_label, i.sentiment_score);
+  if (s) sent.appendChild(s);
+  tr.appendChild(sent);
+  // score
+  tr.appendChild(el("td", null, (i.finance_relevance_score || 0).toFixed(2)));
+  return tr;
+}
+
+function renderResults(items) {
+  const results = $("#results");
+  if (!items.length) {
+    results.replaceChildren(el("div", { class: "empty" }, "no records match · run a replay first"));
+    return;
+  }
+  const head = el("thead", null, el("tr", null,
+    el("th", null, "published / domain"),
+    el("th", null, "title + evidence"),
+    el("th", null, "labels"),
+    el("th", null, "symbols"),
+    el("th", null, "sentiment"),
+    el("th", null, "score"),
+  ));
+  const body = el("tbody");
+  for (const i of items) body.appendChild(renderRow(i));
+  results.replaceChildren(el("table", null, head, body));
+}
+
+async function render() {
+  try {
+    const cfg = await fetchJSON("/config");
+    $("#version").textContent = cfg.mode;
+    if (cfg.diagnostic_allowed) {
+      const d = $("#diag");
+      d.style.display = "block";
+      d.textContent = "research_diagnostic mode active — NewsImpact diagnostic stamp attached to records (read-only, may not override finance relevance).";
+    }
+
+    const dash = await fetchJSON("/dashboard?limit=200");
+    $("#status").textContent =
+      dash.totals.finance_relevant + "/" + dash.totals.total + " relevant · stubs=" + cfg.use_ml_stubs;
+
+    renderCards(dash);
+    renderDistribution(dash);
+    renderFilters(dash);
+
+    let items;
+    if (state.ac) items = (await fetchJSON("/records/by-asset-class/" + encodeURIComponent(state.ac) + "?limit=200")).items;
+    else if (state.rc) items = (await fetchJSON("/records/by-reason/" + encodeURIComponent(state.rc) + "?limit=200")).items;
+    else items = (await fetchJSON("/recent?limit=200&relevant_only=" + (state.mode === "relevant"))).items;
+    if (state.mode === "relevant" && !state.ac && !state.rc) items = items.filter((i) => i.is_finance_relevant);
+    renderResults(items);
+  } catch (e) {
+    const err = el("div", { class: "err" }, String(e && e.message || e));
+    $("#results").replaceChildren(err);
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-mode]");
+  if (t) { state.mode = t.dataset.mode; state.ac = null; state.rc = null; render(); return; }
+  const ac = e.target.closest("[data-ac]");
+  if (ac) { state.ac = state.ac === ac.dataset.ac ? null : ac.dataset.ac; state.rc = null; render(); return; }
+  const rc = e.target.closest("[data-rc]");
+  if (rc) { state.rc = state.rc === rc.dataset.rc ? null : rc.dataset.rc; state.ac = null; render(); return; }
+});
+
+render();
+setInterval(render, 7000);
+</script>
+</body>
+</html>

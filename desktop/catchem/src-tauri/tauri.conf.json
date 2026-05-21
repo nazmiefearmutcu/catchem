@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Catchem",
   "version": "0.1.0",
-  "identifier": "com.fusionstack.catchem",
+  "identifier": "com.catchem.app",
   "build": {
     "frontendDist": "../web/dist",
     "devUrl": "http://localhost:1421",
@@ -10,21 +10,20 @@
     "beforeBuildCommand": "npm --prefix web run build"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "macOSPrivateApi": true,
     "windows": [],
     "security": {
-      "csp": null,
-      "dangerousDisableAssetCspModification": true
+      "csp": "default-src 'self' http://127.0.0.1:8087 http://localhost:8087 ipc: http://ipc.localhost; img-src 'self' http://127.0.0.1:8087 http://localhost:8087 data: blob:; style-src 'self' 'unsafe-inline' http://127.0.0.1:8087 http://localhost:8087; script-src 'self' 'unsafe-inline' http://127.0.0.1:8087 http://localhost:8087; connect-src 'self' http://127.0.0.1:8087 http://localhost:8087 ws://127.0.0.1:8087 ws://localhost:8087 ipc: http://ipc.localhost; font-src 'self' http://127.0.0.1:8087 http://localhost:8087 data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
     }
   },
   "bundle": {
     "active": true,
     "category": "Productivity",
-    "copyright": "Copyright © 2026 fusion_stack",
+    "copyright": "Copyright © 2026 catchem",
     "targets": ["app", "dmg"],
     "shortDescription": "Catchem — local-first news-to-finance analyst workstation",
-    "longDescription": "Catchem wraps the local fusion_stack pipeline in a polished macOS desktop UI. Paste a news article, upload a text file, and watch the same finance-relevance pipeline process it locally. NewsImpact stays quarantined; production-safe mode is the default.",
+    "longDescription": "Catchem wraps the local catchem pipeline in a polished macOS desktop UI. Paste a news article, upload a text file, and watch the same finance-relevance pipeline process it locally. NewsImpact stays quarantined; production-safe mode is the default.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

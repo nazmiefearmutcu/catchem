@@ -2,18 +2,15 @@ import { useEffect, useState } from "react";
 import { Command } from "cmdk";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "@/hooks/useTheme";
+import { NAV_SHORTCUTS, chordLabel } from "@/lib/nav-shortcuts";
 
-const NAV: { label: string; path: string; kbd?: string }[] = [
-  { label: "Overview", path: "/", kbd: "g o" },
-  { label: "Live Feed", path: "/feed", kbd: "g f" },
-  { label: "Replay / Upload", path: "/replay", kbd: "g r" },
-  { label: "Analysis (Map)", path: "/map", kbd: "g a" },
-  { label: "Symbols", path: "/symbols", kbd: "g s" },
-  { label: "Benchmark Lab", path: "/benchmark", kbd: "g b" },
-  { label: "Model Controls", path: "/model-controls", kbd: "g c" },
-  { label: "System / Ops", path: "/ops", kbd: "g x" },
-  { label: "Help", path: "/help", kbd: "g h" },
-  { label: "Settings", path: "/settings", kbd: "g ," },
+/**
+ * Palette entries. Routed entries are mirrored verbatim from the
+ * canonical NAV_SHORTCUTS table; the legacy dashboard is appended as a
+ * non-chord shortcut.
+ */
+export const NAV: { label: string; path: string; kbd?: string }[] = [
+  ...NAV_SHORTCUTS.map((s) => ({ label: s.label, path: s.path, kbd: chordLabel(s) })),
   { label: "Legacy Dashboard", path: "/legacy" },
 ];
 

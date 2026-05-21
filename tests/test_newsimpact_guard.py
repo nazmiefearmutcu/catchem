@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.newsimpact_guarded_adapter import (
+from catchem.newsimpact_guarded_adapter import (
     NewsImpactGuardError,
     NewsImpactGuardedAdapter,
     snapshot_guard_state,
 )
-from fusion_stack.settings import FusionMode, load_settings, reload_settings
+from catchem.settings import CatchemMode, load_settings, reload_settings
 
 
 NEWSIMPACT_REAL = Path("/Users/nazmi/Desktop/Projeler/proje/merged_news")
@@ -110,12 +110,12 @@ def test_verify_script_fails_on_flipped_gate(tmp_path: Path) -> None:
 
 @pytest.mark.guard
 def test_service_in_production_safe_never_loads_diagnostic_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
     # Even if the operator forces the diagnostic flag to true, prod-safe must refuse.
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
     reload_settings()
     s = load_settings()
-    from fusion_stack.service import build_service
+    from catchem.service import build_service
     svc = build_service(s)
     assert svc.diagnostic_enabled is False
 

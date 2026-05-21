@@ -211,6 +211,16 @@ def test_default_feeds_have_valid_https_urls() -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def test_default_poll_interval_matches_ui_fallback() -> None:
+    """If this default ever moves, frontend FeedPage interval fallback (?? 10)
+    and the surrounding 'every 10s' comment must move in lockstep — otherwise
+    the UI will silently lie about cadence the first time /ui/news-status is
+    not yet populated (cold boot, brief race).
+    See Round 6 Bug 3."""
+    from catchem.settings import NewsConfig
+    assert NewsConfig().poll_interval_seconds == 10.0
+
+
 def test_news_poller_floors_interval_to_10s() -> None:
     """A misconfigured interval shouldn't hammer publishers."""
     class _StubSupervisor: pass

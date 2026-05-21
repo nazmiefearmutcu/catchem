@@ -83,6 +83,29 @@ def _is_production_safe() -> bool:
     return s.is_production_safe()
 
 
+def _display_path(p: Path | str | None) -> str | None:
+    """Redact an absolute path to a tilde-relative form for UI surfaces.
+
+    `/Users/nazmi/Documents/Catchem` becomes `~/Documents/Catchem`, which is
+    clear to the operator but does not leak the local username to anyone
+    glancing at the screen (or to UI tooltips persisted in logs/screenshots).
+    Paths outside $HOME (e.g. `/tmp/...` in tests, network mounts) are
+    returned as-is — they don't carry user-identifying segments.
+    """
+    if p is None:
+        return None
+    text = str(p)
+    try:
+        home = str(Path.home())
+    except (RuntimeError, OSError):
+        return text
+    if home and text == home:
+        return "~"
+    if home and text.startswith(home + "/"):
+        return "~" + text[len(home):]
+    return text
+
+
 def _to_summary_list(items: list[dict[str, Any]], production_safe: bool) -> list[FinancialImpactSummary]:
     """Redact diagnostics first, then project to the compact summary contract."""
     redacted = redact_records_for_mode(items, production_safe=production_safe)
@@ -782,7 +805,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         return {
             "enabled": True,
-            "drive_dir": str(_ARCHIVER.drive_dir),
+            # User-facing surface: tilde-redacted so /Users/<name>/... does not
+            # leak into tooltips, screenshots, or persisted UI state. The
+            # archiver retains the resolved absolute path internally; only the
+            # JSON projection is redacted.
+            "drive_dir": _display_path(_ARCHIVER.drive_dir),
             "interval_seconds": _ARCHIVER.interval_seconds,
             "local_cap_rows": _ARCHIVER.local_cap,
             "last_run_at": _ARCHIVER.last_run_at.isoformat() if _ARCHIVER.last_run_at else None,
@@ -790,7 +817,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "total_archived": _ARCHIVER.total_archived,
             "last_error": _ARCHIVER.last_error,
             "is_archiving": _ARCHIVER.is_archiving,
-            "current_csv_path": str(_ARCHIVER.current_csv_path) if _ARCHIVER.current_csv_path else None,
+            "current_csv_path": _display_path(_ARCHIVER.current_csv_path),
         }
 
     @app.post("/ui/archive-now")

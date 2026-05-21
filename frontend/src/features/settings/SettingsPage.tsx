@@ -4,10 +4,13 @@ const SHORTCUTS: { keys: string; description: string }[] = [
   { keys: "⌘K  /  Ctrl+K", description: "Open the command palette" },
   { keys: "g o", description: "Go to Overview" },
   { keys: "g f", description: "Go to Live Feed" },
+  { keys: "g r", description: "Go to Replay" },
   { keys: "g m", description: "Go to Market Map" },
   { keys: "g s", description: "Go to Symbols" },
   { keys: "g b", description: "Go to Benchmark Lab" },
+  { keys: "g c", description: "Go to Model Controls" },
   { keys: "g x", description: "Go to System / Ops" },
+  { keys: "g h", description: "Go to Help" },
   { keys: "g ,", description: "Go to Settings" },
   { keys: "Esc", description: "Close drawer / palette" },
 ];

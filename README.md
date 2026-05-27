@@ -1,4 +1,4 @@
-# fusion_stack
+# catchem
 
 Local-first sidecar workspace that fuses two existing systems:
 
@@ -6,7 +6,7 @@ Local-first sidecar workspace that fuses two existing systems:
 - **NewsImpact** — multimodal candidate that is **currently quarantined** and
   permitted only as a read-only diagnostic.
 
-`fusion_stack` consumes Awareness JSONL captures **after** they are durably
+`catchem` consumes Awareness JSONL captures **after** they are durably
 committed and emits one `FinancialImpactRecord` per capture: a multi-label
 classification of asset class / impact reason / symbols / sentiment / evidence,
 together with the component scores that produced the decision.
@@ -14,10 +14,22 @@ together with the component scores that produced the decision.
 This repo never modifies Awareness or NewsImpact source. It is reversible:
 deleting it has zero effect on either upstream system.
 
+## Preview
+
+> Native macOS `.app` (Tauri shell + Python FastAPI sidecar + React UI). Launch from `/Applications/Catchem.app`.
+
+| Analyst workstation overview | DeepSeek capture synthesis |
+| --- | --- |
+| ![Catchem overview pane with KPI strip (150 records, 60 finance-relevant, 100% benchmark F1), asset-class histogram, reason-code breakdown, and time-bucket relevance trend chart](docs/screenshots/01-overview.png) | ![Capture detail view showing DeepSeek synthesis output — long-form analyst writeup with stats footer and full nav](docs/screenshots/02-deepseek-synthesis.png) |
+
+The Overview pane is the analyst's home: live KPIs, asset-class distribution,
+reason-code breakdown, and a relevance trend. Click any capture to drill into a
+full analyst writeup like the DeepSeek synthesis shown above.
+
 ## One-command bootstrap
 
 ```bash
-bash scripts/fusion_bootstrap_and_run.sh
+bash scripts/catchem_bootstrap_and_run.sh
 ```
 
 What it does (idempotent):

@@ -1,5 +1,11 @@
 # catchem
 
+[![License: MIT](https://img.shields.io/github/license/nazmiefearmutcu/catchem?color=blue)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/nazmiefearmutcu/catchem?style=flat&logo=github)](https://github.com/nazmiefearmutcu/catchem/stargazers)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://python.org)
+[![Tauri](https://img.shields.io/badge/shell-Tauri%202-24c8db?logo=tauri&logoColor=white)](https://tauri.app/)
+[![Tests](https://img.shields.io/badge/pytest-220%2B-success?logo=pytest&logoColor=white)](#tests)
+
 Local-first sidecar workspace that fuses two existing systems:
 
 - **Awareness** — public-text ingestion engine (stable upstream, system of record).

@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: "catchem — local-first finance-relevance sidecar"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+authors:
+  - alias: nazmiefearmutcu
+    given-names: Aylin
+    website: https://github.com/nazmiefearmutcu
+repository-code: https://github.com/nazmiefearmutcu/catchem
+url: https://github.com/nazmiefearmutcu/catchem
+license: MIT
+keywords:
+  - finance
+  - news
+  - sidecar
+  - fastapi
+  - tauri
+  - multi-label-classification
+  - financial-impact
+  - sentiment-analysis
+abstract: >-
+  catchem is a local-first sidecar that consumes web text captures and
+  emits one FinancialImpactRecord per capture: a multi-label
+  classification of asset class, impact reason, direction, time horizon,
+  symbols, and component scores. Python sidecar (FastAPI) feeds a Tauri 2
+  + React analyst UI. Default mode is production-safe (CPU stubs); the
+  real ML adapter is opt-in via a config flag and quarantined under a
+  three-check release gate.

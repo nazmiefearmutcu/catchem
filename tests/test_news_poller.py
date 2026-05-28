@@ -403,3 +403,36 @@ def test_max_item_age_seconds_property_default() -> None:
     # Custom value flows through and clamps negatives to zero.
     poller2 = _make_poller(feeds=[], max_item_age_seconds=-5.0)
     assert poller2.max_item_age_seconds == 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# poll_now runs exactly ONE tick (no double-poll) — v79 fix
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_poll_now_runs_exactly_one_tick_without_double_polling() -> None:
+    # `poll_now()` runs its OWN single tick and returns that count. It used to
+    # ALSO set a `_poke` event that woke the background sleep, so one "Poll now"
+    # press fetched every feed twice (manual tick + poke-woken background tick).
+    # The poke mechanism is gone; guard against silent re-introduction and prove
+    # exactly one tick fires per call.
+    import asyncio
+
+    poller = _make_poller(feeds=[FeedSpec("a", "https://example.com/a")])
+    assert not hasattr(poller, "_poke"), "the double-poll poke event must stay removed"
+
+    calls = {"n": 0}
+
+    async def _fake_tick(_client) -> int:
+        calls["n"] += 1
+        return 7
+
+    # Replace the tick with a counting stub and pretend the background loop owns
+    # a client so poll_now takes the lock path (the stub ignores the client).
+    poller._run_one_tick = _fake_tick  # type: ignore[assignment]
+    poller._client = object()  # type: ignore[assignment]
+
+    result = asyncio.run(poller.poll_now())
+
+    assert result == 7, "poll_now returns its own tick's ingested count"
+    assert calls["n"] == 1, "exactly one tick per poll_now call — no double poll"

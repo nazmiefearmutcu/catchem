@@ -384,3 +384,109 @@ def test_ws_status_enabled_returns_stats_envelope(
     assert isinstance(body["sources"], list) and len(body["sources"]) == 1
     assert body["sources"][0]["name"] == "wire"
     assert body["sources"][0]["state"] == "idle"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Graceful-close handling + parser containment (v79 reliability fixes)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_graceful_close_with_frames_resets_failure_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A graceful server close that DELIVERED frames is a healthy session, not a
+    failure: consecutive_failures resets to 0 so the reconnect uses the fastest
+    backoff rung instead of being penalized like a flaky drop."""
+    spec = WsSourceSpec("healthy", "wss://h/ws", "h.local")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+    st.consecutive_failures = 5  # pretend we'd accrued failures earlier
+
+    async def _graceful_with_frames(_spec, _st) -> None:
+        _st.messages_received += 3  # session delivered frames…
+        await asyncio.sleep(0)      # …then the server closed (graceful return)
+
+    backoff_calls: list[int] = []
+
+    def _spy_backoff(consecutive: int) -> float:
+        backoff_calls.append(consecutive)
+        return 0.01  # shrink the wait so the test doesn't sleep seconds
+
+    monkeypatch.setattr(chan, "_connect_and_read", _graceful_with_frames)
+    monkeypatch.setattr(chan, "_backoff_seconds", _spy_backoff)
+
+    chan._stop.clear()
+    task = asyncio.create_task(chan._run_source(spec))
+    await asyncio.sleep(0.06)
+    chan._stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert st.reconnects >= 1
+    assert st.consecutive_failures == 0, "a productive graceful close is not a failure"
+    assert backoff_calls and all(c == 0 for c in backoff_calls), (
+        "reconnect after a healthy session must use the fastest backoff rung"
+    )
+    assert st.state == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_graceful_close_without_frames_counts_as_soft_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A graceful close that delivered ZERO frames (server accepts then closes
+    empty) is treated as a soft failure so backoff throttles the otherwise-hot
+    reconnect loop."""
+    spec = WsSourceSpec("empty", "wss://e/ws", "e.local")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    async def _graceful_no_frames(_spec, _st) -> None:
+        await asyncio.sleep(0)  # return immediately, no messages delivered
+
+    backoff_calls: list[int] = []
+
+    def _spy_backoff(consecutive: int) -> float:
+        backoff_calls.append(consecutive)
+        return 0.01
+
+    monkeypatch.setattr(chan, "_connect_and_read", _graceful_no_frames)
+    monkeypatch.setattr(chan, "_backoff_seconds", _spy_backoff)
+
+    chan._stop.clear()
+    task = asyncio.create_task(chan._run_source(spec))
+    await asyncio.sleep(0.06)
+    chan._stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert st.consecutive_failures >= 2, "empty graceful closes must accrue soft failures"
+    assert st.reconnects >= 2
+    assert max(backoff_calls) >= 2, "backoff must climb when empty closes repeat"
+    assert st.state == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_handle_frame_survives_throwing_custom_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A custom parser that RAISES must be contained inside _handle_frame
+    (count a parse failure + skip), never bubble out — otherwise _run_source
+    misreads it as a connection drop and tears down a healthy socket."""
+    import catchem.ws_push as ws_push
+
+    def _throwing_parser(_raw, _domain):
+        raise ValueError("malformed frame the custom parser choked on")
+
+    monkeypatch.setitem(ws_push._FRAME_PARSERS, "boom", _throwing_parser)
+    spec = WsSourceSpec("custom", "wss://c/ws", "c.local", parser="boom")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+    sup: _FakeSupervisor = chan._sup  # type: ignore[assignment]
+
+    # Must NOT raise even though the parser throws.
+    await chan._handle_frame(spec, st, '{"anything": "here"}')
+
+    assert st.parse_failures == 1
+    assert st.messages_received == 1
+    assert st.ingested == 0
+    assert sup.processed == []

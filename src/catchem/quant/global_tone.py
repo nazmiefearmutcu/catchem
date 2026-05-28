@@ -187,23 +187,6 @@ def _empty_summary(now: datetime) -> dict[str, Any]:
     }
 
 
-def _order_points(
-    points: list[tuple[datetime | None, float]],
-) -> list[float]:
-    """Return values in chronological order.
-
-    Points with a parseable date sort by it; date-less points keep their
-    original relative position appended at the end (GDELT returns the
-    series already oldest→newest, so a missing date is rare and trailing
-    it is the least-surprising choice). The returned list is the value
-    sequence used for latest/trend.
-    """
-    dated = [(d, v) for d, v in points if d is not None]
-    undated = [v for d, v in points if d is None]
-    dated.sort(key=lambda dv: dv[0])
-    return [v for _, v in dated] + undated
-
-
 def summarize_tone(
     timeline: list[dict],
     *,
@@ -245,27 +228,40 @@ def summarize_tone(
     if not points:
         return _empty_summary(resolved_now)
 
-    values = _order_points(points)
-    n = len(values)
+    # Order-FREE aggregates see every valid point (a point with a bad date but
+    # a good value still counts toward mean/min/max — its time only matters for
+    # ordering, not for the range).
+    all_values = [v for _d, v in points]
+    n = len(all_values)
+    mean_tone = statistics.fmean(all_values)
+    min_tone = min(all_values)
+    max_tone = max(all_values)
 
-    latest_tone = values[-1]
-    mean_tone = statistics.fmean(values)
-    min_tone = min(values)
-    max_tone = max(values)
+    # Order-SENSITIVE stats (latest / trend / slope) run over a chronological
+    # sequence built from DATED points only, sorted oldest→newest. A point with
+    # an unparseable date has no defensible position, so trusting it as "latest"
+    # or letting it anchor the trend window would be wrong. Only when NO point
+    # carries a usable date do we fall back to the raw order GDELT sent
+    # (oldest→newest) so a fully date-less series still yields a latest/trend.
+    dated = sorted((d, v) for d, v in points if d is not None)
+    ordered = [v for _d, v in dated] if dated else all_values
+    m = len(ordered)
 
-    # Recent-window vs earlier-window delta. With a single point there is no
-    # earlier window, so the trend is 0 and the state is stable.
-    if n >= 2:
-        recent_count = max(1, round(n * _RECENT_WINDOW_FRACTION))
+    latest_tone = ordered[-1]
+
+    # Recent-window vs earlier-window delta. With a single ordered point there
+    # is no earlier window, so the trend is 0 and the state is stable.
+    if m >= 2:
+        recent_count = max(1, round(m * _RECENT_WINDOW_FRACTION))
         # Guarantee at least one point in the earlier window too.
-        recent_count = min(recent_count, n - 1)
-        earlier = values[: n - recent_count]
-        recent = values[n - recent_count :]
+        recent_count = min(recent_count, m - 1)
+        earlier = ordered[: m - recent_count]
+        recent = ordered[m - recent_count :]
         tone_trend = statistics.fmean(recent) - statistics.fmean(earlier)
     else:
         tone_trend = 0.0
 
-    tone_slope = _least_squares_slope(values)
+    tone_slope = _least_squares_slope(ordered)
 
     if tone_trend > _STATE_THRESHOLD:
         tone_state = "improving"

@@ -145,6 +145,11 @@ class NewsConfig(BaseModel):
     # same story, collapse items whose normalized titles match within this
     # window so the feed shows the story once instead of N times. 0 disables.
     dedup_title_window_seconds: float = 21600.0  # 6h
+    # Adaptive per-source polling: persistently-empty feeds (HTTP-200 but zero
+    # new items, cycle after cycle) back off to a longer cadence while
+    # high-yield feeds keep polling every cycle. Separate from the error
+    # circuit breaker (failures). False = poll every feed every cycle.
+    adaptive_polling_enabled: bool = True
 
 
 class ArchiveConfig(BaseModel):

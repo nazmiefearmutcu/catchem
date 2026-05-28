@@ -30,7 +30,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -88,16 +88,17 @@ class FeedSpec:
 # Source packs register non-RSS parsers (GDELT/Reddit JSON, etc.) here so a
 # single generic GET path can feed many heterogeneous firehoses. The "rss"
 # parser is registered at import time below, after parse_feed is defined.
-ParserFn = "Callable[[bytes, str], list[ParsedItem]]"
-_PARSERS: dict[str, "Callable[[bytes, str], list[ParsedItem]]"] = {}
+# `ParsedItem` is forward-referenced (defined further down), hence the string
+# annotation; `Callable` is imported at module top.
+_PARSERS: dict[str, Callable[[bytes, str], list[ParsedItem]]] = {}
 
 
-def register_parser(name: str, fn: "Callable[[bytes, str], list[ParsedItem]]") -> None:
+def register_parser(name: str, fn: Callable[[bytes, str], list[ParsedItem]]) -> None:
     """Register a body parser under `name` (idempotent — last write wins)."""
     _PARSERS[name] = fn
 
 
-def get_parser(name: str) -> "Callable[[bytes, str], list[ParsedItem]]":
+def get_parser(name: str) -> Callable[[bytes, str], list[ParsedItem]]:
     """Return the parser for `name`, falling back to the rss parser."""
     return _PARSERS.get(name) or _PARSERS["rss"]
 
@@ -109,12 +110,10 @@ def get_parser(name: str) -> "Callable[[bytes, str], list[ParsedItem]]":
 # every provider's output, so a pack only ever ADDS its own new module — it
 # never edits the shared DEFAULT_FEEDS tuple, which keeps parallel authorship
 # collision-free.
-from collections.abc import Callable as _Callable  # noqa: E402
-
-_FEED_PROVIDERS: list[_Callable[[], "Iterable[FeedSpec]"]] = []
+_FEED_PROVIDERS: list[Callable[[], Iterable[FeedSpec]]] = []
 
 
-def register_feed_provider(fn: _Callable[[], "Iterable[FeedSpec]"]) -> _Callable[[], "Iterable[FeedSpec]"]:
+def register_feed_provider(fn: Callable[[], Iterable[FeedSpec]]) -> Callable[[], Iterable[FeedSpec]]:
     """Register a zero-arg callable returning extra FeedSpecs. Returns the
     callable so it can be used as a decorator."""
     _FEED_PROVIDERS.append(fn)
@@ -265,6 +264,46 @@ def _compute_cooldown_until(
         return None
     idx = min(consecutive_errors - CIRCUIT_BREAKER_THRESHOLD, len(BACKOFF_LADDER_SECONDS) - 1)
     return now + timedelta(seconds=BACKOFF_LADDER_SECONDS[idx])
+
+
+# Adaptive per-source polling ladder — SEPARATE from the error circuit
+# breaker above. The breaker reacts to *failures* (5xx, timeouts); this
+# ladder reacts to persistent *emptiness* — a feed that fetches fine (HTTP
+# 200) but yields zero NEW items cycle after cycle (think-tanks, podcasts,
+# quiet regulators). Polling those every 10s wastes bandwidth and drags the
+# median publisher-lag window, so we stretch their cadence the longer they
+# stay dry, while high-yield firehoses (GDELT/Google News/squawk) keep
+# fetching every cycle.
+#
+# Mapping (consecutive zero-new-item successful fetches → cycle multiplier):
+#     0-2  empties → 1  (every cycle)
+#     3-5  empties → 3  (every 3rd cycle)
+#     6-10 empties → 6  (every 6th cycle)
+#     >10  empties → 12 (every 12th cycle — the cap)
+# A cycle that yields >=1 NEW item resets consecutive_empty to 0, snapping the
+# feed straight back to every-cycle. Errors do NOT count as emptiness; the
+# circuit breaker owns those and an errored fetch never advances this ladder.
+ADAPTIVE_CADENCE_LADDER: tuple[tuple[int, int], ...] = (
+    (2, 1),   # <=2 empties → every cycle
+    (5, 3),   # <=5 empties → every 3rd cycle
+    (10, 6),  # <=10 empties → every 6th cycle
+)
+ADAPTIVE_CADENCE_MAX: int = 12  # >10 empties → every 12th cycle (cap)
+
+
+def _adaptive_cadence(consecutive_empty: int) -> int:
+    """Map a feed's consecutive-empty count to its poll-cycle multiplier.
+
+    Pure + side-effect free so the ladder can be pinned in isolation. A
+    multiplier of N means "fetch this feed once every N cycles". Negative
+    inputs are clamped to 0 (treated as freshly-yielding). See
+    ADAPTIVE_CADENCE_LADDER for the rungs.
+    """
+    n = max(0, consecutive_empty)
+    for threshold, multiplier in ADAPTIVE_CADENCE_LADDER:
+        if n <= threshold:
+            return multiplier
+    return ADAPTIVE_CADENCE_MAX
 
 
 def _canonical_url(url: str) -> str:
@@ -662,6 +701,25 @@ class NewsPoller:
         # long-running poller can't grow it without bound; oldest evicted.
         self._seen_titles: OrderedDict[str, datetime] = OrderedDict()
         self._seen_titles_cap: int = 5000
+        # Adaptive per-source polling. When enabled, a feed that keeps fetching
+        # OK but returning zero NEW items backs off to a longer cadence (see
+        # `_adaptive_cadence`), saving bandwidth and keeping the median lag
+        # window honest. getattr fallback keeps stub-settings callers (and the
+        # default) working unchanged; default True matches NewsConfig.
+        self._adaptive_polling_enabled = bool(
+            getattr(
+                getattr(settings, "news", None),
+                "adaptive_polling_enabled",
+                True,
+            )
+        )
+        # Monotonic count of completed poll cycles — the modulo base the
+        # adaptive cadence uses to decide whether a backed-off feed is "due".
+        self._cycle_index: int = 0
+        # Per-feed: the cycle index at which each feed becomes due to fetch
+        # again. Absent feeds are always due (fetched on the next cycle). Only
+        # consulted when adaptive polling is enabled.
+        self._feed_next_due_cycle: dict[str, int] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._poke = asyncio.Event()      # signals "skip the sleep, poll now"
@@ -963,6 +1021,11 @@ class NewsPoller:
         # the cooldown expired we drop it now so the fetch proceeds and
         # `_record_feed_result` can reset state on success.
         now_for_cooldown = datetime.now(UTC)
+        # Advance the cycle counter once per pass. The adaptive cadence gate
+        # compares each feed's `next_due_cycle` against this index. Errors and
+        # cooldowns are independent of this — only emptiness moves the ladder.
+        this_cycle = self._cycle_index
+        self._cycle_index += 1
         feeds_to_fetch: list[FeedSpec] = []
         backed_off_results: list[FeedFetchResult] = []
         for spec in self._feeds:
@@ -986,6 +1049,17 @@ class NewsPoller:
                     snapshot["backed_off"] = False
                     self.feed_health[spec.name] = snapshot
                     logger.info("rss_circuit_probing", feed=spec.name)
+            # Adaptive emptiness gate — SEPARATE from the cooldown breaker
+            # above. A persistently-empty feed (but otherwise healthy) is only
+            # fetched once it reaches its `next_due_cycle`; on non-due cycles we
+            # skip it entirely (no synthetic result — it neither succeeded nor
+            # failed, so polls/errors/health stay frozen, exactly like it was
+            # never scheduled). Disabled → every feed is always due.
+            if (
+                self._adaptive_polling_enabled
+                and this_cycle < self._feed_next_due_cycle.get(spec.name, 0)
+            ):
+                continue
             feeds_to_fetch.append(spec)
 
         fetched_results = await asyncio.gather(
@@ -1002,6 +1076,10 @@ class NewsPoller:
         new_items: list[tuple[FeedSpec, ParsedItem]] = []
         stale_skipped = 0
         dupe_titles_skipped = 0
+        # Per-feed NEW-item tally — drives the adaptive emptiness ladder below.
+        # Only the post-dedup "genuinely new" count matters: a feed re-serving
+        # the same 100 items every cycle is *empty* for our purposes.
+        new_per_feed: dict[str, int] = {}
         now = datetime.now(UTC)
         for result in results:
             for item in result.items:
@@ -1023,8 +1101,22 @@ class NewsPoller:
                     dupe_titles_skipped += 1
                     continue
                 new_items.append((result.spec, item))
+                new_per_feed[result.spec.name] = new_per_feed.get(result.spec.name, 0) + 1
         self.last_stale_skipped = stale_skipped
         self.last_dupe_titles_skipped = dupe_titles_skipped
+
+        # Update the adaptive emptiness ladder for every feed we actually
+        # FETCHED this cycle and that returned OK (HTTP 200, no error). A feed
+        # that yielded >=1 new item resets to every-cycle; a zero-new-item
+        # success advances consecutive_empty and stretches the cadence. Errored
+        # / cooldown-skipped / not-due feeds are intentionally untouched — the
+        # circuit breaker owns failures and emptiness only accrues on success.
+        ok_by_name = {r.spec.name: r for r in results if r.ok}
+        for spec in feeds_to_fetch:
+            result = ok_by_name.get(spec.name)
+            if result is None:
+                continue  # errored this cycle → breaker's domain, not ours
+            self._record_adaptive_yield(spec.name, new_per_feed.get(spec.name, 0), this_cycle)
 
         if not new_items:
             return 0
@@ -1155,6 +1247,42 @@ class NewsPoller:
             self._seen_titles.popitem(last=False)
         return False
 
+    def _record_adaptive_yield(self, feed_name: str, new_count: int, this_cycle: int) -> None:
+        """Fold one successful fetch's NEW-item count into the adaptive ladder.
+
+        Called once per feed per cycle, AFTER `_record_feed_result`, and ONLY
+        for feeds that fetched OK this cycle (see `_poll_once`). Mutates the
+        feed's `feed_health` entry in place with the emptiness telemetry:
+
+          * `consecutive_empty` — zero-new-item successes in a row (reset to 0
+            on any cycle that yields >=1 new item),
+          * `adaptive_cadence`  — current poll-cycle multiplier (`_adaptive_cadence`),
+          * `total_new_items`   — cumulative new items since boot.
+
+        Also schedules the next due cycle (`this_cycle + cadence`) so the
+        `_poll_once` gate can cheaply skip the feed until then. No-op on the
+        cadence schedule when adaptive polling is disabled, but the telemetry
+        keys are still maintained so the UI can show them either way.
+        """
+        prev = self.feed_health.get(feed_name)
+        if prev is None:
+            # Defensive: _record_feed_result runs first and always seeds the
+            # entry, so this should never fire. If it does, skip silently
+            # rather than crash the tick.
+            return
+        if new_count > 0:
+            consecutive_empty = 0
+        else:
+            consecutive_empty = int(prev.get("consecutive_empty", 0)) + 1
+        cadence = _adaptive_cadence(consecutive_empty)
+        total_new_items = int(prev.get("total_new_items", 0)) + max(0, new_count)
+        prev["consecutive_empty"] = consecutive_empty
+        prev["adaptive_cadence"] = cadence
+        prev["total_new_items"] = total_new_items
+        # Schedule the next fetch. With adaptive polling off, cadence is still
+        # surfaced but the gate ignores next_due, so every-cycle behavior holds.
+        self._feed_next_due_cycle[feed_name] = this_cycle + cadence
+
     def _record_feed_result(self, result: FeedFetchResult) -> None:
         prev = self.feed_health.get(result.spec.name, {})
         if result.skipped:
@@ -1184,6 +1312,12 @@ class NewsPoller:
                 "last_success_at": prev.get("last_success_at"),
                 "last_failure_at": prev.get("last_failure_at"),
                 "elapsed_ms": None,
+                # Preserve adaptive-polling telemetry across a circuit-breaker
+                # cooldown so the emptiness stats don't reset when failures
+                # (a different axis) pause the feed.
+                "consecutive_empty": int(prev.get("consecutive_empty", 0)),
+                "adaptive_cadence": int(prev.get("adaptive_cadence", 1)),
+                "total_new_items": int(prev.get("total_new_items", 0)),
             })
             self.feed_health[result.spec.name] = snapshot
             return
@@ -1239,6 +1373,14 @@ class NewsPoller:
             "cooldown_until": cooldown_until,
             "last_success_at": result.fetched_at.isoformat() if ok else prev.get("last_success_at"),
             "last_failure_at": result.fetched_at.isoformat() if not ok else prev.get("last_failure_at"),
+            # Adaptive-polling telemetry — preserved across this rebuild so the
+            # ladder accumulates. `_record_adaptive_yield` (called right after,
+            # only on OK fetches) recomputes consecutive_empty/adaptive_cadence
+            # and bumps total_new_items from these carried-over values. Defaults
+            # describe a fresh, every-cycle feed.
+            "consecutive_empty": int(prev.get("consecutive_empty", 0)),
+            "adaptive_cadence": int(prev.get("adaptive_cadence", 1)),
+            "total_new_items": int(prev.get("total_new_items", 0)),
         }
         self.feed_health[result.spec.name] = snapshot
 
@@ -1247,6 +1389,8 @@ class NewsPoller:
 
 
 __all__ = [
+    "ADAPTIVE_CADENCE_LADDER",
+    "ADAPTIVE_CADENCE_MAX",
     "BACKOFF_LADDER_SECONDS",
     "CIRCUIT_BREAKER_THRESHOLD",
     "DEFAULT_FEEDS",
@@ -1254,6 +1398,7 @@ __all__ = [
     "FeedSpec",
     "NewsPoller",
     "ParsedItem",
+    "_adaptive_cadence",
     "_compute_cooldown_until",
     "_is_stale_published_ts",
     "_normalize_title",

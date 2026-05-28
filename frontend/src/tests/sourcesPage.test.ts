@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { extractDomain, formatSuccessRate } from "@/features/sources/SourcesPage";
+import {
+  extractDomain,
+  formatSuccessRate,
+  formatWindowSeconds,
+} from "@/features/sources/SourcesPage";
 
 /**
  * Pure-helper pins for the /sources page. The page component is wired
@@ -58,5 +62,34 @@ describe("formatSuccessRate", () => {
     expect(formatSuccessRate(Number.NaN)).toBe("—");
     expect(formatSuccessRate(-0.5)).toBe("—");
     expect(formatSuccessRate(Number.POSITIVE_INFINITY)).toBe("—");
+  });
+});
+
+describe("formatWindowSeconds", () => {
+  it("formats sub-minute durations in seconds", () => {
+    expect(formatWindowSeconds(0)).toBe("0s");
+    expect(formatWindowSeconds(45)).toBe("45s");
+    // Rounds to the nearest whole second.
+    expect(formatWindowSeconds(45.4)).toBe("45s");
+  });
+
+  it("formats minute+second durations as 'Xm Ys' (drops 0s remainder)", () => {
+    expect(formatWindowSeconds(100)).toBe("1m 40s");
+    expect(formatWindowSeconds(120)).toBe("2m");
+    // effective window ~ poll_interval(10) + median_lag(90)
+    expect(formatWindowSeconds(100)).toBe("1m 40s");
+  });
+
+  it("formats hour-scale durations as 'Xh Ym' (drops 0m remainder)", () => {
+    expect(formatWindowSeconds(3600)).toBe("1h");
+    expect(formatWindowSeconds(3900)).toBe("1h 5m");
+  });
+
+  it("renders an em-dash for null / negative / non-finite inputs", () => {
+    expect(formatWindowSeconds(null)).toBe("—");
+    expect(formatWindowSeconds(undefined)).toBe("—");
+    expect(formatWindowSeconds(-5)).toBe("—");
+    expect(formatWindowSeconds(Number.NaN)).toBe("—");
+    expect(formatWindowSeconds(Number.POSITIVE_INFINITY)).toBe("—");
   });
 });

@@ -325,6 +325,32 @@ export interface NewsSourcesResponse {
   sources: NewsSourceRow[];
 }
 
+/**
+ * The live "awareness window" — answers "how fresh / how broad is
+ * awareness right now?". ``window_estimate_seconds`` ≈
+ * ``poll_interval_seconds + median_publisher_lag_seconds`` (the effective
+ * span between an event happening and it surfacing in the feed).
+ *
+ * Degraded shape (poller disabled / not yet booted): ``configured:false``,
+ * ``sources_total:0``, empty ``sources_by_parser``, null lags + window.
+ */
+export interface NewsAwareness {
+  schema_version: number;
+  generated_at: string;
+  configured: boolean;
+  sources_total: number;
+  /** Configured feeds tallied by parser key ("rss", "gdelt", "reddit", …). */
+  sources_by_parser: Record<string, number>;
+  poll_interval_seconds: number | null;
+  median_publisher_lag_seconds: number | null;
+  avg_publisher_lag_seconds: number | null;
+  last_run_at: string | null;
+  last_new_at: string | null;
+  total_ingested: number;
+  /** poll_interval + median_publisher_lag; null when no fresh lag this tick. */
+  window_estimate_seconds: number | null;
+}
+
 export interface ArchiveStatus {
   enabled: boolean;
   drive_dir: string | null;

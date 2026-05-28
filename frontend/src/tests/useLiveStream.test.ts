@@ -3,8 +3,14 @@ import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import {
+  LIVE_FRESH_SECONDS,
+  LIVE_STALE_SECONDS,
+  SSE_BACKOFF_JITTER_MS,
   SSE_BACKOFF_MAX_MS,
   SSE_BACKOFF_MIN_MS,
+  SSE_EVENT_RECONNECTED,
+  SSE_EVENT_SIDECAR_DOWN,
+  SSE_EVENT_SIDECAR_RECOVERED,
   useLiveStream,
 } from "@/hooks/useLiveStream";
 
@@ -63,6 +69,10 @@ beforeEach(() => {
   FakeEventSource.instances = [];
   // @ts-expect-error overriding the JSDOM global with our stub
   globalThis.EventSource = FakeEventSource;
+  // Pin jitter to 0 so backoff cadence is deterministic. The actual
+  // jitter math is independently exercised in the dedicated jitter
+  // test below by toggling Math.random for that test only.
+  vi.spyOn(Math, "random").mockReturnValue(0);
   vi.useFakeTimers();
 });
 
@@ -213,5 +223,104 @@ describe("useLiveStream", () => {
       vi.advanceTimersByTime(SSE_BACKOFF_MAX_MS * 2);
     });
     expect(FakeEventSource.instances).toHaveLength(1);
+  });
+
+  // ── v25 regressions ────────────────────────────────────────────────────
+
+  it("adds jitter to the scheduled backoff window", () => {
+    // Pin jitter at the ceiling — reconnect must wait BACKOFF + JITTER,
+    // not just BACKOFF, before spawning a fresh EventSource. The base
+    // `beforeEach` already installed a Math.random spy returning 0; we
+    // re-spy here so the runtime instance is fresh after `restoreAllMocks`
+    // is consulted on the previous teardown.
+    vi.spyOn(Math, "random").mockReturnValue(0.999);
+    renderHook(() => useLiveStream(), { wrapper });
+
+    act(() => {
+      FakeEventSource.last().onerror?.();
+    });
+    // The plain backoff (no jitter) would have fired by now…
+    act(() => {
+      vi.advanceTimersByTime(SSE_BACKOFF_MIN_MS);
+    });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    // …but the full jittered window finishes within +500ms of MIN.
+    act(() => {
+      vi.advanceTimersByTime(SSE_BACKOFF_JITTER_MS);
+    });
+    expect(FakeEventSource.instances).toHaveLength(2);
+  });
+
+  it("pauses reconnect attempts while sidecar-down is signalled", () => {
+    renderHook(() => useLiveStream(), { wrapper });
+
+    // Sidecar goes down — close the current ES and stop arming retries.
+    act(() => {
+      window.dispatchEvent(new Event(SSE_EVENT_SIDECAR_DOWN));
+    });
+    // No new EventSource should appear even if many backoff windows elapse.
+    act(() => {
+      vi.advanceTimersByTime(SSE_BACKOFF_MAX_MS * 4);
+    });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.last().closed).toBe(true);
+
+    // Recovery event — should reconnect immediately, no waiting.
+    act(() => {
+      window.dispatchEvent(new Event(SSE_EVENT_SIDECAR_RECOVERED));
+    });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.last().closed).toBe(false);
+  });
+
+  it("emits catchem:sse-reconnected after a recovery beat, not on the very first beat", () => {
+    const listener = vi.fn();
+    window.addEventListener(SSE_EVENT_RECONNECTED, listener);
+
+    renderHook(() => useLiveStream(), { wrapper });
+
+    // First beat is initial connect — not a reconnect.
+    act(() => {
+      FakeEventSource.last().emit("summary");
+    });
+    expect(listener).not.toHaveBeenCalled();
+
+    // Lose the connection and let the backoff fire a fresh ES.
+    act(() => {
+      FakeEventSource.last().onerror?.();
+      vi.advanceTimersByTime(SSE_BACKOFF_MIN_MS);
+    });
+    expect(FakeEventSource.instances).toHaveLength(2);
+
+    // First beat on the new socket — this IS a recovery beat.
+    act(() => {
+      FakeEventSource.last().emit("summary");
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    window.removeEventListener(SSE_EVENT_RECONNECTED, listener);
+  });
+
+  it("exposes stalenessSeconds that grows once the last beat ages past the FRESH bar", () => {
+    const { result } = renderHook(() => useLiveStream(), { wrapper });
+
+    // Pre-beat — no staleness measurement yet.
+    expect(result.current.stalenessSeconds).toBeNull();
+
+    act(() => {
+      FakeEventSource.last().emit("summary");
+    });
+    // First tick of the 1s staleness interval — beat is "now", so 0s.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(result.current.stalenessSeconds).toBeGreaterThanOrEqual(0);
+    expect(result.current.stalenessSeconds).toBeLessThan(LIVE_FRESH_SECONDS);
+
+    // Walk the timer past the STALE bar.
+    act(() => {
+      vi.advanceTimersByTime((LIVE_STALE_SECONDS + 1) * 1_000);
+    });
+    expect(result.current.stalenessSeconds).toBeGreaterThanOrEqual(LIVE_STALE_SECONDS);
   });
 });

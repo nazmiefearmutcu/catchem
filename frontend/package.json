@@ -7,11 +7,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:check": "npm run build && node scripts/check-bundle-budget.js",
+    "analyze": "ANALYZE=true npm run build",
     "preview": "vite preview --port 4173",
     "typecheck": "tsc -b --noEmit",
     "lint": "echo 'no eslint configured — keep it simple'",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "cov": "vitest run --coverage"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
@@ -30,9 +33,11 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.20",
     "jsdom": "^25.0.1",
     "postcss": "^8.4.47",
+    "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.3",
     "vite": "^5.4.8",

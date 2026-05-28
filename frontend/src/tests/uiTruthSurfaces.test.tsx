@@ -34,7 +34,7 @@ vi.mock("@/lib/api", async () => {
 });
 
 vi.mock("@/hooks/useLiveStream", () => ({
-  useLiveStream: vi.fn(() => ({ status: "idle", lastBeatAt: null })),
+  useLiveStream: vi.fn(() => ({ status: "idle", lastBeatAt: null, stalenessSeconds: null })),
 }));
 
 vi.mock("@/hooks/useDesktopAlerts", () => ({
@@ -42,6 +42,7 @@ vi.mock("@/hooks/useDesktopAlerts", () => ({
   setAlertThreshold: vi.fn((value: number) => value),
   useDesktopAlertState: vi.fn(() => ["off", vi.fn()]),
   useDesktopAlerts: vi.fn(),
+  useUnreadNotificationCount: vi.fn(() => 0),
 }));
 
 vi.mock("@/components/CommandPalette", () => ({
@@ -50,6 +51,10 @@ vi.mock("@/components/CommandPalette", () => ({
 
 vi.mock("@/components/ToastTray", () => ({
   ToastTray: () => null,
+}));
+
+vi.mock("@/components/NotificationCenter", () => ({
+  NotificationCenter: () => null,
 }));
 
 import { api } from "@/lib/api";
@@ -125,7 +130,7 @@ function jsonDefaults() {
 beforeEach(() => {
   Object.values(apiMock).forEach((fn) => fn.mockReset());
   liveStreamMock.mockReset();
-  liveStreamMock.mockReturnValue({ status: "idle", lastBeatAt: null });
+  liveStreamMock.mockReturnValue({ status: "idle", lastBeatAt: null, stalenessSeconds: null });
   jsonDefaults();
 });
 
@@ -221,7 +226,7 @@ describe("UI truth regressions", () => {
   });
 
   it("Shell keeps the live dot idle when the stream has opened but no beat arrived", async () => {
-    liveStreamMock.mockReturnValue({ status: "open", lastBeatAt: null });
+    liveStreamMock.mockReturnValue({ status: "open", lastBeatAt: null, stalenessSeconds: null });
     renderWithProviders(
       createElement(Routes, null,
         createElement(Route, { path: "/", element: createElement(Shell) },
@@ -357,7 +362,11 @@ describe("UI truth regressions", () => {
     expect(within(section as HTMLElement).queryByText(/undefined/)).not.toBeInTheDocument();
   });
 
-  it("Ops does not claim the release gate is intentionally false when the guard snapshot is unavailable", async () => {
+  it("Ops shows benign NewsImpact-not-configured note in production_safe (BUG-OO)", async () => {
+    // Pre-fix this state ({ok:false, error_code:"missing_governance_index"})
+    // rendered an alarming red ErrorBox + "cannot prove the release-gate state"
+    // warning, even though catchem operates perfectly without merged_news
+    // in production_safe (the diagnostic adapter is forbidden anyway).
     apiMock.guards.mockResolvedValue({
       ok: false,
       error_code: "missing_governance_index",
@@ -367,8 +376,13 @@ describe("UI truth regressions", () => {
     const guardSection = await screen.findByText("NewsImpact guard");
     const section = guardSection.closest("section");
     expect(section).not.toBeNull();
+    // Raw error_code still surfaced for diagnostics (inside the friendly note).
     expect(within(section as HTMLElement).getByText(/missing_governance_index/)).toBeInTheDocument();
-    expect(within(section as HTMLElement).getByText(/cannot prove the release-gate state/)).toBeInTheDocument();
+    // Friendly explanation replaces the alarming wording.
+    expect(within(section as HTMLElement).getByText(/not configured on this machine/i)).toBeInTheDocument();
+    // The release-gate paragraph and "intentionally" wording should NOT
+    // appear — that path is for actual guard failures.
+    expect(within(section as HTMLElement).queryByText(/cannot prove the release-gate state/)).not.toBeInTheDocument();
     expect(within(section as HTMLElement).queryByText(/intentionally/)).not.toBeInTheDocument();
   });
 });

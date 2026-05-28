@@ -8,6 +8,7 @@ export interface Filters {
   ac?: string | null;       // asset_class
   rc?: string | null;       // reason_code
   sym?: string | null;      // symbol
+  tag?: string | null;      // user-defined tag (see migration v2 / record_tags)
   q?: string | null;        // search query
   sentiment?: string | null;
   relevant?: "all" | "only" | null;
@@ -21,6 +22,7 @@ export function useUrlFilters() {
       ac: params.get("ac"),
       rc: params.get("rc"),
       sym: params.get("sym"),
+      tag: params.get("tag"),
       q: params.get("q"),
       sentiment: params.get("sentiment"),
       relevant: (params.get("relevant") as Filters["relevant"]) ?? "only",

@@ -13,7 +13,11 @@ import { ReplayUploadPage } from "@/features/replay-upload/ReplayUploadPage";
  *   R4 — UploadForm had no Clear button while PasteForm did. We pin the
  *        symmetry + the clear-resets-state behavior.
  *
- * The fetch is mocked so the test runs hermetically without a sidecar.
+ * Round 8 redesign update:
+ *   The page now also pulls /ui/sidecar-status to drive the live storage
+ *   context strip + QuickStats sidebar. The fetch mock here discriminates
+ *   by URL so the R3/R4 contracts can still be asserted in isolation
+ *   without the sidecar-status query "stealing" mocked responses.
  */
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -29,8 +33,28 @@ function wrapper({ children }: { children: ReactNode }) {
 
 const fetchMock = vi.fn();
 
+const SIDECAR_STUB = {
+  healthy: true,
+  api_host: "127.0.0.1",
+  api_port: 0,
+  pid: 0,
+  uptime_seconds: 0,
+  records: { total: 0, finance_relevant: 0 },
+  dlq: 0,
+  diagnostic_enabled: true,
+  generated_at: "2026-01-01T00:00:00Z",
+};
+
 beforeEach(() => {
   fetchMock.mockReset();
+  // URL-discriminating default: sidebar/context strips get a quiet stub.
+  // Per-test mocks (replay/demo) layer on via mockImplementationOnce.
+  fetchMock.mockImplementation((url: string) => {
+    if (typeof url === "string" && url.startsWith("/ui/sidecar-status")) {
+      return Promise.resolve(jsonResponse(SIDECAR_STUB));
+    }
+    return Promise.resolve(new Response("unhandled", { status: 500 }));
+  });
   (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 });
 
@@ -45,11 +69,42 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * Push a one-shot mock for the next call to the given URL — but unlike
+ * `mockImplementationOnce`, this fires when the *matching URL* is called,
+ * not when any URL is called next. Sidecar-status etc. still fall through
+ * to the URL-discriminating default. Pinned by 2026-05 redesign: the page
+ * fires multiple GETs unrelated to the endpoint under test.
+ */
+function mockOnce(url: string, response: Response) {
+  let consumed = false;
+  fetchMock.mockImplementation((u: string) => {
+    if (u === url && !consumed) {
+      consumed = true;
+      return Promise.resolve(response);
+    }
+    if (typeof u === "string" && u.startsWith("/ui/sidecar-status")) {
+      return Promise.resolve(jsonResponse(SIDECAR_STUB));
+    }
+    return Promise.resolve(new Response("unhandled", { status: 500 }));
+  });
+}
+
+/** Calls made against a specific URL. */
+function callsFor(url: string): Array<[string, RequestInit | undefined]> {
+  return fetchMock.mock.calls.filter(([u]) => u === url) as Array<
+    [string, RequestInit | undefined]
+  >;
+}
+
 describe("ReplayUploadPage", () => {
   it("renders three tabs in order: Paste, Upload, Replay", () => {
     render(createElement(ReplayUploadPage), { wrapper });
     const tablist = screen.getByRole("tablist", { name: /Replay\/Upload mode/i });
     const tabs = within(tablist).getAllByRole("tab");
+    // The visible label is exactly the mode name — the subtitle renders
+    // OUTSIDE the tablist, the icon is aria-hidden, so textContent is the
+    // label verbatim.
     expect(tabs.map((t) => t.textContent)).toEqual([
       "Paste article",
       "Upload file",
@@ -68,18 +123,21 @@ describe("ReplayUploadPage", () => {
   });
 
   it("Run replay posts to /replay with clamped max_records and shows the result", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({
-      processed: 7,
-      skipped: 3,
-      failed: 1,
-      dlq: 5,
-      dlq_delta: 1,
-      records_before: { total: 20, finance_relevant: 12 },
-      records_after: { total: 22, finance_relevant: 13 },
-      inserted: 2,
-      replaced: 4,
-      net_new_records: 2,
-    }));
+    mockOnce(
+      "/replay",
+      jsonResponse({
+        processed: 7,
+        skipped: 3,
+        failed: 1,
+        dlq: 5,
+        dlq_delta: 1,
+        records_before: { total: 20, finance_relevant: 12 },
+        records_after: { total: 22, finance_relevant: 13 },
+        inserted: 2,
+        replaced: 4,
+        net_new_records: 2,
+      }),
+    );
 
     render(createElement(ReplayUploadPage), { wrapper });
     fireEvent.click(screen.getByTestId("tab-replay"));
@@ -94,8 +152,9 @@ describe("ReplayUploadPage", () => {
       expect(screen.getByTestId("replay-result")).toBeInTheDocument();
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0];
+    const replayCalls = callsFor("/replay");
+    expect(replayCalls).toHaveLength(1);
+    const [url, init] = replayCalls[0];
     expect(url).toBe("/replay");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ max_records: 12 });
@@ -121,15 +180,29 @@ describe("ReplayUploadPage", () => {
   });
 
   it("Run replay surfaces a 5xx response as an inline alert and keeps the tab usable", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("supervisor crashed", { status: 500 }));
+    mockOnce("/replay", new Response("supervisor crashed", { status: 500 }));
 
     render(createElement(ReplayUploadPage), { wrapper });
     fireEvent.click(screen.getByTestId("tab-replay"));
     fireEvent.click(screen.getByTestId("replay-run"));
 
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/500/);
-    });
+    await waitFor(
+      () => {
+        // The mutation surfaces an inline ApiError; the message contains the
+        // status code so the analyst can correlate against the sidecar log.
+        const alerts = screen.getAllByRole("alert");
+        const replayAlert = alerts.find((el) => /500/.test(el.textContent ?? ""));
+        expect(replayAlert).toBeTruthy();
+      },
+      // `api.replay` POSTs through the shared client, which retries a
+      // retryable 5xx (status >= 500) up to DEFAULT_RETRIES (2) times with
+      // exponential backoff (~300ms + ~600ms + jitter). That resilience is
+      // intentional — a sidecar mid-restart blips 5xx — but it pushes the
+      // settled error state past waitFor's 1000ms default. Budget for the
+      // full retry/backoff window so we assert on the real terminal state
+      // (the inline `/replay → 500` alert) rather than racing it.
+      { timeout: 4000 },
+    );
     // The form remains operable.
     expect(screen.getByTestId("replay-run")).toBeEnabled();
   });

@@ -13,7 +13,14 @@ export default {
         bg: { DEFAULT: "#0e1014", elev: "#161922", elev2: "#1f2531" },
         border: { DEFAULT: "#232838", subtle: "#1a1f2a" },
         fg: { DEFAULT: "#e7ebf0", dim: "#9aa3b2", muted: "#6b7385" },
-        accent: { DEFAULT: "#5fb3ff", hot: "#3b82f6" },
+        // `accent` is routed through the `--accent` CSS variable so the
+        // user-tunable accent-picker (useAccent.ts) can swap the theme
+        // accent across every `bg-accent` / `border-accent` / `text-accent`
+        // utility without rebuilding Tailwind. The variable's default
+        // value lives in globals.css (#5fb3ff dark, #1e6fdd light) and
+        // useAccent injects an override <style> when the user picks
+        // a non-default preset or custom hex pair.
+        accent: { DEFAULT: "var(--accent)", hot: "#3b82f6" },
         good: "#4ade80",
         bad: "#f87171",
         warn: "#fbbf24",

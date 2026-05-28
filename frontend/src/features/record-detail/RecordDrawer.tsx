@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, fmtDate, fmtScore, safeHref } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError, fmtDate, fmtScore, safeHref, scoreToneClass } from "@/lib/api";
 import { Pill } from "@/components/Pill";
-import { Skeleton, ErrorBox } from "@/components/Skeleton";
+import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
+import { Icon } from "@/components/Icon";
+import { useOverlaySurface } from "@/context/overlayCoordinator";
+
+// Mirror the backend regex (catchem.storage._validate_tag) so the user gets
+// fast feedback before a 400. Anything matching this passes the API gate.
+const TAG_PATTERN = /^[a-zA-Z0-9_\-.]+$/;
 
 interface Props {
   captureId: string;
@@ -10,6 +16,14 @@ interface Props {
 }
 
 export function RecordDrawer({ captureId, onClose }: Props) {
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  useOverlaySurface({
+    id: `record-drawer:${captureId}`,
+    open: true,
+    onClose,
+    lockBody: true,
+  });
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["record", captureId],
     queryFn: () => api.record(captureId),
@@ -18,11 +32,20 @@ export function RecordDrawer({ captureId, onClose }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    closeRef.current?.focus();
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    lastFocusedRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    const t = setTimeout(() => closeRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(t);
+      const prev = lastFocusedRef.current;
+      if (prev && typeof prev.focus === "function") {
+        try {
+          prev.focus();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, []);
 
   return (
     <div
@@ -36,9 +59,12 @@ export function RecordDrawer({ captureId, onClose }: Props) {
         className="w-full sm:w-[640px] h-full bg-[color:var(--bg)] border-l border-[color:var(--border)] overflow-auto animate-slide-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="sticky top-0 z-10 bg-[color:var(--bg)] border-b border-[color:var(--border)] px-4 py-3 flex items-center justify-between">
-          <div className="text-xs text-[color:var(--fg-dim)] truncate" title={captureId}>{captureId}</div>
-          <button ref={closeRef} className="btn" onClick={onClose} aria-label="Close">esc · close</button>
+        <header className="sticky top-0 z-10 bg-[color:var(--bg)] border-b border-[color:var(--border)] px-4 py-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">RECORD · NEWS DETAIL</div>
+            <div className="text-xs text-[color:var(--fg-dim)] truncate" title={captureId}>{captureId}</div>
+          </div>
+          <button ref={closeRef} className="btn shrink-0" onClick={onClose} aria-label="Close">esc · close</button>
         </header>
         <div className="p-4 grid gap-4">
           {isLoading && <DetailSkeleton />}
@@ -51,15 +77,20 @@ export function RecordDrawer({ captureId, onClose }: Props) {
                 </div>
                 <h2 className="text-lg font-semibold leading-snug">{data.title ?? "(untitled)"}</h2>
                 {safeHref(data.url) && (
-                  <a href={safeHref(data.url)} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">
-                    open source ↗
+                  <a href={safeHref(data.url)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-accent hover:underline">
+                    open source
+                    <Icon name="external" size={12} />
                   </a>
                 )}
               </section>
 
               <section className="grid grid-cols-2 gap-3">
-                <Card label="finance score" value={fmtScore(data.finance_relevance_score)}
-                      tone={data.is_finance_relevant ? "good" : "bad"} />
+                <div className="card">
+                  <div className="label">finance score</div>
+                  <div className={`mt-1 text-xl font-semibold tabular-nums ${scoreToneClass(data.finance_relevance_score)}`}>
+                    {fmtScore(data.finance_relevance_score)}
+                  </div>
+                </div>
                 <Card label="relevant" value={data.is_finance_relevant ? "YES" : "no"}
                       tone={data.is_finance_relevant ? "good" : "bad"} />
                 <Card label="sentiment" value={data.sentiment_label ?? "—"} hint={data.sentiment_score != null ? fmtScore(data.sentiment_score) : undefined} />
@@ -88,10 +119,13 @@ export function RecordDrawer({ captureId, onClose }: Props) {
                 </section>
               )}
 
+              <TagsSection captureId={captureId} />
+
+
               <section>
                 <div className="label mb-1">evidence sentences</div>
                 {data.evidence_sentences.length === 0 ? (
-                  <p className="text-xs text-[color:var(--fg-dim)]">no extractive evidence picked</p>
+                  <EmptyState title="no extractive evidence picked" hint="evidence pipeline returned an empty set for this record" />
                 ) : (
                   <ul className="space-y-1">
                     {data.evidence_sentences.map((s, i) => (
@@ -181,5 +215,190 @@ function DetailSkeleton() {
       <Skeleton className="h-32" />
       <Skeleton className="h-24" />
     </div>
+  );
+}
+
+/**
+ * User-defined tag editor. Sits below the asset-class / reason-code pills so
+ * the analyst can layer free-form tags on top of the pipeline-derived labels.
+ *
+ * Validation is duplicated on the client (TAG_PATTERN) so the user sees a red
+ * inline note instantly; the backend re-checks identically and returns 400 if
+ * the client check is bypassed. Optimistic update keeps the UI snappy on the
+ * happy path — on failure we roll back to the server snapshot.
+ */
+export function TagsSection({ captureId }: { captureId: string }) {
+  const qc = useQueryClient();
+  const queryKey = ["record-tags", captureId];
+  const tagsQuery = useQuery({
+    queryKey,
+    queryFn: () => api.getTags(captureId),
+    staleTime: 5_000,
+  });
+  const [draft, setDraft] = useState("");
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const [lastAction, setLastAction] = useState<
+    { kind: "added" | "removed" | "noop"; tag: string } | null
+  >(null);
+
+  const addMutation = useMutation({
+    mutationFn: (tag: string) => api.addTag(captureId, tag),
+    onMutate: async (tag) => {
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<{ capture_id: string; tags: string[] }>(queryKey);
+      // Optimistic insert — keep sorted to match the server response shape.
+      if (previous && !previous.tags.includes(tag)) {
+        qc.setQueryData(queryKey, {
+          ...previous,
+          tags: [...previous.tags, tag].sort(),
+        });
+      }
+      return { previous };
+    },
+    onError: (err, _tag, ctx) => {
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+      const msg = err instanceof ApiError
+        ? err.status === 400
+          ? "tag rejected by server"
+          : `request failed (${err.status})`
+        : "request failed";
+      setInlineError(msg);
+    },
+    onSuccess: (res, tag) => {
+      qc.setQueryData(queryKey, { capture_id: captureId, tags: res.tags });
+      qc.invalidateQueries({ queryKey: ["tags-top"] });
+      // The Tags aggregation page (frontend/.../tags/TagsPage.tsx) keys
+      // its useQuery on ["tags-aggregate"]. Without this invalidation a
+      // tag added or removed in the record drawer wouldn't propagate to
+      // the page until the next 60s refetch poll fired — analysts saw
+      // chip counts stuck at stale values for up to a minute.
+      qc.invalidateQueries({ queryKey: ["tags-aggregate"] });
+      setDraft("");
+      setInlineError(null);
+      setLastAction({ kind: res.added ? "added" : "noop", tag });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (tag: string) => api.removeTag(captureId, tag),
+    onMutate: async (tag) => {
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<{ capture_id: string; tags: string[] }>(queryKey);
+      if (previous) {
+        qc.setQueryData(queryKey, {
+          ...previous,
+          tags: previous.tags.filter((t) => t !== tag),
+        });
+      }
+      return { previous };
+    },
+    onError: (err, _tag, ctx) => {
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+      const msg = err instanceof ApiError
+        ? `request failed (${err.status})`
+        : "request failed";
+      setInlineError(msg);
+    },
+    onSuccess: (res, tag) => {
+      qc.setQueryData(queryKey, { capture_id: captureId, tags: res.tags });
+      qc.invalidateQueries({ queryKey: ["tags-top"] });
+      // The Tags aggregation page (frontend/.../tags/TagsPage.tsx) keys
+      // its useQuery on ["tags-aggregate"]. Without this invalidation a
+      // tag added or removed in the record drawer wouldn't propagate to
+      // the page until the next 60s refetch poll fired — analysts saw
+      // chip counts stuck at stale values for up to a minute.
+      qc.invalidateQueries({ queryKey: ["tags-aggregate"] });
+      setInlineError(null);
+      setLastAction({ kind: "removed", tag });
+    },
+  });
+
+  function submitDraft() {
+    const cleaned = draft.trim();
+    if (!cleaned) {
+      setInlineError("tag must not be empty");
+      return;
+    }
+    if (cleaned.length > 50) {
+      setInlineError("tag must be <= 50 characters");
+      return;
+    }
+    if (!TAG_PATTERN.test(cleaned)) {
+      setInlineError("only [a-zA-Z0-9_-.] allowed, no whitespace");
+      return;
+    }
+    setInlineError(null);
+    addMutation.mutate(cleaned);
+  }
+
+  const tags = tagsQuery.data?.tags ?? [];
+
+  return (
+    <section data-testid="tags-section">
+      <div className="label mb-1">tags</div>
+      <div className="flex flex-wrap gap-1" data-testid="tags-list">
+        {tags.length === 0 && !tagsQuery.isLoading && (
+          <span className="text-xs text-[color:var(--fg-dim)]">no tags yet</span>
+        )}
+        {tags.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className="chip chip-active inline-flex items-center gap-1"
+            onClick={() => removeMutation.mutate(tag)}
+            disabled={removeMutation.isPending}
+            data-testid={`tag-pill-${tag}`}
+            title={`Remove tag "${tag}"`}
+            aria-label={`Remove tag ${tag}`}
+          >
+            <span>{tag}</span>
+            <span aria-hidden className="text-[10px] opacity-70">×</span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          type="text"
+          className="input flex-1"
+          placeholder="add tag (a-z 0-9 _ - .)"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (inlineError) setInlineError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitDraft();
+            }
+          }}
+          maxLength={50}
+          aria-label="New tag"
+          data-testid="tag-input"
+          disabled={addMutation.isPending}
+        />
+        <button
+          type="button"
+          className="btn"
+          onClick={submitDraft}
+          disabled={addMutation.isPending || !draft.trim()}
+          data-testid="tag-add"
+        >
+          add
+        </button>
+      </div>
+      {inlineError && (
+        <div className="mt-1 text-[11px] text-bad" data-testid="tag-error">
+          {inlineError}
+        </div>
+      )}
+      {!inlineError && lastAction && (
+        <div className="mt-1 text-[11px] text-[color:var(--fg-dim)]" data-testid="tag-action">
+          {lastAction.kind === "added" && `added "${lastAction.tag}"`}
+          {lastAction.kind === "removed" && `removed "${lastAction.tag}"`}
+          {lastAction.kind === "noop" && `"${lastAction.tag}" already attached`}
+        </div>
+      )}
+    </section>
   );
 }

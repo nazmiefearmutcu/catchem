@@ -5,6 +5,10 @@ import {
   ONBOARDING_STORAGE_KEY,
   OnboardingModal,
 } from "@/components/OnboardingModal";
+import {
+  OPEN_ONBOARDING_EVENT,
+  requestOpenOnboarding,
+} from "@/lib/onboarding";
 import { __resetOverlayStateForTests } from "@/context/overlayCoordinator";
 
 /**
@@ -134,6 +138,42 @@ describe("onboarding modal", () => {
     act(() => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
     });
+    expect(screen.getByText(ONBOARDING_STEPS[0].title)).toBeInTheDocument();
+  });
+
+  it("re-opens on the catchem:open-onboarding event even after being dismissed, without clearing the flag", () => {
+    // Simulate a returning user: tour already completed.
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
+    render(<OnboardingModal />);
+    // Mounts closed (already seen).
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Some surface (Help button / palette) requests a replay.
+    act(() => {
+      window.dispatchEvent(new Event(OPEN_ONBOARDING_EVENT));
+    });
+
+    // Tour is back, starting at step 1 — and replaying does NOT wipe the
+    // "seen" flag (so it won't auto-pop again next launch).
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(ONBOARDING_STEPS[0].title)).toBeInTheDocument();
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe("true");
+  });
+
+  it("replay restarts from step 1 even if the user had advanced before dismissing", () => {
+    render(<OnboardingModal />);
+    // Advance to the last step, then finish (writes the flag + closes).
+    for (let i = 0; i < ONBOARDING_STEPS.length - 1; i += 1) {
+      fireEvent.click(screen.getByTestId("onboarding-next"));
+    }
+    fireEvent.click(screen.getByTestId("onboarding-finish"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // requestOpenOnboarding() helper dispatches the same event.
+    act(() => {
+      requestOpenOnboarding();
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(ONBOARDING_STEPS[0].title)).toBeInTheDocument();
   });
 });

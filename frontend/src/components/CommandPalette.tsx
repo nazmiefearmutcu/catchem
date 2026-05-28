@@ -5,7 +5,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { NAV_SHORTCUTS, chordLabel } from "@/lib/nav-shortcuts";
 import { api } from "@/lib/api";
 import { buildSymbolRoute } from "@/lib/symbolNavigation";
-import { ONBOARDING_STORAGE_KEY } from "@/components/OnboardingModal";
+import { resetOnboarding } from "@/lib/onboarding";
 import { closeAllOverlays, useOverlaySurface } from "@/context/overlayCoordinator";
 
 /**
@@ -298,13 +298,12 @@ export function buildActions(deps: ActionDeps): Extract<Command, { kind: "action
       group: "Settings",
       aliases: ["welcome", "tour", "first run"],
       run: () => {
-        try {
-          localStorage.removeItem(ONBOARDING_STORAGE_KEY);
-        } catch {
-          /* ignore storage errors */
-        }
-        // Reload to remount Shell so OnboardingModal's `useState` re-
-        // reads the now-absent flag and renders fresh.
+        // Clear the flag AND reload so the tour also shows on the next
+        // cold launch — this is the "reset me to a first-run state"
+        // action. The Help page's "Replay welcome tour" button is the
+        // lighter, reload-free path (lib/onboarding.requestOpenOnboarding)
+        // for users who just want to re-watch it once.
+        resetOnboarding();
         window.location.reload();
       },
     },

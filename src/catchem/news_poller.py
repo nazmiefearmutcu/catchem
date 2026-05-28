@@ -900,17 +900,24 @@ class NewsPoller:
                 new_items.append(item)
             self.last_dupe_titles_skipped = dupe_titles_skipped
 
+            ingested_ok = 0
             for item in new_items:
                 try:
                     await asyncio.to_thread(self._ingest_one, item)
                 except Exception as exc:
                     logger.info("news_ingest_failed", feed=spec.name, url=item.url, error=str(exc))
-            # Manual probes feed into the same total_ingested counter
-            # the background tick maintains, so the Sources page totals
-            # stay honest. Increment is inside the lock so a concurrent
+                    # Ingest failed → undo the title-dedup record so a later
+                    # sighting isn't suppressed behind a story that never landed.
+                    self._rollback_title(item.title)
+                else:
+                    ingested_ok += 1
+            # Manual probes feed into the same total_ingested counter the
+            # background tick maintains, so the Sources page totals stay honest.
+            # Count only items that ACTUALLY ingested — a swallowed failure must
+            # not inflate the total. Increment is inside the lock so a concurrent
             # tick can't lose this update to a read-modify-write race.
-            if new_items:
-                self.total_ingested += len(new_items)
+            if ingested_ok:
+                self.total_ingested += ingested_ok
 
             return dict(self.feed_health.get(spec.name, {}))
 
@@ -1145,6 +1152,16 @@ class NewsPoller:
             _ingest_one_async(spec, item) for spec, item in new_items
         ))
         ingested = sum(1 for ok in gathered if ok)
+        # Roll back the title-dedup record for any item whose ingest FAILED, so
+        # a later sighting (another outlet this cycle, or the next tick) gets a
+        # fresh chance instead of being suppressed for the whole window behind a
+        # story that never actually landed. `new_items` and `gathered` are
+        # positionally aligned — asyncio.gather preserves the awaitable order —
+        # so zip pairs each item with its own outcome. Still on the event loop
+        # under `self._lock`, same as the original record, so no race.
+        for (_spec, item), ok in zip(new_items, gathered, strict=True):
+            if not ok:
+                self._rollback_title(item.title)
 
         # Compute publisher-lag stats but exclude obviously-old items.
         # Google News and a few wires return historical results matching
@@ -1246,6 +1263,30 @@ class NewsPoller:
         while len(self._seen_titles) > self._seen_titles_cap:
             self._seen_titles.popitem(last=False)
         return False
+
+    def _rollback_title(self, title: str) -> None:
+        """Undo the `_is_duplicate_title` first-sighting record after the
+        ingest that title was let through for FAILED.
+
+        `_is_duplicate_title` is a side-effecting gate: the first time it sees
+        a headline it records ``title→now`` and returns False so the item
+        ingests. But ingest happens LATER (the phase-2 thread pool in
+        `_poll_once`, the ingest loop in `probe_feed_async`) and can raise —
+        leaving the title marked "seen" even though no copy ever landed. Every
+        later outlet carrying the same headline would then be silently
+        suppressed for the whole dedup window, and the story would never reach
+        the feed until the window expired.
+
+        Rolling the title back out of `_seen_titles` on ingest failure means
+        the NEXT sighting (another outlet this cycle, or the next tick) is
+        treated as a fresh first-seen and gets a real chance to ingest.
+        Idempotent and safe if the key was already LRU-evicted past the cap or
+        the title normalized to "" — we pop-with-default. Runs on the event
+        loop under `self._lock`, same as the record, so no race.
+        """
+        key = _normalize_title(title)
+        if key:
+            self._seen_titles.pop(key, None)
 
     def _record_adaptive_yield(self, feed_name: str, new_count: int, this_cycle: int) -> None:
         """Fold one successful fetch's NEW-item count into the adaptive ladder.

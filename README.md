@@ -6,7 +6,9 @@
 [![Tauri](https://img.shields.io/badge/shell-Tauri%202-24c8db?logo=tauri&logoColor=white)](https://tauri.app/)
 [![Tests](https://img.shields.io/badge/pytest-220%2B-success?logo=pytest&logoColor=white)](#tests)
 
-Local-first sidecar workspace that fuses two existing systems:
+**Reads news articles + RSS, then tags each one by what it would move** (equity / crypto / FX / commodity / rates), which direction (positive / negative / mixed / uncertain), and how soon (intraday / short / medium / long). Lives entirely on your laptop. Useful if you want a structured stream of finance signals from the open web.
+
+Under the hood, catchem is a local-first sidecar workspace that fuses two existing systems:
 
 - **Awareness** — public-text ingestion engine (stable upstream, system of record).
 - **NewsImpact** — multimodal candidate that is **currently quarantined** and

@@ -66,12 +66,86 @@ _NS = {
 
 @dataclass(frozen=True)
 class FeedSpec:
-    """One configured feed source."""
+    """One configured feed source.
+
+    `parser` selects how the fetched body is turned into ParsedItems. The
+    default "rss" handles RSS/Atom XML (the original behavior). Source packs
+    under `catchem.news_sources` can register additional parsers (e.g.
+    "gdelt", "reddit") via `register_parser` so non-XML firehoses plug into
+    the exact same fetch → dedup → ingest pipeline without touching the loop.
+    """
 
     name: str
     url: str
     # Default domain to attribute when an item lacks one (rare but happens).
     fallback_domain: str = ""
+    # Body parser key — see `register_parser`. "rss" = RSS/Atom XML.
+    parser: str = "rss"
+
+
+# ── Pluggable parser registry ────────────────────────────────────────────
+# A parser turns a fetched response body (bytes) into a list[ParsedItem].
+# Source packs register non-RSS parsers (GDELT/Reddit JSON, etc.) here so a
+# single generic GET path can feed many heterogeneous firehoses. The "rss"
+# parser is registered at import time below, after parse_feed is defined.
+ParserFn = "Callable[[bytes, str], list[ParsedItem]]"
+_PARSERS: dict[str, "Callable[[bytes, str], list[ParsedItem]]"] = {}
+
+
+def register_parser(name: str, fn: "Callable[[bytes, str], list[ParsedItem]]") -> None:
+    """Register a body parser under `name` (idempotent — last write wins)."""
+    _PARSERS[name] = fn
+
+
+def get_parser(name: str) -> "Callable[[bytes, str], list[ParsedItem]]":
+    """Return the parser for `name`, falling back to the rss parser."""
+    return _PARSERS.get(name) or _PARSERS["rss"]
+
+
+# ── Pluggable feed-provider registry ─────────────────────────────────────
+# Source packs (catchem/news_sources/*.py) call `register_feed_provider` at
+# import time to contribute extra FeedSpecs (more wires, GDELT, Reddit, per-
+# sector Google News queries, …). `assemble_feeds()` merges DEFAULT_FEEDS +
+# every provider's output, so a pack only ever ADDS its own new module — it
+# never edits the shared DEFAULT_FEEDS tuple, which keeps parallel authorship
+# collision-free.
+from collections.abc import Callable as _Callable  # noqa: E402
+
+_FEED_PROVIDERS: list[_Callable[[], "Iterable[FeedSpec]"]] = []
+
+
+def register_feed_provider(fn: _Callable[[], "Iterable[FeedSpec]"]) -> _Callable[[], "Iterable[FeedSpec]"]:
+    """Register a zero-arg callable returning extra FeedSpecs. Returns the
+    callable so it can be used as a decorator."""
+    _FEED_PROVIDERS.append(fn)
+    return fn
+
+
+def assemble_feeds() -> tuple[FeedSpec, ...]:
+    """DEFAULT_FEEDS + every registered provider's feeds, de-duped by name.
+
+    Importing `catchem.news_sources` triggers auto-discovery of all source
+    packs (each self-registers). Name collisions keep the first occurrence so
+    DEFAULT_FEEDS always wins over a pack that reuses a name by accident.
+    """
+    with contextlib.suppress(Exception):
+        import catchem.news_sources  # noqa: F401  (import side-effect: registration)
+
+    seen: set[str] = set()
+    out: list[FeedSpec] = []
+    for spec in DEFAULT_FEEDS:
+        if spec.name not in seen:
+            seen.add(spec.name)
+            out.append(spec)
+    for provider in _FEED_PROVIDERS:
+        try:
+            for spec in provider():
+                if spec.name not in seen:
+                    seen.add(spec.name)
+                    out.append(spec)
+        except Exception as exc:  # one bad pack never breaks the rest
+            logger.warning("feed_provider_failed", provider=getattr(provider, "__name__", "?"), error=str(exc))
+    return tuple(out)
 
 
 # Curated default set — public, no-auth, stable over years. Each one is a
@@ -430,13 +504,32 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
     return items
 
 
+# Register the built-in RSS/Atom parser now that parse_feed exists. Source
+# packs register additional parsers ("gdelt", "reddit", …) at import time.
+register_parser(
+    "rss",
+    lambda content, fallback_domain: list(parse_feed(content, fallback_domain=fallback_domain)),
+)
+
+
 async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFetchResult:
-    """Fetch + parse one feed and return a structured health result."""
+    """Fetch + parse one feed and return a structured health result.
+
+    The body parser is selected by `spec.parser` (default "rss"), so JSON
+    firehoses (GDELT, Reddit) share this exact fetch/health/dedup path.
+    """
     started = time.perf_counter()
     try:
+        # JSON sources want a JSON Accept header; RSS wants XML. Pick based on
+        # the parser key so a non-RSS endpoint isn't sent an XML-only Accept.
+        accept = (
+            "application/json, */*;q=0.5"
+            if spec.parser != "rss"
+            else "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5"
+        )
         resp = await client.get(
             spec.url,
-            headers={"User-Agent": _USER_AGENT, "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5"},
+            headers={"User-Agent": _USER_AGENT, "Accept": accept},
             timeout=12.0,
             follow_redirects=True,
         )
@@ -451,7 +544,7 @@ async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFe
             )
         return FeedFetchResult(
             spec=spec,
-            items=tuple(parse_feed(resp.content, fallback_domain=spec.fallback_domain)),
+            items=tuple(get_parser(spec.parser)(resp.content, spec.fallback_domain)),
             status_code=resp.status_code,
             elapsed_ms=elapsed_ms,
         )

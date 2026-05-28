@@ -195,7 +195,7 @@ from .demo import DemoResult as _DemoResult
 from .demo import run_demo as _run_demo
 from .logging import get_logger
 from .market_data import LocalFixtureMarketDataProvider, parse_symbol_list
-from .news_poller import DEFAULT_FEEDS, FeedSpec, NewsPoller
+from .news_poller import DEFAULT_FEEDS, FeedSpec, NewsPoller, assemble_feeds
 from .newsimpact_guarded_adapter import NewsImpactGuardError, snapshot_guard_state
 from .rate_limit import (
     DB_IMPORT_BUCKET,
@@ -596,17 +596,24 @@ def _build_news_poller(supervisor: Supervisor, settings: Settings) -> NewsPoller
     """Construct the poller from settings, or None if disabled."""
     if not settings.news.poller_enabled:
         return None
-    feeds: tuple[FeedSpec, ...] = DEFAULT_FEEDS
+    # Base set = curated DEFAULT_FEEDS + every auto-discovered source pack
+    # (GDELT, Reddit, expanded Google News / global wires, …) registered under
+    # catchem.news_sources. Operator-configured feeds EXTEND this set rather
+    # than replace it, so adding a custom feed never silently drops the
+    # curated awareness surface.
+    feeds: tuple[FeedSpec, ...] = assemble_feeds()
     if settings.news.feeds:
-        feeds = tuple(
+        extra = tuple(
             FeedSpec(
                 name=str(f.get("name", "user")),
                 url=str(f["url"]),
                 fallback_domain=str(f.get("fallback_domain", "")),
+                parser=str(f.get("parser", "rss")),
             )
             for f in settings.news.feeds
             if f.get("url")
         )
+        feeds = feeds + extra
     return NewsPoller(
         supervisor=supervisor,
         settings=settings,
@@ -3817,6 +3824,73 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "interval_seconds": poller.interval_seconds,
             "last_run_at": poller.last_run_at.isoformat() if poller.last_run_at else None,
             "sources": sources,
+        }
+
+    @app.get("/api/news/awareness")
+    def api_news_awareness() -> dict[str, Any]:
+        """The live "awareness window" — how fresh + how broad is awareness now.
+
+        Answers the analyst's single question: *given the poll cadence and
+        the publisher-side RSS lag, roughly how far back does "now" reach?*
+        ``window_estimate_seconds`` ≈ ``poll_interval + median_publisher_lag``:
+        the effective span between an event happening and it surfacing here.
+
+        ``sources_by_parser`` tallies the configured feeds by their ``.parser``
+        attribute (``rss``, plus any source-pack parsers like ``gdelt`` /
+        ``reddit``) so the breadth side of the answer is concrete rather than
+        a single "N feeds" number.
+
+        Read-only diagnostic: when the poller is disabled (or not yet built
+        during startup grace) this still returns 200 with ``sources_total: 0``
+        and null lags / window — the UI renders a degraded panel instead of
+        hitting a 503. Mirrors the ``/api/news/sources`` graceful-degrade
+        contract.
+        """
+        now_iso = datetime.now(UTC).isoformat()
+        poller = _NEWS_POLLER
+        if poller is None:
+            return {
+                "schema_version": 1,
+                "generated_at": now_iso,
+                "configured": False,
+                "sources_total": 0,
+                "sources_by_parser": {},
+                "poll_interval_seconds": None,
+                "median_publisher_lag_seconds": None,
+                "avg_publisher_lag_seconds": None,
+                "last_run_at": None,
+                "last_new_at": None,
+                "total_ingested": 0,
+                "window_estimate_seconds": None,
+            }
+        # Tally configured feeds by their parser key. FeedSpec.parser defaults
+        # to "rss"; source packs contribute "gdelt"/"reddit"/etc. A plain dict
+        # (insertion-order) keeps the JSON stable enough for the UI to render
+        # without re-sorting.
+        sources_by_parser: dict[str, int] = {}
+        for spec in poller.feeds:
+            key = getattr(spec, "parser", "rss") or "rss"
+            sources_by_parser[key] = sources_by_parser.get(key, 0) + 1
+        interval = poller.interval_seconds
+        median_lag = poller.last_median_publisher_lag_seconds
+        avg_lag = poller.last_avg_publisher_lag_seconds
+        # The effective window: poll cadence + publisher lag. Only computable
+        # when we have a fresh median (no new fresh items this tick → None,
+        # matching the poller's own "don't show stale lag" rule).
+        window_estimate = (interval + median_lag) if median_lag is not None else None
+        return {
+            "schema_version": 1,
+            "generated_at": now_iso,
+            "configured": True,
+            "sources_total": len(poller.feeds),
+            "sources_by_parser": sources_by_parser,
+            "poll_interval_seconds": interval,
+            "median_publisher_lag_seconds": median_lag,
+            "avg_publisher_lag_seconds": avg_lag,
+            "last_run_at": poller.last_run_at.isoformat() if poller.last_run_at else None,
+            "last_new_at": poller.last_new_at.isoformat() if poller.last_new_at else None,
+            "total_ingested": poller.total_ingested,
+            "window_estimate_seconds": window_estimate,
         }
 
     @app.get("/ui/archive-status")

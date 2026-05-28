@@ -917,6 +917,121 @@ def _signals_diagnostics(json_out: bool) -> None:
         typer.echo(f"    └─ {err}")
 
 
+def _awareness_live(json_out: bool) -> None:
+    """Implementation of ``catchem awareness --live``.
+
+    Queries the running sidecar's /api/news/awareness endpoint — the live
+    awareness window (poll cadence + publisher lag + breadth) lives in
+    *that* process's NewsPoller, so a fresh import here would always report
+    zero lag / zero ingested. Same rationale as ``signals --diagnostics``.
+
+    Resolves host/port via ``settings.api.host/port`` (the v66 audit shape,
+    NOT the legacy top-level fields). Short timeout + actionable message +
+    exit code 2 when the sidecar isn't running.
+    """
+    import httpx
+
+    settings = load_settings()
+    host = settings.api.host or "127.0.0.1"
+    port = settings.api.port or 8087
+    url = f"http://{host}:{port}/api/news/awareness"
+    try:
+        resp = httpx.get(url, timeout=2.0)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        msg = f"sidecar unreachable at {host}:{port} ({exc})"
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "error": msg}))
+        else:
+            typer.secho(msg, err=True, fg=typer.colors.RED)
+            typer.echo("  start it with: catchem serve")
+        raise typer.Exit(code=2) from exc
+
+    payload = resp.json()
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+
+    total = int(payload.get("sources_total") or 0)
+    by_parser: dict[str, int] = payload.get("sources_by_parser") or {}
+    interval = payload.get("poll_interval_seconds")
+    median_lag = payload.get("median_publisher_lag_seconds")
+    window = payload.get("window_estimate_seconds")
+    ingested = int(payload.get("total_ingested") or 0)
+
+    interval_str = f"{float(interval):.0f}s" if interval is not None else "?"
+    typer.echo(f"catchem awareness (live) · {total} sources · poll every {interval_str}")
+    typer.echo("\nsources by parser:")
+    for parser, count in sorted(by_parser.items(), key=lambda kv: -kv[1]):
+        typer.echo(f"  {parser:<12}  {count:>4}")
+    if not by_parser:
+        typer.echo("  (none — poller not configured)")
+    lag_str = f"{float(median_lag):.0f}s" if median_lag is not None else "n/a (no fresh items this tick)"
+    window_str = f"{float(window):.0f}s" if window is not None else "n/a"
+    typer.echo("\nfreshness:")
+    typer.echo(f"  median publisher lag   {lag_str}")
+    typer.echo(f"  effective window       {window_str}")
+    typer.echo(f"  total ingested         {ingested:,}")
+
+
+@app.command("awareness")
+def cli_awareness(
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help=(
+            "Skip the static catalog and query the running sidecar's "
+            "/api/news/awareness endpoint for the live awareness window "
+            "(median publisher lag + effective window + total ingested)."
+        ),
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
+) -> None:
+    """How broad + fresh is the awareness layer — sources x parsers x cadence.
+
+    Static mode (default) needs no sidecar: it imports the configured feed
+    set directly, tallies sources by parser, and prints the poll interval
+    from settings. Mirrors /api/news/awareness's breadth side offline.
+
+    With ``--live`` it instead asks the running sidecar what the awareness
+    window actually looks like right now (publisher lag + effective window +
+    items ingested this process). Same text/JSON shape contract as the HTTP
+    twin so scripts can pipe it through ``jq``. Unreachable sidecar → exit 2.
+    """
+    if live:
+        _awareness_live(json_out)
+        return
+
+    from .news_poller import assemble_feeds
+
+    settings = load_settings()
+    feeds = assemble_feeds()
+    sources_by_parser: dict[str, int] = {}
+    for spec in feeds:
+        key = getattr(spec, "parser", "rss") or "rss"
+        sources_by_parser[key] = sources_by_parser.get(key, 0) + 1
+    interval = settings.news.poll_interval_seconds
+
+    if json_out:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "configured": True,
+            "sources_total": len(feeds),
+            "sources_by_parser": sources_by_parser,
+            "poll_interval_seconds": interval,
+        }))
+        return
+
+    typer.echo(
+        f"catchem awareness · {len(feeds)} sources · poll every {interval:.0f}s\n"
+    )
+    typer.echo("sources by parser:")
+    for parser, count in sorted(sources_by_parser.items(), key=lambda kv: -kv[1]):
+        typer.echo(f"  {parser:<12}  {count:>4}")
+    if not sources_by_parser:
+        typer.echo("  (none configured)")
+
+
 @app.command("signals")
 def cli_signals(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),

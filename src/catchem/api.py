@@ -240,6 +240,114 @@ def _display_path(p: Path | str | None) -> str | None:
     return text
 
 
+# Regulator / official-source domains. A feed whose fallback_domain matches one
+# of these (or a subdomain of one) is classified as "regulator" regardless of
+# its name prefix, so e.g. a plain RSS feed off federalreserve.gov is not
+# mis-bucketed as "wire". Kept as a frozenset for O(1) suffix checks.
+_REGULATOR_DOMAINS: frozenset[str] = frozenset(
+    {
+        "federalreserve.gov",
+        "sec.gov",
+        "ecb.europa.eu",
+        "bankofengland.co.uk",
+        "imf.org",
+        "worldbank.org",
+        "bis.org",
+        "treasury.gov",
+        "cftc.gov",
+        "finra.org",
+        "esma.europa.eu",
+        "bankofcanada.ca",
+        "rba.gov.au",
+        "boj.or.jp",
+    }
+)
+
+# Crypto-native publishers. Same idea as the regulator set: a feed whose
+# fallback_domain matches (or is a subdomain of) one of these is "crypto" even
+# when it carries no recognizable name prefix.
+_CRYPTO_DOMAINS: frozenset[str] = frozenset(
+    {
+        "coindesk.com",
+        "cointelegraph.com",
+        "theblock.co",
+        "decrypt.co",
+        "bitcoinmagazine.com",
+        "cryptoslate.com",
+        "blockworks.co",
+    }
+)
+
+
+def _domain_matches(domain: str, known: frozenset[str]) -> bool:
+    """True when `domain` equals or is a subdomain of any entry in `known`.
+
+    `www.sec.gov` and `sec.gov` both match a `sec.gov` entry; `notsec.gov`
+    does not (suffix is compared on a dot boundary). Empty domain → False.
+    """
+    d = (domain or "").strip().lower()
+    if not d:
+        return False
+    return any(d == k or d.endswith("." + k) for k in known)
+
+
+def _classify_feed_category(name: str, parser: str, domain: str) -> str:
+    """Bucket one configured feed into a coverage category for the operator.
+
+    Pure + deterministic so it can be unit-tested in isolation. Resolution
+    order is *most specific first*:
+
+      1. Name prefixes that disambiguate Google News sub-streams
+         (``gnews-watch-`` → watchlist, ``gnews-tkr-`` → tickers) before the
+         generic ``gnews-`` → google_news catch.
+      2. Parser-driven social/firehose buckets (twitter, reddit, gdelt) and the
+         matching ``x-`` / ``reddit-`` name prefixes.
+      3. Remaining domain-flavored name prefixes (regional/macro/specialist/
+         video/podcast).
+      4. Domain-set membership (regulator, then crypto).
+      5. Fallback: ``wire`` (generic newswire).
+    """
+    n = (name or "").lower()
+    p = (parser or "").lower()
+
+    # 1 — Google News sub-streams (specific prefixes win over generic).
+    if n.startswith("gnews-watch-"):
+        return "watchlist"
+    if n.startswith("gnews-tkr-"):
+        return "tickers"
+    if n.startswith("gnews-"):
+        return "google_news"
+
+    # 2 — Social + global firehose (parser OR name prefix).
+    if p == "twitter" or n.startswith("x-"):
+        return "social"
+    if p == "reddit" or n.startswith("reddit-"):
+        return "social"
+    if p == "gdelt":
+        return "global_firehose"
+
+    # 3 — Domain-flavored prefixes.
+    if n.startswith("rem-"):
+        return "regional"
+    if n.startswith("macro-"):
+        return "macro"
+    if n.startswith("spec-"):
+        return "specialist"
+    if n.startswith("yt-"):
+        return "video"
+    if n.startswith("pod-"):
+        return "podcast"
+
+    # 4 — Official / crypto publishers by domain (or explicit name membership).
+    if n in _REGULATOR_DOMAINS or _domain_matches(domain, _REGULATOR_DOMAINS):
+        return "regulator"
+    if _domain_matches(domain, _CRYPTO_DOMAINS):
+        return "crypto"
+
+    # 5 — Generic newswire.
+    return "wire"
+
+
 def _to_summary_list(items: list[dict[str, Any]], production_safe: bool) -> list[FinancialImpactSummary]:
     """Redact diagnostics first, then project to the compact summary contract."""
     redacted = redact_records_for_mode(items, production_safe=production_safe)
@@ -3855,12 +3963,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "configured": False,
                 "sources_total": 0,
                 "sources_by_parser": {},
+                "sources_by_category": {},
                 "poll_interval_seconds": None,
                 "median_publisher_lag_seconds": None,
                 "avg_publisher_lag_seconds": None,
                 "last_run_at": None,
                 "last_new_at": None,
                 "total_ingested": 0,
+                "dupe_titles_skipped": None,
                 "window_estimate_seconds": None,
             }
         # Tally configured feeds by their parser key. FeedSpec.parser defaults
@@ -3868,9 +3978,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # (insertion-order) keeps the JSON stable enough for the UI to render
         # without re-sorting.
         sources_by_parser: dict[str, int] = {}
+        # Coverage by *domain/topic* (not just parser machinery): each feed is
+        # classified from its name prefix / fallback_domain so the operator
+        # sees breadth as "watchlist / tickers / regulator / crypto / …"
+        # rather than only "rss / gdelt / reddit". Additive to the parser tally.
+        sources_by_category: dict[str, int] = {}
         for spec in poller.feeds:
             key = getattr(spec, "parser", "rss") or "rss"
             sources_by_parser[key] = sources_by_parser.get(key, 0) + 1
+            category = _classify_feed_category(
+                getattr(spec, "name", "") or "",
+                key,
+                getattr(spec, "fallback_domain", "") or "",
+            )
+            sources_by_category[category] = sources_by_category.get(category, 0) + 1
         interval = poller.interval_seconds
         median_lag = poller.last_median_publisher_lag_seconds
         avg_lag = poller.last_avg_publisher_lag_seconds
@@ -3884,12 +4005,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "configured": True,
             "sources_total": len(poller.feeds),
             "sources_by_parser": sources_by_parser,
+            "sources_by_category": sources_by_category,
             "poll_interval_seconds": interval,
             "median_publisher_lag_seconds": median_lag,
             "avg_publisher_lag_seconds": avg_lag,
             "last_run_at": poller.last_run_at.isoformat() if poller.last_run_at else None,
             "last_new_at": poller.last_new_at.isoformat() if poller.last_new_at else None,
             "total_ingested": poller.total_ingested,
+            # Null-safe passthrough: present only as a number once the poller
+            # starts tracking title-level dedupe skips; null otherwise.
+            "dupe_titles_skipped": getattr(poller, "last_dupe_titles_skipped", None),
             "window_estimate_seconds": window_estimate,
         }
 

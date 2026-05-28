@@ -150,6 +150,15 @@ class NewsConfig(BaseModel):
     # high-yield feeds keep polling every cycle. Separate from the error
     # circuit breaker (failures). False = poll every feed every cycle.
     adaptive_polling_enabled: bool = True
+    # Real-time WebSocket PUSH channel (ws_push.WebSocketNewsChannel) —
+    # complements the HTTP poller for genuine push firehoses (squawk/news WS)
+    # so the freshest sources arrive with near-zero latency. OFF by default;
+    # the operator opts in AND supplies sources. Empty sources = the channel
+    # constructs but connects to nothing. No hardcoded endpoints ship.
+    websocket_enabled: bool = False
+    # List of {name, url, fallback_domain} dicts. Each becomes a long-lived
+    # WebSocket reader task. Default empty so nothing connects out of the box.
+    websocket_sources: list[dict[str, str]] = Field(default_factory=list)
 
 
 class ArchiveConfig(BaseModel):

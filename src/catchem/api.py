@@ -211,6 +211,7 @@ from .settings import Settings, load_settings
 from .static_assets import get_static_path, open_static_bytes
 from .supervisor import Supervisor
 from .text_extract import MAX_UPLOAD_BYTES, extract_text
+from .ws_push import WebSocketNewsChannel
 
 
 def _is_production_safe() -> bool:
@@ -673,6 +674,7 @@ def _rate_limit_probe(request: Request) -> None:
 _SUPERVISOR: Supervisor | None = None
 _SETTINGS: Settings | None = None
 _NEWS_POLLER: NewsPoller | None = None
+_WS_CHANNEL: WebSocketNewsChannel | None = None
 _ARCHIVER: DriveArchiver | None = None
 _QUANT_ENGINE = None  # lazy: needs the supervisor's storage; built on first request
 
@@ -731,6 +733,21 @@ def _build_news_poller(supervisor: Supervisor, settings: Settings) -> NewsPoller
     )
 
 
+def _build_ws_channel(supervisor: Supervisor, settings: Settings) -> WebSocketNewsChannel | None:
+    """Construct the real-time WebSocket PUSH channel, or None if disabled.
+
+    Mirrors ``_build_news_poller``: returns None unless the operator both
+    flips ``news.websocket_enabled`` AND supplies ``news.websocket_sources``.
+    The channel reads its sources straight from settings (list of
+    ``{name, url, fallback_domain}`` dicts), so there are no hardcoded
+    endpoints. When the WS client lib isn't importable the channel still
+    constructs — it just degrades to idle at ``start()`` time.
+    """
+    if not settings.news.websocket_enabled:
+        return None
+    return WebSocketNewsChannel(supervisor=supervisor, settings=settings)
+
+
 def _build_archiver(supervisor: Supervisor, settings: Settings) -> DriveArchiver | None:
     """Construct the Drive archiver from settings, or None if disabled."""
     if not settings.archive.enabled:
@@ -749,12 +766,15 @@ def _build_archiver(supervisor: Supervisor, settings: Settings) -> DriveArchiver
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
-    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER, _ARCHIVER
+    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER, _WS_CHANNEL, _ARCHIVER
     _SETTINGS = load_settings()
     _SUPERVISOR = Supervisor(_SETTINGS)
     _NEWS_POLLER = _build_news_poller(_SUPERVISOR, _SETTINGS)
     if _NEWS_POLLER is not None:
         _NEWS_POLLER.start()
+    _WS_CHANNEL = _build_ws_channel(_SUPERVISOR, _SETTINGS)
+    if _WS_CHANNEL is not None:
+        _WS_CHANNEL.start()
     _ARCHIVER = _build_archiver(_SUPERVISOR, _SETTINGS)
     if _ARCHIVER is not None:
         _ARCHIVER.start()
@@ -764,6 +784,9 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         if _ARCHIVER is not None:
             await _ARCHIVER.stop()
         _ARCHIVER = None
+        if _WS_CHANNEL is not None:
+            await _WS_CHANNEL.stop()
+        _WS_CHANNEL = None
         if _NEWS_POLLER is not None:
             await _NEWS_POLLER.stop()
         _NEWS_POLLER = None
@@ -4069,6 +4092,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "dupe_titles_skipped": getattr(poller, "last_dupe_titles_skipped", None),
             "window_estimate_seconds": window_estimate,
         }
+
+    @app.get("/api/news/ws-status", summary="Real-time WebSocket PUSH channel diagnostics")
+    def api_news_ws_status() -> dict[str, Any]:
+        """Stats for the real-time WebSocket PUSH channel (squawk/news firehoses).
+
+        Returns ``{"enabled": false}`` when the channel is disabled or not yet
+        built during startup (mirrors the ``/api/news/sources`` degrade-to-200
+        contract — the UI renders a dormant panel instead of hitting a 503).
+        When enabled, returns the channel's full stats envelope: the resolved
+        WS client library (or null when none was importable → idle), per-source
+        connection state + message/ingest counters, and the aggregate
+        connected/messages/ingested totals.
+        """
+        channel = _WS_CHANNEL
+        if channel is None:
+            return {"enabled": False}
+        return channel.stats()
 
     @app.get("/ui/archive-status")
     def archive_status() -> dict[str, Any]:

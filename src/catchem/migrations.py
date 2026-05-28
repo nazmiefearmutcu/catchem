@@ -101,6 +101,29 @@ MIGRATIONS: tuple[Migration, ...] = (
             CREATE INDEX IF NOT EXISTS idx_record_tags_capture ON record_tags(capture_id);
         """,
     ),
+    Migration(
+        version=3,
+        name="add_portfolio_table",
+        sql="""
+            -- READ-ONLY portfolio tracking. Holdings are analyst-entered
+            -- positions joined to the awareness/quant layers for context.
+            -- No order execution, no money movement — purely a watchlist
+            -- with cost-basis bookkeeping. ``symbol`` is the join key to the
+            -- records' candidate_symbols / quote provider. All numeric
+            -- columns are nullable so a holding can be a bare watch entry.
+            CREATE TABLE IF NOT EXISTS portfolio (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                label TEXT,
+                shares REAL,
+                weight REAL,
+                cost_basis REAL,
+                notes TEXT,
+                added_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_portfolio_symbol ON portfolio(symbol);
+        """,
+    ),
 )
 
 

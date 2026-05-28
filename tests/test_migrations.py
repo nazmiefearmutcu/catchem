@@ -123,6 +123,34 @@ def test_applied_migrations_create_record_tags_table() -> None:
     assert {"idx_record_tags_tag", "idx_record_tags_capture"} <= idx
 
 
+def test_applied_migrations_create_portfolio_table() -> None:
+    """Migration #3 lays down the READ-ONLY portfolio holdings table."""
+    conn = _fresh_conn()
+    apply_migrations(conn)
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='portfolio'"
+    ).fetchone()
+    assert row is not None, "portfolio table should be created by migration 3"
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(portfolio)").fetchall()}
+    assert {
+        "id",
+        "symbol",
+        "label",
+        "shares",
+        "weight",
+        "cost_basis",
+        "notes",
+        "added_at",
+    } <= cols
+    idx = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='portfolio'"
+        ).fetchall()
+    }
+    assert "idx_portfolio_symbol" in idx
+
+
 def test_apply_migrations_idempotent_against_partial_state() -> None:
     """Re-running a migration whose objects already exist is a clean no-op.
 

@@ -57,3 +57,7 @@ desktop/catchem/sidecar-out/
 desktop/catchem/_sidecar_build/
 desktop/catchem/_sidecar_entry.py
 desktop/catchem/src-tauri/Cargo.lock
+
+# PyInstaller sidecar staging (created+trap-removed by build_catchem_release.sh;
+# an interrupted build leaves it behind — never source)
+desktop/catchem/src-tauri/resources/

@@ -686,6 +686,77 @@ class Storage:
             ).fetchall()
             return [_row_to_payload(dict(r)) for r in rows]
 
+    # ── portfolio (READ-ONLY holdings tracker) ───────────────────────────────
+    # Analyst-entered positions joined to the awareness/quant layers for
+    # context. No order execution, no money movement — see
+    # :mod:`catchem.portfolio` for the enrichment join. Backed by the
+    # ``portfolio`` table (migration v3); numeric columns are nullable so a
+    # holding may be a bare watch entry with just a symbol.
+    def add_holding(
+        self,
+        symbol: str,
+        *,
+        label: str | None = None,
+        shares: float | None = None,
+        weight: float | None = None,
+        cost_basis: float | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert a holding and return its hydrated row.
+
+        ``symbol`` is stripped and required (raises :class:`ValueError` when
+        blank). Numeric fields are coerced to ``float`` or kept ``None``.
+        ``added_at`` is stamped with the current UTC instant in ISO-8601.
+        """
+        sym = str(symbol or "").strip()
+        if not sym:
+            raise ValueError("symbol must not be empty")
+        added_at = datetime.now(UTC).isoformat()
+        with self._lock, self._connection() as conn:
+            cur = conn.execute(
+                """INSERT INTO portfolio
+                   (symbol, label, shares, weight, cost_basis, notes, added_at)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    sym,
+                    label,
+                    _coerce_float(shares),
+                    _coerce_float(weight),
+                    _coerce_float(cost_basis),
+                    notes,
+                    added_at,
+                ),
+            )
+            holding_id = int(cur.lastrowid or 0)
+            row = conn.execute(
+                "SELECT * FROM portfolio WHERE id = ?", (holding_id,)
+            ).fetchone()
+            return _row_to_holding(dict(row))
+
+    def list_holdings(self) -> list[dict[str, Any]]:
+        """All holdings, newest-added first (ties broken by id desc)."""
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM portfolio ORDER BY added_at DESC, id DESC"
+            ).fetchall()
+            return [_row_to_holding(dict(r)) for r in rows]
+
+    def get_holding(self, holding_id: int) -> dict[str, Any] | None:
+        """Single holding by id, or ``None`` if absent."""
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM portfolio WHERE id = ?", (int(holding_id),)
+            ).fetchone()
+            return _row_to_holding(dict(row)) if row else None
+
+    def delete_holding(self, holding_id: int) -> bool:
+        """Delete a holding. Returns ``True`` when a row was removed."""
+        with self._lock, self._connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM portfolio WHERE id = ?", (int(holding_id),)
+            )
+            return int(cur.rowcount or 0) > 0
+
     # ── housekeeping ---------------------------------------------------------
     def close(self) -> None:
         self.flush()
@@ -754,6 +825,34 @@ def _row_to_payload(r: dict[str, Any]) -> dict[str, Any]:
         "model_versions": json.loads(r["model_versions_json"]),
         "published_ts": r["published_ts"],
         "created_at": r["created_at"],
+    }
+
+
+def _coerce_float(value: Any) -> float | None:
+    """Best-effort float coercion; ``None`` / unparseable → ``None``.
+
+    Keeps portfolio numeric columns tolerant of missing form fields without
+    storing ``"none"`` strings or raising on blank input.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _row_to_holding(r: dict[str, Any]) -> dict[str, Any]:
+    """Hydrate a SQLite ``portfolio`` row into the API-shaped dict."""
+    return {
+        "id": int(r["id"]),
+        "symbol": r["symbol"],
+        "label": r.get("label"),
+        "shares": r.get("shares"),
+        "weight": r.get("weight"),
+        "cost_basis": r.get("cost_basis"),
+        "notes": r.get("notes"),
+        "added_at": r["added_at"],
     }
 
 

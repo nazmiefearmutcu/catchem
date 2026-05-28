@@ -125,6 +125,24 @@ export const PAGE_HELP: Record<string, HelpContent> = {
     ],
     shortcuts: [...navShortcutFor("/symbols", "You're here")],
   },
+  "/portfolio": {
+    quickTips: [
+      "Holdings are tracked instruments, not trading positions — Catchem never places orders",
+      "A red 'blind spot' badge means the symbol is tracked but no recent news references it",
+      "shares / cost basis are optional bookkeeping fields — a bare symbol works fine for watch-only tracking",
+    ],
+    questions: [
+      {
+        q: "Why does a holding show 'no quote'?",
+        a: "No market-data provider has a price for that symbol. The coverage + news enrichment still works without a quote feed.",
+      },
+      {
+        q: "What is a blind spot?",
+        a: "A holding you're tracking that has had zero coverage inside the awareness window — you'd miss breaking news on it. Configure more feeds in Sources to close gaps.",
+      },
+    ],
+    shortcuts: [...navShortcutFor("/portfolio", "You're here")],
+  },
   "/tags": {
     quickTips: [
       "User-defined tags are analyst memos — independent of pipeline labels like asset class or reason code",

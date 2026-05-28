@@ -32,6 +32,7 @@ export const NAV_SHORTCUTS: NavShortcut[] = [
   { key: "r", path: "/replay",          label: "Replay/Upload" },
   { key: "a", path: "/map",             label: "Analysis Map", alias: "m" },
   { key: "s", path: "/symbols",         label: "Symbols" },
+  { key: "p", path: "/portfolio",       label: "Portfolio" },
   { key: "t", path: "/tags",            label: "Tags" },
   { key: "b", path: "/benchmark",       label: "Benchmark" },
   { key: "k", path: "/backtest",        label: "Backtest" },

@@ -203,6 +203,7 @@ from .rate_limit import (
     SEARCH_BUCKET,
     check_rate,
 )
+from .awareness_gaps import find_coverage_gaps
 from .redaction import redact_record_for_mode, redact_records_for_mode, safe_guard_view
 from .runtime_metrics import current_metrics as _current_process_metrics
 from .schemas import AwarenessCaptureView
@@ -3837,6 +3838,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
                 for r in top
             ],
+        }
+
+    # Mega-cap fallback when the operator hasn't configured a priority
+    # watchlist yet — gives the blind-spot detector something meaningful to
+    # answer against out of the box rather than an empty result.
+    _DEFAULT_WATCH_TERMS: tuple[str, ...] = (
+        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA",
+    )
+
+    @app.get("/api/news/coverage-gaps")
+    def api_news_coverage_gaps(
+        window_seconds: float = Query(86400.0, gt=0.0, le=2_592_000.0),
+        limit: int = Query(500, ge=1, le=2000),
+    ) -> dict[str, Any]:
+        """Awareness BLIND-SPOT detector — which watched terms have NO coverage?
+
+        Inverts the firehose: with hundreds of sources arriving, the valuable
+        question is "what am I *not* seeing?". Reads the most recent records
+        from storage, takes the watchlist from
+        ``settings.news.priority_tickers`` (falling back to a small mega-cap
+        set when unconfigured), and classifies every watched term as either
+        *covered* (with freshness + mention count) or a *gap* — no in-window
+        mention at all.
+
+        Degraded (supervisor not yet initialized) → 200 with empty
+        ``covered`` / ``gaps`` so the UI renders a clean "no data" state
+        instead of an opaque 503.
+        """
+        now = datetime.now(UTC)
+        settings = _SETTINGS or load_settings()
+        watch_terms = list(settings.news.priority_tickers) or list(_DEFAULT_WATCH_TERMS)
+
+        records: list[dict[str, Any]] = []
+        try:
+            sup = _get_supervisor()
+            records = sup.storage.recent_records(limit, relevant_only=False)
+        except HTTPException:
+            # Supervisor not ready: still answer 200 with an empty scan over
+            # the configured watchlist (every term lands in `gaps`).
+            records = []
+
+        result = find_coverage_gaps(
+            records,
+            watch_terms,
+            window_seconds=window_seconds,
+            now=now,
+        )
+        return {
+            "schema_version": 1,
+            "generated_at": now.isoformat(),
+            **result,
         }
 
     @app.get("/api/news/sources")

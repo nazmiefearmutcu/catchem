@@ -466,3 +466,59 @@ def test_endpoint_degraded_when_compute_raises(
     assert data["degraded"] is True
     assert data["by_theme"] == {}
     assert data["overall_tone"] is None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# summarize_tone — date-less points must not masquerade as "latest" (v79 fix)
+#
+# `_order_points` used to append date-less points to the END of the value
+# sequence, so `latest_tone = values[-1]` could return a date-less straggler and
+# the trend's recent window could be anchored on one. Order-sensitive stats now
+# run over DATED points sorted chronologically; order-free aggregates still see
+# every valid point.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_summarize_tone_latest_is_newest_dated_not_input_order() -> None:
+    # Points arrive OUT OF ORDER and one is date-less. latest_tone must be the
+    # most-recent DATED point — never the date-less straggler that happens to be
+    # last in the input list.
+    timeline = [
+        {"date": "20260101T000000Z", "value": -3.0},  # oldest
+        {"date": "20260103T000000Z", "value": 5.0},   # newest DATED
+        {"date": "20260102T000000Z", "value": 1.0},   # middle
+        {"value": 99.0},                               # date-less, last in input
+    ]
+    s = gt.summarize_tone(timeline)
+    assert s["latest_tone"] == 5.0, "latest = newest dated point, not the date-less last item"
+    # All valid points still count toward the order-free aggregates.
+    assert s["n_points"] == 4
+    assert s["max_tone"] == 99.0
+    assert s["min_tone"] == -3.0
+
+
+def test_summarize_tone_dateless_point_excluded_from_trend_and_latest() -> None:
+    # A date-less extreme must not anchor the trend window or the latest. A clean
+    # improving dated series plus an injected date-less spike yields IDENTICAL
+    # latest/trend/slope (the spike is excluded from the ordered sequence) while
+    # still moving the order-free min.
+    dated_improving = [
+        {"date": f"202601{d:02d}T000000Z", "value": float(d)} for d in range(1, 11)
+    ]
+    base = gt.summarize_tone(dated_improving)
+    with_spike = gt.summarize_tone([*dated_improving, {"value": -500.0}])
+
+    assert base["tone_state"] == "improving"  # sanity: the dated series trends up
+    assert with_spike["latest_tone"] == base["latest_tone"]
+    assert with_spike["tone_trend"] == base["tone_trend"]
+    assert with_spike["tone_slope"] == base["tone_slope"]
+    # …but the spike does move the order-free range.
+    assert with_spike["min_tone"] == -500.0
+
+
+def test_summarize_tone_all_dateless_falls_back_to_input_order() -> None:
+    # When NO point carries a usable date we fall back to GDELT's as-sent order
+    # (oldest→newest), so a fully date-less series still yields a latest/trend.
+    s = gt.summarize_tone([{"value": 1.0}, {"value": 2.0}, {"value": 9.0}])
+    assert s["latest_tone"] == 9.0  # last in input order
+    assert s["n_points"] == 3

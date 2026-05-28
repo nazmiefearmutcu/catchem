@@ -580,15 +580,24 @@ class WebSocketNewsChannel:
         st = self._states[spec.name]
         while not self._stop.is_set():
             st.state = "connecting"
+            messages_before = st.messages_received
             try:
                 await self._connect_and_read(spec, st)
-                # _connect_and_read only returns on a graceful close (server
-                # closed the socket) — treat as a drop and reconnect.
+                # _connect_and_read returns only on a graceful server-side
+                # close. That is NOT a transport failure, so a session that
+                # delivered ≥1 frame resets the failure count and reconnects at
+                # the fastest cadence. Only a graceful close that produced ZERO
+                # frames is treated as a soft failure — that's the signature of
+                # a server accepting then immediately closing, and counting it
+                # lets backoff throttle the otherwise-hot reconnect loop.
                 if self._stop.is_set():
                     break
                 st.connected = False
-                st.consecutive_failures += 1
                 st.reconnects += 1
+                if st.messages_received > messages_before:
+                    st.consecutive_failures = 0
+                else:
+                    st.consecutive_failures += 1
                 st.state = "reconnecting"
             except asyncio.CancelledError:
                 raise
@@ -703,7 +712,18 @@ class WebSocketNewsChannel:
         st.messages_received += 1
         st.last_message_at = datetime.now(UTC)
         parser = _FRAME_PARSERS.get(spec.parser, parse_ws_message)
-        item = parser(raw, spec.fallback_domain)
+        try:
+            item = parser(raw, spec.fallback_domain)
+        except Exception as exc:
+            # A custom parser registered via `_FRAME_PARSERS` must not be able
+            # to tear down the reader loop — an uncaught raise here would bubble
+            # out of `_connect_and_read` and `_run_source` would misread it as a
+            # connection FAILURE (bumping backoff + dropping a healthy socket).
+            # Built-in parsers are defensive; third-party ones may not be. Treat
+            # a throwing parser exactly like an unparseable frame: count + skip.
+            st.parse_failures += 1
+            logger.info("ws_push_parse_failed", source=spec.name, error=str(exc))
+            return
         if item is None:
             # For the Wikimedia firehose most events are intentionally filtered
             # out (wrong wiki / irrelevant title) — that's a skip, not a failure,

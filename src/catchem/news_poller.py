@@ -722,7 +722,6 @@ class NewsPoller:
         self._feed_next_due_cycle: dict[str, int] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
-        self._poke = asyncio.Event()      # signals "skip the sleep, poll now"
         self._lock = asyncio.Lock()       # serializes concurrent poll_now calls
         self._client: httpx.AsyncClient | None = None
         # Persistent diagnostics for /ui/news-status.
@@ -804,6 +803,12 @@ class NewsPoller:
         Used by `POST /ui/news-poll-now` so the UI's "Poll now" button can
         force activity on demand. Returns the number of items ingested.
         Safe to call concurrently — the internal lock serializes runs.
+
+        Runs its OWN immediate tick under `self._lock` and returns that tick's
+        ingested count. It deliberately does NOT wake the background sleep:
+        doing both (a manual tick AND a poke-triggered background tick) made a
+        single button press fetch every feed twice. The background schedule
+        simply carries on from where it was, so one press = one fetch pass.
         """
         if self._client is None:
             # Poller hasn't entered its main loop yet; create an ephemeral
@@ -811,7 +816,6 @@ class NewsPoller:
             # Explicit timeout: a slow feed must not stall the manual button.
             async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
                 return await self._run_one_tick(client)
-        self._poke.set()
         async with self._lock:
             return await self._run_one_tick(self._client)
 
@@ -964,30 +968,19 @@ class NewsPoller:
                     # a "next poll in Xs" countdown.
                     from datetime import timedelta
                     self.next_run_at = datetime.now(UTC) + timedelta(seconds=self._interval)
-                    # Sleep for the interval, but wake early on stop OR poke.
-                    waiters = [
-                        asyncio.create_task(self._stop.wait()),
-                        asyncio.create_task(self._poke.wait()),
-                    ]
+                    # Sleep for the interval, but wake early on stop(). A
+                    # manual `poll_now()` no longer interrupts this sleep — it
+                    # runs its own tick under `self._lock` and the background
+                    # schedule continues, so one "Poll now" press costs a
+                    # single fetch pass rather than two.
+                    stop_wait = asyncio.create_task(self._stop.wait())
                     _done, pending = await asyncio.wait(
-                        waiters,
+                        {stop_wait},
                         timeout=self._interval,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                     for t in pending:
                         t.cancel()
-                    # Reset the poke event IMMEDIATELY upon observing it,
-                    # before we re-loop into the next `_run_one_tick`.
-                    # Previously `clear()` happened in the same loop
-                    # iteration AFTER `asyncio.wait()` returned, which
-                    # left a tiny window where poll_now() could set the
-                    # flag again, _run_one_tick could acquire the lock,
-                    # and the background tick would then re-enter
-                    # `_run_one_tick` concurrently with the manual one
-                    # via the lock. With the clear happening up front
-                    # the next poll_now() must re-set the flag to wake
-                    # the next sleep, and the lock cleanly serialises.
-                    self._poke.clear()
             finally:
                 self._client = None
 

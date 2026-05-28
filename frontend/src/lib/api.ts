@@ -257,6 +257,7 @@ import type {
   ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
   SymbolSentimentTrend,
   PortfolioListResponse, PortfolioEnriched, PortfolioHolding, PortfolioAddBody,
+  GlobalTone,
 } from "@/types/api";
 
 export const api = {
@@ -719,6 +720,14 @@ export const api = {
     request<RecordDetailResponse>(`/api/quant/record/${encodeURIComponent(captureId)}/detail`),
   quantLiveRead: (limit = 1000) =>
     request<LiveReadResponse>(`/api/quant/live-read?limit=${limit}`),
+  /**
+   * Global news tone — GDELT-derived macro sentiment lens. Reads the whole
+   * global press firehose (markets / economy / crypto / fed themes) rather than
+   * catchem's own ingested corpus. Always 200: a GDELT outage degrades to a
+   * neutral payload with ``degraded: true``. Cached server-side ~120s, so poll
+   * at the same cadence from the UI.
+   */
+  quantGlobalTone: () => request<GlobalTone>("/api/quant/global-tone"),
   quantExplain: (kind: "cluster" | "regime_shift" | "anomaly" | "spillover", payload: Record<string, unknown>) =>
     request<{ kind: string; narrative: string; source: "deepseek" | "local"; usd_cost?: number; fallback_reason?: string }>(
       "/api/quant/explain",

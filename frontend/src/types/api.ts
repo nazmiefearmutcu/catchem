@@ -479,6 +479,42 @@ export interface PortfolioAddBody {
   notes?: string | null;
 }
 
+/**
+ * One theme's tone summary inside {@link GlobalTone}. Mirrors
+ * ``summarize_tone`` in src/catchem/quant/global_tone.py. Every tone field is
+ * nullable because an empty/all-malformed GDELT timeline yields a neutral
+ * all-zero summary (``n_points: 0``, ``tone_state: "stable"``).
+ */
+export interface GlobalToneTheme {
+  latest_tone: number | null;
+  mean_tone: number | null;
+  min_tone: number | null;
+  max_tone: number | null;
+  tone_trend: number;
+  tone_slope: number;
+  tone_state: "improving" | "deteriorating" | "stable";
+  n_points: number;
+  generated_at: string;
+}
+
+/**
+ * Global news tone — GDELT-derived macro sentiment (GET /api/quant/global-tone).
+ *
+ * ``overall_tone`` is the mean of per-theme latest tones (negative = bad press,
+ * positive = good). ``overall_state`` classifies the aggregate trend. The
+ * endpoint never 500s on a GDELT outage: when no theme produced a usable point
+ * it returns ``degraded: true`` with each theme carrying its neutral summary.
+ * Cached server-side ~120s, so the UI polls at the same cadence.
+ */
+export interface GlobalTone {
+  schema_version: number;
+  degraded: boolean;
+  generated_at: string;
+  overall_tone: number | null;
+  overall_state: "improving" | "deteriorating" | "stable";
+  by_theme: Record<string, GlobalToneTheme>;
+}
+
 /** Result of POST /replay — single pass over the awareness JSONL dir. */
 export interface ReplayRunResponse {
   processed: number;

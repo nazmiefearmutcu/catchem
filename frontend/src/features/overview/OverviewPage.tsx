@@ -13,6 +13,7 @@ import {
   useOverviewTileOrder,
   type TileId,
 } from "./useOverviewTileOrder";
+import type { GlobalTone, GlobalToneTheme } from "@/types/api";
 
 /**
  * Tiny inline markdown renderer (bold + para-break). Mirrored from /scan
@@ -74,6 +75,14 @@ export function OverviewPage() {
     queryFn: () => api.quantLiveRead(1000),
     refetchInterval: 60_000,
     staleTime: 30_000,
+  });
+  // GDELT-derived macro news tone. Backend caches ~120s, so match that
+  // cadence here — polling faster only re-serves the same cached payload.
+  const globalTone = useQuery({
+    queryKey: ["quant-global-tone"],
+    queryFn: api.quantGlobalTone,
+    refetchInterval: 120_000,
+    staleTime: 60_000,
   });
 
   const { order: tileOrder, reorder: reorderTile, reset: resetTileOrder } = useOverviewTileOrder();
@@ -306,6 +315,12 @@ export function OverviewPage() {
         </section>
       </div>
 
+      {/* Global news tone — GDELT macro sentiment lens */}
+      <GlobalTonePanel
+        data={globalTone.data}
+        isLoading={globalTone.isLoading}
+      />
+
       {/* Distribution + trends */}
       <section className="grid gap-3 lg:grid-cols-3">
         <DistributionCard title="asset classes" items={Object.entries(s.asset_class_distribution)} />
@@ -380,6 +395,88 @@ export function OverviewPage() {
         )}
       </section>
     </div>
+  );
+}
+
+// Map a GDELT tone_state to a label + tone class + Pill variant. "improving"
+// is good news (green), "deteriorating" is bad (red), "stable" is neutral.
+function toneStateMeta(state: GlobalToneTheme["tone_state"]): {
+  label: string;
+  cls: string;
+  pill: "good" | "bad" | "default";
+} {
+  if (state === "improving") return { label: "improving", cls: "text-good", pill: "good" };
+  if (state === "deteriorating") return { label: "deteriorating", cls: "text-bad", pill: "bad" };
+  return { label: "stable", cls: "text-[color:var(--fg-dim)]", pill: "default" };
+}
+
+// Compact macro-sentiment panel backed by GET /api/quant/global-tone. Shows
+// the overall tone state + value, then a small per-theme row. Degrades to a
+// muted "tone unavailable" line when GDELT is down (degraded:true).
+function GlobalTonePanel({
+  data,
+  isLoading,
+}: {
+  data: GlobalTone | undefined;
+  isLoading: boolean;
+}) {
+  const themeOrder = ["markets", "economy", "crypto", "fed"];
+
+  return (
+    <section className="card" data-testid="global-tone-panel" aria-label="Global news tone">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="label">global news tone</h2>
+        <span className="text-[10px] text-[color:var(--fg-dim)]">GDELT · macro</span>
+      </div>
+
+      {isLoading ? (
+        <Skeleton className="h-16" />
+      ) : !data || data.degraded ? (
+        <EmptyState
+          title="tone unavailable"
+          hint="GDELT macro tone isn’t available right now — it’ll refill on the next poll."
+        />
+      ) : (
+        (() => {
+          const meta = toneStateMeta(data.overall_state);
+          const themes = themeOrder
+            .map((name) => [name, data.by_theme[name]] as const)
+            .filter((entry): entry is readonly [string, GlobalToneTheme] => Boolean(entry[1]));
+          return (
+            <div className="grid gap-3">
+              {/* Overall */}
+              <div className="flex items-baseline gap-3">
+                <span className={`text-xl font-semibold ${meta.cls}`} data-testid="global-tone-overall-state">
+                  {meta.label}
+                </span>
+                <span className="text-sm tabular-nums text-[color:var(--fg-muted)]">
+                  tone {fmtScore(data.overall_tone)}
+                </span>
+              </div>
+              {/* Per-theme row */}
+              <div className="flex flex-wrap gap-2">
+                {themes.map(([name, theme]) => {
+                  const tm = toneStateMeta(theme.tone_state);
+                  return (
+                    <div
+                      key={name}
+                      className="flex items-center gap-1.5 rounded border border-[color:var(--border)] px-2 py-1"
+                      data-testid={`global-tone-theme-${name}`}
+                    >
+                      <span className="text-[11px] text-[color:var(--fg-muted)] capitalize">{name}</span>
+                      <Pill variant={tm.pill} title={`${name}: ${tm.label}`}>{tm.label}</Pill>
+                      <span className="text-[10px] tabular-nums text-[color:var(--fg-dim)]">
+                        {fmtScore(theme.latest_tone)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()
+      )}
+    </section>
   );
 }
 

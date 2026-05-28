@@ -85,6 +85,22 @@ _STATS_CACHE: dict[str, Any] = {"payload": None, "expires_at": 0.0}
 _STATS_CACHE_LOCK = threading.Lock()
 _STATS_TTL_SECONDS = 2.0
 
+# Tiny TTL cache for /api/quant/global-tone. Unlike /api/stats (a cheap local
+# DB read), this endpoint fans out to several outbound GDELT GETs, so the
+# stampede risk is real and the cost of a miss is network-bound (~hundreds of
+# ms). A 120s window keeps a dashboard left open from hammering GDELT while
+# still refreshing tone within ~2 minutes — well inside GDELT's own ~15-minute
+# re-index cadence, so the cache never hides genuinely fresh data.
+#
+# Same locking rationale as _STATS_CACHE: the handler is async (GDELT fetch
+# is awaited), but the cache read/write is guarded so two concurrent requests
+# can't both observe a miss and both fan out. The lock is only ever held for
+# the dict read/write itself — never across the awaited fetch — so it cannot
+# serialize the slow path or deadlock the event loop.
+_GLOBAL_TONE_CACHE: dict[str, Any] = {"payload": None, "expires_at": 0.0}
+_GLOBAL_TONE_CACHE_LOCK = threading.Lock()
+_GLOBAL_TONE_TTL_SECONDS = 120.0
+
 # Actual bind host/port observed at uvicorn startup, OR None if create_app
 # was called without `record_bind` being invoked yet. Settings defaults
 # (`s.api.host` / `s.api.port`) are NOT the truth — the CLI / Tauri shell
@@ -3815,6 +3831,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "generated_at": datetime.now(UTC).isoformat(),
             **engine.diagnostics(),
         }
+
+    @app.get("/api/quant/global-tone")
+    async def api_quant_global_tone() -> dict[str, Any]:
+        """Global news tone — GDELT ``TimelineTone`` macro-sentiment lens.
+
+        Fetches GDELT's free, no-auth average-article-tone timeline for a few
+        economic themes (markets / economy / crypto / fed), summarizes each
+        into a tone signal (latest / mean / trend / state), and rolls them
+        into an ``overall_tone`` + ``overall_state``. This is the macro
+        complement to the corpus-local sentiment signals: it reads the whole
+        global press firehose rather than catchem's own ingested records.
+
+        Cached in-process for ~120s (`_GLOBAL_TONE_TTL_SECONDS`) so a
+        dashboard left open never hammers GDELT — comfortably inside GDELT's
+        own ~15-minute re-index cadence, so the cache never hides fresh data.
+
+        Degrades gracefully: if every theme's fetch fails the payload is a
+        200 with each theme carrying its neutral empty summary (and
+        ``degraded: true``); the endpoint never 500s on an upstream outage.
+        """
+        now_ts = time.monotonic()
+        with _GLOBAL_TONE_CACHE_LOCK:
+            cached = _GLOBAL_TONE_CACHE.get("payload")
+            expires_at = float(_GLOBAL_TONE_CACHE.get("expires_at") or 0.0)
+            if cached is not None and now_ts < expires_at:
+                return cached
+
+        from .quant.global_tone import DEFAULT_THEMES, compute_global_tone
+
+        try:
+            result = await compute_global_tone(DEFAULT_THEMES)
+        except Exception as exc:  # pragma: no cover — compute is fail-soft
+            logger.warning("global_tone_compute_failed", extra={"error": str(exc)[:200]})
+            result = {
+                "generated_at": datetime.now(UTC).isoformat(),
+                "by_theme": {},
+                "overall_tone": None,
+                "overall_state": "stable",
+            }
+
+        # Degraded when no theme produced a single usable point — either the
+        # whole fan-out failed or GDELT returned empty series for everything.
+        by_theme = result.get("by_theme") or {}
+        degraded = not by_theme or all(
+            (s.get("n_points") or 0) == 0 for s in by_theme.values()
+        )
+
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "degraded": degraded,
+            **result,
+        }
+        with _GLOBAL_TONE_CACHE_LOCK:
+            _GLOBAL_TONE_CACHE["payload"] = payload
+            _GLOBAL_TONE_CACHE["expires_at"] = now_ts + _GLOBAL_TONE_TTL_SECONDS
+        return payload
 
     @app.get("/api/news/top-recent")
     def api_news_top_recent(

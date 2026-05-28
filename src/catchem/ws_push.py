@@ -43,7 +43,15 @@ from typing import Any
 
 from .demo import _deterministic_capture_id, build_capture, write_jsonl
 from .logging import get_logger
-from .news_poller import ParsedItem, _canonical_url, _resolve_domain, _SeenCache, _strip_html
+from .news_poller import (
+    _USER_AGENT,
+    ParsedItem,
+    _canonical_url,
+    _parse_ts,
+    _resolve_domain,
+    _SeenCache,
+    _strip_html,
+)
 from .settings import Settings
 from .supervisor import Supervisor
 
@@ -63,18 +71,95 @@ WS_BACKOFF_LADDER_SECONDS: tuple[float, ...] = (1.0, 2.0, 5.0, 15.0, 30.0, 60.0)
 _TITLE_KEYS: tuple[str, ...] = ("title", "headline", "summary", "text", "body", "message")
 _URL_KEYS: tuple[str, ...] = ("url", "link", "href", "uri", "permalink", "source_url")
 
+# ── Wikimedia EventStreams (SSE) relevance filter ──────────────────────────────
+# Wikimedia EventStreams (https://stream.wikimedia.org/v2/stream/recentchange) is
+# a genuine public, auth-free SSE firehose of every wiki edit in real time. The
+# raw volume is enormous (hundreds of edits/sec across all wikis), so we keep it
+# sane by ingesting ONLY enwiki edits whose page title brushes a curated
+# finance/company keyword set. A finance/company Wikipedia page being edited is a
+# weak-but-real awareness signal — it cannot be a hard dependency, hence OFF by
+# default — but it proves the SSE path end-to-end against a real public stream.
+#
+# Substring keywords matched case-insensitively against the page title. Kept
+# deliberately tight; broadening this trades signal for noise.
+_WIKI_FINANCE_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "stock",
+        "market",
+        "nasdaq",
+        "earnings",
+        "merger",
+        "bank",
+        "inflation",
+        "federal reserve",
+        "bitcoin",
+        "crypto",
+    }
+)
+# Mega-cap company names (lowercase). Matched as case-insensitive substrings so
+# e.g. "Apple Inc." or "Apple (company)" both hit "apple". Short/ambiguous tokens
+# are intentionally omitted to avoid false positives on unrelated pages.
+_WIKI_COMPANY_NAMES: frozenset[str] = frozenset(
+    {
+        "apple inc",
+        "microsoft",
+        "nvidia",
+        "amazon",
+        "alphabet",
+        "google",
+        "meta platforms",
+        "tesla",
+        "berkshire hathaway",
+        "jpmorgan",
+        "visa inc",
+        "mastercard",
+        "exxon",
+        "walmart",
+        "saudi aramco",
+        "taiwan semiconductor",
+    }
+)
+
 
 @dataclass(frozen=True)
 class WsSourceSpec:
-    """One configured WebSocket source.
+    """One configured push source — a WebSocket (default) or an SSE stream.
 
     `fallback_domain` attributes frames that carry no resolvable URL host
     (some squawk feeds ship a bare headline). Mirrors FeedSpec.fallback_domain.
+
+    `kind` selects the transport: ``"ws"`` (long-lived WebSocket, the default)
+    or ``"sse"`` (Server-Sent Events over an httpx streaming GET). Both share
+    the exact same dedup + ingest path and reconnect/backoff loop downstream.
+
+    `parser` names the per-source frame parser. ``"generic"`` (default) runs the
+    tolerant squawk/news-frame probe (`parse_ws_message`); ``"wikimedia"`` runs
+    the recentchange relevance filter (`parse_wikimedia_event`). This lets a
+    single SSE/WS reader serve heterogeneous firehoses without branching upstream.
     """
 
     name: str
     url: str
     fallback_domain: str = ""
+    kind: str = "ws"  # "ws" | "sse"
+    parser: str = "generic"  # "generic" | "wikimedia"
+
+
+# Documented default push sources. Available out of the box but NOT used unless
+# the operator flips `settings.news.websocket_enabled` AND leaves
+# `settings.news.websocket_sources` empty (then this list fills in). Today this
+# is exactly one entry: the Wikimedia EventStreams SSE firehose, the one genuine
+# public auth-free real-time stream we can prove live. Keep additions here
+# strictly free/no-auth/stable — no API keys, no fragile vendor endpoints.
+DEFAULT_WS_SOURCES: tuple[WsSourceSpec, ...] = (
+    WsSourceSpec(
+        name="wikimedia-recentchange",
+        url="https://stream.wikimedia.org/v2/stream/recentchange",
+        fallback_domain="en.wikipedia.org",
+        kind="sse",
+        parser="wikimedia",
+    ),
+)
 
 
 @dataclass
@@ -194,6 +279,110 @@ def parse_ws_message(raw: str | bytes, fallback_domain: str = "") -> ParsedItem 
     )
 
 
+def _wikimedia_title_is_relevant(title: str) -> bool:
+    """True iff a Wikipedia page title brushes the finance/company filter.
+
+    Case-insensitive substring test against the curated keyword set + the
+    mega-cap company-name set. This is the volume governor for the Wikimedia
+    firehose — without it every wiki edit on earth would ingest.
+    """
+    low = title.casefold()
+    if any(kw in low for kw in _WIKI_FINANCE_KEYWORDS):
+        return True
+    return any(name in low for name in _WIKI_COMPANY_NAMES)
+
+
+def parse_wikimedia_event(raw: str | bytes, fallback_domain: str = "") -> ParsedItem | None:
+    """Parse one Wikimedia EventStreams `recentchange` event into a ParsedItem.
+
+    The event shape is ``{"title", "server_name", "wiki", "type",
+    "meta": {"uri", "dt"}, ...}``. We ingest ONLY when:
+      * the event is valid JSON object with a non-empty string ``title``,
+      * ``wiki == "enwiki"`` (English Wikipedia — keeps language sane), and
+      * the title passes the finance/company relevance filter.
+    Anything else (malformed, non-enwiki, irrelevant title) returns None so the
+    caller counts it a parse-skip and never ingests. Title → ``"Wikipedia edit:
+    <title>"``, url → ``meta.uri``, domain → ``en.wikipedia.org``, published_ts
+    → ``meta.dt`` (best-effort ISO parse, falls back to now()).
+    """
+    try:
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("wiki") != "enwiki":
+        return None
+    title_raw = data.get("title")
+    if not isinstance(title_raw, str) or not title_raw.strip():
+        return None
+    title = title_raw.strip()
+    if not _wikimedia_title_is_relevant(title):
+        return None
+
+    meta = data.get("meta")
+    meta = meta if isinstance(meta, dict) else {}
+    uri = meta.get("uri")
+    if not isinstance(uri, str) or not uri.strip():
+        # No canonical edit URI → synthesize a stable page URL so the dedup
+        # key is content-derived and the row still links somewhere sensible.
+        slug = title.replace(" ", "_")
+        uri = f"https://en.wikipedia.org/wiki/{slug}"
+    uri = uri.strip()
+    dt_raw = meta.get("dt") if isinstance(meta.get("dt"), str) else None
+
+    domain = _resolve_domain(uri, fallback_domain) or fallback_domain or "en.wikipedia.org"
+    return ParsedItem(
+        title=f"Wikipedia edit: {title}",
+        text=f"Wikipedia edit: {title}",
+        url=uri,
+        domain=domain,
+        published_ts=_parse_ts(dt_raw),
+    )
+
+
+# Frame-parser registry: maps a source's `parser` key to the callable that
+# turns one raw frame/event into a ParsedItem (or None to skip). Both have the
+# identical (raw, fallback_domain) signature so `_handle_frame` stays generic.
+_FRAME_PARSERS: dict[str, Any] = {
+    "generic": parse_ws_message,
+    "wikimedia": parse_wikimedia_event,
+}
+
+
+def _iter_sse_data_lines(buffer: str) -> tuple[list[str], str]:
+    """Split an accumulated SSE text buffer into complete `data:` payloads.
+
+    SSE events are blocks of newline-delimited fields terminated by a blank
+    line (``\\n\\n``); a single logical event may carry multiple ``data:`` lines
+    which the spec concatenates with ``\\n``. We split the buffer on the event
+    boundary (``\\n\\n``), keeping the trailing partial block — everything after
+    the last boundary — as the verbatim ``remainder`` to prepend to the next
+    read, so an event is never parsed until fully received. For each *complete*
+    block we collect its ``data:`` field values (ignoring ``:`` comment/keep-
+    alive heartbeats and non-data fields like ``event:``/``id:``) and emit one
+    payload per block that had at least one data line. Returns ``(payloads,
+    remainder)``.
+    """
+    # Normalize CRLF so the boundary test is purely "\n\n".
+    normalized = buffer.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n\n" not in normalized:
+        return [], normalized  # no complete event yet — keep buffering
+    *blocks, remainder = normalized.split("\n\n")
+    payloads: list[str] = []
+    for block in blocks:
+        data_lines = [
+            line[len("data:") :].lstrip(" ")
+            for line in block.split("\n")
+            if line.startswith("data:")
+        ]
+        if data_lines:
+            payloads.append("\n".join(data_lines))
+    return payloads, remainder
+
+
 class WebSocketNewsChannel:
     """Manages a fleet of long-lived WebSocket source tasks.
 
@@ -216,6 +405,12 @@ class WebSocketNewsChannel:
             self._sources: tuple[WsSourceSpec, ...] = tuple(sources)
         else:
             self._sources = self._sources_from_settings(settings)
+            # Fallback: enabled but no sources configured → use the documented
+            # DEFAULT_WS_SOURCES (the Wikimedia SSE firehose) so the channel has
+            # something real to prove live without forcing the operator to hand-
+            # author a source dict. Only kicks in when the operator opted in.
+            if not self._sources and self._websocket_enabled(settings):
+                self._sources = DEFAULT_WS_SOURCES
         # Shared canonical-URL LRU — parity with the poller's `_seen`. A URL
         # that already arrived (poller or WS) within the LRU window is skipped
         # before the storage round-trip.
@@ -230,12 +425,19 @@ class WebSocketNewsChannel:
 
     # ── construction helpers ────────────────────────────────────────────────
     @staticmethod
+    def _websocket_enabled(settings: Settings) -> bool:
+        """Defensive read of `settings.news.websocket_enabled` (default False)."""
+        return bool(getattr(getattr(settings, "news", None), "websocket_enabled", False))
+
+    @staticmethod
     def _sources_from_settings(settings: Settings) -> tuple[WsSourceSpec, ...]:
         """Build specs from `settings.news.websocket_sources` (list of dicts).
 
-        Each dict is `{name, url, fallback_domain}`; entries without a `url`
-        are dropped. Defensive getattr keeps stub-settings callers (tests)
-        working even when the `news` namespace lacks the field.
+        Each dict is `{name, url, fallback_domain, kind?, parser?}`; entries
+        without a `url` are dropped. `kind` defaults to ``"ws"`` and `parser`
+        to ``"generic"`` so existing WS configs are unaffected. Defensive
+        getattr keeps stub-settings callers (tests) working even when the
+        `news` namespace lacks the field.
         """
         raw = getattr(getattr(settings, "news", None), "websocket_sources", None) or []
         out: list[WsSourceSpec] = []
@@ -246,11 +448,15 @@ class WebSocketNewsChannel:
                 continue
             if not url:
                 continue
+            kind = str(entry.get("kind") or "ws").strip().lower() or "ws"
+            parser = str(entry.get("parser") or "generic").strip().lower() or "generic"
             out.append(
                 WsSourceSpec(
                     name=str(entry.get("name") or url),
                     url=url,
                     fallback_domain=str(entry.get("fallback_domain") or ""),
+                    kind=kind,
+                    parser=parser,
                 )
             )
         return tuple(out)
@@ -302,9 +508,11 @@ class WebSocketNewsChannel:
     def start(self) -> None:
         """Spawn one reader task per source. No-op when nothing to do.
 
-        Degrades gracefully when no WS client lib is importable: every source
-        is marked ``disabled`` and no task is spawned. Logs once so the
-        operator can see why the firehose is dark.
+        Transport-aware degradation: SSE sources ride httpx (always present, a
+        hard dep) so they always spawn. WS sources need an importable WS client
+        lib (`websockets` / `httpx_ws`); when none is available every *WS-kind*
+        source is marked ``disabled`` and skipped, while SSE sources still run.
+        Logs once when WS sources are dark so the operator can see why.
         """
         if self._tasks:
             return  # already running
@@ -312,25 +520,31 @@ class WebSocketNewsChannel:
             logger.info("ws_push_no_sources")
             return
         self._lib = _ws_lib_available()
-        if self._lib is None:
-            for st in self._states.values():
+        ws_specs = [s for s in self._sources if s.kind != "sse"]
+        if self._lib is None and ws_specs:
+            for spec in ws_specs:
+                st = self._states[spec.name]
                 st.state = "disabled"
                 st.last_error = "no_ws_library"
             logger.warning(
                 "ws_push_degraded_no_library",
-                sources=len(self._sources),
+                ws_sources=len(ws_specs),
                 hint="pip install websockets (or httpx_ws) to enable the WS firehose",
             )
-            return
         self._stop.clear()
         loop = asyncio.get_running_loop()
         self.started_at = datetime.now(UTC)
+        spawned = 0
         for spec in self._sources:
+            # Skip WS-kind sources when no WS lib is available; SSE always runs.
+            if spec.kind != "sse" and self._lib is None:
+                continue
             task = loop.create_task(
                 self._run_source(spec), name=f"catchem-ws-{spec.name}"
             )
             self._tasks.append(task)
-        logger.info("ws_push_started", sources=len(self._sources), library=self._lib)
+            spawned += 1
+        logger.info("ws_push_started", spawned=spawned, sources=len(self._sources), library=self._lib)
 
     async def stop(self) -> None:
         """Cancel every source task and await their teardown."""
@@ -400,14 +614,16 @@ class WebSocketNewsChannel:
         st.state = "stopped"
 
     async def _connect_and_read(self, spec: WsSourceSpec, st: _SourceState) -> None:
-        """Open the socket (via whichever lib resolved) and pump frames.
+        """Open the transport (WS or SSE) and pump frames.
 
         Returns on a graceful server-side close; raises on any connection or
         read error (the caller's loop converts that into a backoff + retry).
         Each successful connect resets `consecutive_failures` and flips the
         source to ``connected`` so `stats()` reflects a live firehose.
         """
-        if self._lib == "websockets":
+        if spec.kind == "sse":
+            await self._connect_and_read_sse(spec, st)
+        elif self._lib == "websockets":
             import websockets
 
             async with websockets.connect(spec.url) as ws:
@@ -429,6 +645,46 @@ class WebSocketNewsChannel:
         else:  # pragma: no cover - start() guards this
             raise RuntimeError("no_ws_library")
 
+    async def _connect_and_read_sse(self, spec: WsSourceSpec, st: _SourceState) -> None:
+        """Open an SSE stream (httpx streaming GET) and pump `data:` events.
+
+        Server-Sent Events ride a plain long-lived HTTP response with
+        ``Accept: text/event-stream``; the server keeps the body open and emits
+        newline-delimited ``data: <json>`` frames (blank line = event boundary).
+        We stream raw bytes, accumulate a text buffer, and hand each complete
+        ``data:`` payload to `_handle_frame`. httpx is a hard dependency, so this
+        path needs no optional WS lib. Returns on graceful close; raises on any
+        network/transport error so the caller's backoff loop reconnects.
+        """
+        import httpx
+
+        # Long read timeout: an idle SSE stream is normal between events, so we
+        # must NOT treat read-silence as an error. connect/write/pool keep finite
+        # budgets so a dead endpoint still fails fast into backoff.
+        timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
+        # A descriptive User-Agent is REQUIRED by some public SSE firehoses —
+        # notably Wikimedia EventStreams, which 403s a missing/generic UA per its
+        # robot policy. Reuse the poller's UA so both channels are attributable.
+        headers = {
+            "Accept": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "User-Agent": _USER_AGENT,
+        }
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", spec.url, headers=headers) as resp:
+                resp.raise_for_status()
+                self._mark_connected(st)
+                buffer = ""
+                async for chunk in resp.aiter_text():
+                    if self._stop.is_set():
+                        return
+                    buffer += chunk
+                    payloads, buffer = _iter_sse_data_lines(buffer)
+                    for payload in payloads:
+                        if self._stop.is_set():
+                            return
+                        await self._handle_frame(spec, st, payload)
+
     def _mark_connected(self, st: _SourceState) -> None:
         st.connected = True
         st.consecutive_failures = 0
@@ -446,8 +702,13 @@ class WebSocketNewsChannel:
         """
         st.messages_received += 1
         st.last_message_at = datetime.now(UTC)
-        item = parse_ws_message(raw, spec.fallback_domain)
+        parser = _FRAME_PARSERS.get(spec.parser, parse_ws_message)
+        item = parser(raw, spec.fallback_domain)
         if item is None:
+            # For the Wikimedia firehose most events are intentionally filtered
+            # out (wrong wiki / irrelevant title) — that's a skip, not a failure,
+            # but we count it the same so stats stay simple. messages_received
+            # still reflects true volume seen on the wire.
             st.parse_failures += 1
             return
         canon = _canonical_url(item.url)
@@ -495,8 +756,10 @@ class WebSocketNewsChannel:
 
 
 __all__ = [
+    "DEFAULT_WS_SOURCES",
     "WS_BACKOFF_LADDER_SECONDS",
     "WebSocketNewsChannel",
     "WsSourceSpec",
+    "parse_wikimedia_event",
     "parse_ws_message",
 ]

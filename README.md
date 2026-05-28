@@ -34,7 +34,10 @@ read-only / quarantined and never trained from this workspace.
 
 - **Local-first pipeline** — Awareness JSONL → FastAPI sidecar → SQLite,
   with optional Drive archiver for CSV history.
-- **53 RSS sources** polled every 10 s (configurable; opt-out via env).
+- **~375 awareness sources** polled every 10 s across 6 pluggable parser
+  types (RSS + GDELT + GKG + HN Algolia + Reddit + X/Twitter), self-extending
+  via auto-discovered source packs (configurable; opt-out via env), plus an
+  optional real-time WebSocket/SSE push channel (off by default).
 - **23 quant signals** behind one engine: event clustering, topic regime
   detection, anomaly detection, sentiment momentum, lead/lag attribution,
   spillover (cross-asset), novelty, source reliability, co-occurrence,
@@ -107,7 +110,7 @@ bash desktop/catchem/scripts/build_catchem_dev.sh
    │  • Sentiment + embeddings + entity linker   │
    │  • QuantEngine (23 signals, fail-soft)      │
    │  • DeepSeek reviewer  (opt-in)              │
-   │  • News poller        (53 RSS feeds, 10 s)  │
+   │  • Awareness engine   (~375 feeds, 10 s)    │
    │  • Drive archiver     (CSV history)         │
    │  • SQLite + parquet results                 │
    └─────────────────────────────────────────────┘
@@ -138,6 +141,7 @@ The premium SPA mounts at `/` and registers 14 routes:
 | `/benchmark` | Golden-set precision/recall/F1, per-item, history |
 | `/reviews` | Reviews Compare — side-by-side classifier vs DeepSeek |
 | `/scan` | Quant Scan — events, sentiment, sources, network tabs |
+| `/portfolio` | Read-only holdings tracker joined to the awareness layer (no order execution) |
 | `/model-controls` | Model controls + gate status |
 | `/ops` | System health, guard status, model versions, DLQ |
 | `/logs` | Sidecar log stream (live, structured) |
@@ -199,7 +203,7 @@ Commonly-touched variables:
 | `CATCHEM_MODE` | `production_safe` | one of `production_safe`, `replay_existing`, `live_tail`, `research_diagnostic` |
 | `CATCHEM_USE_ML_STUBS` | `true` | skip heavy ML model loads for CPU-only smoke tests |
 | `CATCHEM_API__HOST` / `CATCHEM_API__PORT` | `127.0.0.1` / `8087` | sidecar bind address |
-| `CATCHEM_NEWS__POLLER_ENABLED` | `true` | toggle the 53-feed RSS poller |
+| `CATCHEM_NEWS__POLLER_ENABLED` | `true` | toggle the ~375-feed awareness poller |
 | `CATCHEM_NEWS__POLL_INTERVAL_SECONDS` | `10.0` | poller cadence |
 | `CATCHEM_ARCHIVE__ENABLED` | `true` | drain old SQLite rows into a Drive CSV |
 | `CATCHEM_ARCHIVE__DRIVE_DIR` | _auto-detect_ | Drive / iCloud / Documents path override |

@@ -12,6 +12,7 @@ const Feed = lazy(() => import("@/features/feed/FeedPage").then(m => ({ default:
 const MarketMap = lazy(() => import("@/features/market-map/MarketMapPage").then(m => ({ default: m.MarketMapPage })));
 const Symbols = lazy(() => import("@/features/symbols/SymbolsPage").then(m => ({ default: m.SymbolsPage })));
 const SymbolDetail = lazy(() => import("@/features/symbols/SymbolDetailPage").then(m => ({ default: m.SymbolDetailPage })));
+const Portfolio = lazy(() => import("@/features/portfolio/PortfolioPage").then(m => ({ default: m.PortfolioPage })));
 const Tags = lazy(() => import("@/features/tags/TagsPage").then(m => ({ default: m.TagsPage })));
 const Benchmark = lazy(() => import("@/features/benchmark/BenchmarkPage").then(m => ({ default: m.BenchmarkPage })));
 const Backtest = lazy(() => import("@/features/backtest/BacktestPage").then(m => ({ default: m.BacktestPage })));
@@ -38,6 +39,7 @@ export function App() {
           <Route path="map" element={<MarketMap />} />
           <Route path="symbols" element={<Symbols />} />
           <Route path="symbols/:symbol" element={<SymbolDetail />} />
+          <Route path="portfolio" element={<Portfolio />} />
           <Route path="tags" element={<Tags />} />
           <Route path="benchmark" element={<Benchmark />} />
           <Route path="backtest" element={<Backtest />} />

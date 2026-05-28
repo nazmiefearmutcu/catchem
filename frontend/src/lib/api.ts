@@ -256,6 +256,7 @@ import type {
   NewsSourcesResponse, NewsAwareness, NewsCoverageGaps,
   ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
   SymbolSentimentTrend,
+  PortfolioListResponse, PortfolioEnriched, PortfolioHolding, PortfolioAddBody,
 } from "@/types/api";
 
 export const api = {
@@ -811,6 +812,25 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(sample),
+    }),
+
+  // ── Portfolio (read-only holdings tracker) ───────────────────────────
+  // A holding is a tracked instrument, not a trading position — catchem
+  // never places orders. `portfolioList` returns the bare holdings;
+  // `portfolioEnriched` fans each one out to the awareness layer (live
+  // quote + coverage + recent news + blind-spot status) and is the query
+  // the page polls at ~30s. Mutations invalidate both query keys.
+  portfolioList: () => request<PortfolioListResponse>("/api/portfolio"),
+  portfolioEnriched: () => request<PortfolioEnriched>("/api/portfolio/enriched"),
+  portfolioAdd: (body: PortfolioAddBody) =>
+    request<PortfolioHolding>("/api/portfolio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  portfolioDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/portfolio/${encodeURIComponent(id)}`, {
+      method: "DELETE",
     }),
 };
 

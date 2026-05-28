@@ -409,6 +409,76 @@ export interface ArchiveNowResponse {
   total_archived: number;
 }
 
+// ── Portfolio (read-only holdings tracker) ──────────────────────────────────
+//
+// A holding is a user-tracked instrument — NOT a trading position. There is
+// no order/execution surface anywhere in catchem; the portfolio simply layers
+// the awareness pipeline (live quote + coverage + recent news + blind-spot
+// status) over a hand-maintained watchlist with optional bookkeeping fields
+// (shares / cost_basis) the analyst fills in for context.
+//
+// `shares`, `weight`, and `cost_basis` are all optional: a holding can be a
+// bare symbol the analyst is merely watching, or a fully-specified line item.
+export interface PortfolioHolding {
+  id: string;
+  symbol: string;
+  label?: string | null;
+  shares?: number | null;
+  weight?: number | null;
+  cost_basis?: number | null;
+  notes?: string | null;
+  added_at: string;
+}
+
+export interface PortfolioListResponse {
+  schema_version: number;
+  generated_at: string;
+  holdings: PortfolioHolding[];
+}
+
+/**
+ * One holding enriched by the awareness layer (GET /api/portfolio/enriched).
+ *
+ * Every enrichment field is independently nullable/degradable so a holding
+ * with no quote provider, no recent coverage, or a freshly-booted poller
+ * still renders:
+ *   - `quote` is null when no market data is available for the symbol.
+ *   - `coverage.covered=false` is the blind-spot signal — the symbol is
+ *     tracked but nothing referencing it has arrived inside the window.
+ *   - `recent_top` is capped server-side (top few headlines by score).
+ */
+export interface PortfolioEnrichedHolding extends PortfolioHolding {
+  quote: {
+    last: number | null;
+    prev_close: number | null;
+    change_pct: number | null;
+  } | null;
+  coverage: {
+    covered: boolean;
+    last_seen_age_seconds: number | null;
+    mention_count: number;
+  };
+  recent_news_count: number;
+  recent_top: Array<{ title: string; url: string | null; score: number | null }>;
+  sentiment_label?: "positive" | "negative" | "neutral" | "unknown" | null;
+}
+
+export interface PortfolioEnriched {
+  schema_version: number;
+  generated_at: string;
+  holdings: PortfolioEnrichedHolding[];
+}
+
+/** Body for POST /api/portfolio — every field except `symbol` is optional. */
+export interface PortfolioAddBody {
+  symbol: string;
+  label?: string | null;
+  shares?: number | null;
+  weight?: number | null;
+  cost_basis?: number | null;
+  notes?: string | null;
+}
+
 /** Result of POST /replay — single pass over the awareness JSONL dir. */
 export interface ReplayRunResponse {
   processed: number;

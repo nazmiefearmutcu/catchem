@@ -40,6 +40,7 @@ const NAV: { key: string; path: string }[] = [
   { key: "nav.replay", path: "/replay" },
   { key: "nav.analysis", path: "/map" },
   { key: "nav.symbols", path: "/symbols" },
+  { key: "nav.portfolio", path: "/portfolio" },
   { key: "nav.tags", path: "/tags" },
   { key: "nav.benchmark", path: "/benchmark" },
   { key: "nav.backtest", path: "/backtest" },

@@ -135,6 +135,16 @@ class NewsConfig(BaseModel):
     # Built-in defaults defined in news_poller.DEFAULT_FEEDS. Use this to
     # supply or replace the source set: list of {name, url, fallback_domain}.
     feeds: list[dict[str, str]] = Field(default_factory=list)
+    # Tickers/companies to actively watch via dynamic per-entity Google News
+    # queries (the watchlist_dynamic source pack reads this). Each becomes a
+    # near-real-time GN search feed so the system tracks exactly what the
+    # operator cares about, not just the curated mainstream surface. Empty =
+    # the pack falls back to a built-in mega-cap default set.
+    priority_tickers: list[str] = Field(default_factory=list)
+    # Cross-source near-duplicate suppression: when many outlets carry the
+    # same story, collapse items whose normalized titles match within this
+    # window so the feed shows the story once instead of N times. 0 disables.
+    dedup_title_window_seconds: float = 21600.0  # 6h
 
 
 class ArchiveConfig(BaseModel):

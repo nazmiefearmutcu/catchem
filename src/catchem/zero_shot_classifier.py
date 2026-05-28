@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Protocol
+from itertools import pairwise
+from typing import Protocol
 
 from .schemas import AwarenessCaptureView
-from .taxonomy import LabelDef, Taxonomy
+from .taxonomy import Taxonomy
 
 
 @dataclass(frozen=True)
@@ -42,31 +44,70 @@ class ZeroShotStub:
 
     def __init__(self, taxonomy: Taxonomy) -> None:
         self.taxonomy = taxonomy
-        # Build inverted index: word/alias → set(label ids)
+        # Build inverted index: word/alias → set(label ids).
+        #
+        # BUG-EE fix: previously this also indexed every >3-char non-stop
+        # word from `d.hypothesis` (e.g. "This text is about a central bank
+        # decision, rate move, or monetary policy."). That dumped generic
+        # English ("move", "decision", "report", "event", "major", "impact")
+        # into the index, all pointing at whatever label whose hypothesis
+        # they came from. Result: a BTC headline saying "Analysts attribute
+        # the **move** to institutional demand" fired `central_bank` —
+        # because "move" was a central_bank hypothesis token. The stub
+        # should rely on the curated `id` + `aliases` set only; the
+        # full-hypothesis path is meant for the BART-MNLI model template,
+        # not for keyword-overlap.
         self._index: dict[str, set[str]] = {}
         for group in (taxonomy.asset_classes, taxonomy.impact_reason_codes, taxonomy.negative_class):
             for d in group:
                 tokens = {d.id.replace("_", " ").lower(), *[a.lower() for a in d.aliases]}
-                # Hypothesis-derived keywords too
-                tokens |= {w.lower() for w in _WORD_RE.findall(d.hypothesis) if len(w) > 3 and w.lower() not in _STOP}
                 for t in tokens:
                     self._index.setdefault(t, set()).add(d.id)
 
+    # Title weight relative to body. Pre-fix this multiplier was applied by
+    # repeating the title 3x in a concatenated string and then calling
+    # `set(...)`, which destroyed every repetition — so the documented
+    # "title carries 3x weight" was a no-op. Bigrams (which used a list,
+    # not a set) DID get the 3x boost, an undocumented asymmetry that
+    # silently inflated multi-word-alias scores over single-word ones.
+    _TITLE_WEIGHT = 3.0
+    _BIGRAM_WEIGHT = 1.5
+
     def classify(self, cap: AwarenessCaptureView) -> ZeroShotResult:
         title_l = (cap.title or "").lower()
-        body_l = (cap.text or "").lower()
-        # Title carries 3× weight relative to body.
-        weighted = f"{(title_l + ' ') * 3}{body_l[:3000]}"
-        words = set(w.lower() for w in _WORD_RE.findall(weighted) if w.lower() not in _STOP)
+        body_l = (cap.text or "")[:3000].lower()
+
+        # Set-based dedup intentional: prevents repetition spam from
+        # inflating a label's score. Title vs body weighting is applied
+        # via separate processing, not by string repetition.
+        title_words = {
+            w for w in _WORD_RE.findall(title_l)
+            if w not in _STOP
+        }
+        body_words = {
+            w for w in _WORD_RE.findall(body_l)
+            if w not in _STOP
+        } - title_words  # exclude title-overlap to avoid double-counting
+
+        title_bigrams = set(_bigrams(title_l))
+        body_bigrams = set(_bigrams(body_l)) - title_bigrams
 
         scores: dict[str, float] = {}
-        for token in words:
+
+        def _add(token: str, weight: float) -> None:
             for label_id in self._index.get(token, ()):
-                scores[label_id] = scores.get(label_id, 0.0) + 1.0
-        # Add bigram hits for multi-word aliases.
-        for bigram in _bigrams(weighted):
-            for label_id in self._index.get(bigram, ()):
-                scores[label_id] = scores.get(label_id, 0.0) + 1.5
+                scores[label_id] = scores.get(label_id, 0.0) + weight
+
+        # Unigrams — title tokens carry _TITLE_WEIGHT, body tokens carry 1.0.
+        for w in title_words:
+            _add(w, self._TITLE_WEIGHT)
+        for w in body_words:
+            _add(w, 1.0)
+        # Bigrams (multi-word aliases) — same title boost; base weight 1.5.
+        for b in title_bigrams:
+            _add(b, self._BIGRAM_WEIGHT * self._TITLE_WEIGHT)
+        for b in body_bigrams:
+            _add(b, self._BIGRAM_WEIGHT)
 
         if not scores:
             return ZeroShotResult(label_scores={}, model_version=self.model_version)
@@ -98,10 +139,13 @@ class ZeroShotModel:
         if not text.strip():
             return ZeroShotResult(label_scores={}, model_version=self.model_version)
         # Use hypothesis-style template for multi-label.
-        labels_id = [lid for lid, _ in self._candidate_hypotheses]
         hyps = [h for _, h in self._candidate_hypotheses]
         out = self._pipe(text, candidate_labels=hyps, multi_label=True)
-        scores_by_hyp = {lbl: float(s) for lbl, s in zip(out["labels"], out["scores"])}
+        # HF zero-shot pipeline contract: out["labels"] and out["scores"]
+        # are guaranteed same length; strict=True surfaces a contract break.
+        scores_by_hyp = {
+            lbl: float(s) for lbl, s in zip(out["labels"], out["scores"], strict=True)
+        }
         scores: dict[str, float] = {}
         for lid, hyp in self._candidate_hypotheses:
             scores[lid] = scores_by_hyp.get(hyp, 0.0)
@@ -131,4 +175,6 @@ _STOP = frozenset(
 
 def _bigrams(text: str) -> list[str]:
     tokens = [t.lower() for t in _WORD_RE.findall(text) if t.lower() not in _STOP]
-    return [f"{a} {b}" for a, b in zip(tokens, tokens[1:])]
+    # itertools.pairwise yields (t0,t1), (t1,t2), ... so the last token has
+    # no pair (intent: bigrams over consecutive token pairs).
+    return [f"{a} {b}" for a, b in pairwise(tokens)]

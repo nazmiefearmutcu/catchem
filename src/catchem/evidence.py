@@ -1,4 +1,4 @@
-"""Extractive evidence: pick the 1–N sentences that best support the labels.
+"""Extractive evidence: pick the 1-N sentences that best support the labels.
 
 No generation. Pure ranking over sentences in title+body using keyword overlap
 against the chosen labels (zero-shot top hits + entity hits).
@@ -7,7 +7,7 @@ against the chosen labels (zero-shot top hits + entity hits).
 from __future__ import annotations
 
 import re
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from .schemas import AwarenessCaptureView
 
@@ -54,6 +54,17 @@ def split_sentences(text: str) -> list[str]:
     return out
 
 
+def _sentence_word_match(sentence_lc: str, term_lc: str) -> bool:
+    """Word-boundary match — pre-fix `term in sentence_lc` was substring,
+    so the term "rate" matched "operating" and "fed" matched "federated".
+    Multi-word terms ("central bank") still work because the regex escape
+    keeps internal whitespace literal and \\b anchors on the outer chars.
+    """
+    if not term_lc:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(term_lc)}(?![a-z0-9])", sentence_lc) is not None
+
+
 def extract_evidence(
     cap: AwarenessCaptureView,
     label_terms: Sequence[str],
@@ -76,7 +87,7 @@ def extract_evidence(
     scored: list[tuple[float, int, str]] = []
     for idx, s in enumerate(sentences):
         s_lc = s.lower()
-        score = sum(1.0 for t in terms if t in s_lc)
+        score = sum(1.0 for t in terms if _sentence_word_match(s_lc, t))
         if idx == 0:
             score += 0.5  # title boost
         scored.append((score, -idx, s))   # later sentences lose ties

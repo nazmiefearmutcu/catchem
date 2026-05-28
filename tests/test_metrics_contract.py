@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 from catchem.api import create_app
 from catchem.settings import load_settings, reload_settings
 
-
 REQUIRED_METRICS_KEYS = {
     "mode",
     "diagnostic_enabled",

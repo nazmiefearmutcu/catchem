@@ -7,8 +7,8 @@ already-computed numeric features so it's trivially testable.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .taxonomy import Taxonomy
 

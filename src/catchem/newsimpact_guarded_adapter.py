@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from .logging import get_logger
 
@@ -91,21 +92,38 @@ def snapshot_guard_state(newsimpact_root: Path) -> GuardSnapshot:
         raise NewsImpactGuardError(f"governance_index.json missing at {idx_path}")
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, json.JSONDecodeError) as exc:
+        # Narrow: only read errors (OSError) and parse errors
+        # (JSONDecodeError) are the documented failure modes. A broader
+        # `except Exception` would swallow programming bugs we want to
+        # surface (TypeError, AttributeError, etc.).
         raise NewsImpactGuardError(f"governance_index.json unreadable: {exc}") from exc
     cands = data.get("candidates") or []
     if not cands:
         raise NewsImpactGuardError("governance_index.json contains no candidates")
     c = cands[0]
     gate = c.get("gate_failure_status", {}) or {}
+    # Fail-safe direction consistency: `release_gate_passed` defaults to True
+    # (refuse diagnostic if the field is missing — assume gate passed = not
+    # quarantined = not safe). `safe_to_publish` / `safe_to_promote` should
+    # follow the same fail-safe principle: missing `forbidden_operations`
+    # means we cannot prove the candidate is publishable, so treat it as
+    # NOT safe. Pre-fix the missing-field defaulted to "no forbidden ops"
+    # which meant safe_to_publish=True — the opposite of fail-safe.
+    forbidden = c.get("forbidden_operations")
+    if forbidden is None:
+        safe_publish = False
+        safe_promote = False
+    else:
+        safe_publish = "export" not in forbidden
+        safe_promote = "promotion" not in forbidden
     return GuardSnapshot(
         governance_index_path=idx_path,
         governance_index_sha256=_sha256_file(idx_path),
         release_gate_passed=bool(gate.get("release_gate_passed", True)),
         quarantine_state=str(c.get("governance_status", "UNKNOWN")),
-        # `safe_to_publish`/`safe_to_promote` are inferred from forbidden_operations
-        safe_to_publish="export" not in (c.get("forbidden_operations") or []),
-        safe_to_promote="promotion" not in (c.get("forbidden_operations") or []),
+        safe_to_publish=safe_publish,
+        safe_to_promote=safe_promote,
         fusion_verdict_class=str(c.get("fusion_verdict_class", "UNKNOWN")),
     )
 

@@ -13,11 +13,10 @@ manually under ``data/golden/extended.jsonl``.
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, Optional
 
 from .schemas import AwarenessCaptureView
 from .service import CatchemService
@@ -39,7 +38,7 @@ class GoldenItem:
     expected_sentiment: str | None = None   # "positive" | "negative" | "neutral"
 
     def as_capture(self) -> AwarenessCaptureView:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return AwarenessCaptureView(
             capture_id=self.capture_id,
             doc_id=f"golden-{self.capture_id}",
@@ -260,7 +259,7 @@ class BenchmarkReport:
         return {
             "schema_version": GOLDEN_SCHEMA_VERSION,
             "dataset_name": self.dataset_name,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "relevance": {"precision": self.relevance.precision, "recall": self.relevance.recall, "f1": self.relevance.f1},
             "asset_class_f1": {k: s.f1 for k, s in self.asset_class.items()},
             "reason_code_f1": {k: s.f1 for k, s in self.reason_code.items()},

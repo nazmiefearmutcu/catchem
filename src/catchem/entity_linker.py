@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, Iterator
-
 
 _CASHTAG_RE = re.compile(r"\$([A-Z]{1,6})\b")
 _TICKER_PAREN_RE = re.compile(r"\(([A-Z]{2,6})\)")
@@ -126,12 +124,19 @@ class EntityLinker:
             if re.search(rf"\b{ccy}\b", joined):
                 add(ccy, "currency", "lex:currency")
 
+        # Word-boundary match — pre-fix the plain `in` substring check made
+        # "Fed" (a central-bank token) hit inside "Federation"/"Federated"
+        # and "Dow" (an index) hit inside "Down"/"shutdown". The other
+        # lexicon scans below (commodities, crypto) already used \b...\b
+        # — the inconsistency was the real bug. Names with non-alnum chars
+        # (e.g. "S&P 500") are still matched because re.escape neutralises
+        # the special chars and \b anchors on the surrounding text.
         for cb in _KNOWN_CENTRAL_BANKS:
-            if cb in joined:
+            if re.search(rf"\b{re.escape(cb)}\b", joined):
                 add(cb, "central_bank", "lex:central_bank")
 
         for idx in _KNOWN_INDICES:
-            if idx in joined:
+            if re.search(rf"\b{re.escape(idx)}\b", joined):
                 add(idx, "index", "lex:index")
 
         for c in _KNOWN_COMMODITIES:

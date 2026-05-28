@@ -10,9 +10,8 @@ Two layers of defense:
 
 from __future__ import annotations
 
-import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,7 +20,6 @@ from fastapi.testclient import TestClient
 from catchem.api import create_app
 from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
 from catchem.settings import load_settings, reload_settings
-
 
 REPO = Path(__file__).resolve().parents[1]
 LEGACY_DASHBOARD = REPO / "src" / "catchem" / "static" / "dashboard.html"
@@ -116,7 +114,7 @@ def _malicious_record() -> FinancialImpactRecord:
         diagnostic_multimodal_result=None,
         processing_mode=ProcessingMode.PRODUCTION_SAFE,
         model_versions={"zero_shot": "stub"},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

@@ -21,8 +21,8 @@ crosses the wire.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
-
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 # Fields we ALWAYS want present on a record payload but force to safe values in
 # production_safe. Listed explicitly so reviewers can audit the closed set.

@@ -5,6 +5,7 @@ Both CLI and API construct a Supervisor and call ``run_*`` / ``process_one``.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,18 @@ from .awareness_reader import discover_awareness_jsonl_root
 from .awareness_replay import ReplayRunner
 from .embeddings import VectorIndex
 from .logging import configure_logging, get_logger
-from .schemas import AwarenessCaptureView, FinancialImpactRecord, ProcessingMode
+from .reviewers import (
+    REVIEWER_DEEPSEEK,
+    ReviewerRegistry,
+    build_default_registry,
+    record_to_review_payload,
+)
+from .schemas import AwarenessCaptureView, FinancialImpactRecord
 from .service import CatchemService, build_service
-from .settings import CatchemMode, Settings
-from .storage import Storage, load_storage_from_settings
+from .settings import Settings
+from .storage import load_storage_from_settings
+from .taxonomy import default_taxonomy_path, load_taxonomy
+from .webhook import send_webhook
 
 logger = get_logger("catchem.supervisor")
 
@@ -25,23 +34,66 @@ class Supervisor:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         configure_logging(
-            level=settings.logging_.level,
-            log_file=settings.paths.catchem_output_dir / Path(settings.logging_.file).relative_to("data") if settings.logging_.file.startswith("data/") else None,
-            json_mode=settings.logging_.json_logs,
+            level=settings.logging.level,
+            log_file=settings.paths.catchem_output_dir / Path(settings.logging.file).relative_to("data") if settings.logging.file.startswith("data/") else None,
+            json_mode=settings.logging.json_logs,
         )
         self.storage = load_storage_from_settings(settings)
         vector_dir = settings.paths.catchem_output_dir / Path(settings.storage.vector_index_dir).relative_to("data") if settings.storage.vector_index_dir.startswith("data/") else settings.paths.catchem_output_dir / "vector_index"
         self.vector_index = VectorIndex(vector_dir)
         self.service: CatchemService = build_service(settings, vector_index=self.vector_index)
+        # Second-opinion reviewer plumbing. The registry is cheap to
+        # construct (lazy DeepSeek init) so we always wire it; it's the
+        # `should_sample_for_deepseek` gate that decides whether any
+        # external call actually fires.
+        self.reviewers: ReviewerRegistry = build_default_registry(
+            settings=settings,
+            service=self.service,
+            taxonomy=load_taxonomy(default_taxonomy_path()),
+            storage=self.storage,
+        )
+        # Bounded thread pool — DeepSeek calls are 1-5s each, and the
+        # news poller can ingest ~50 rows/min during a busy news window.
+        # Two workers + the deterministic sampling rate keep us under the
+        # DeepSeek free-tier rate-limit (60 RPM) by a wide margin.
+        self._deepseek_pool = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="catchem-deepseek",
+        )
+        # Separate fire-and-forget pool for webhook POSTs so a stuck
+        # webhook can never starve DeepSeek's call queue (or vice-versa).
+        # Two workers is plenty: webhook traffic is rare (only
+        # high-score arrivals) and short (single POST + parse).
+        self._webhook_pool = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="catchem-webhook",
+        )
+        # Aggregate counters surfaced via /api/webhook/status. In-memory
+        # only — restarting the sidecar resets these. That's fine; the
+        # operator just wants to know "did anything fire this session?".
+        self.webhook_stats: dict[str, int] = {
+            "attempted": 0,
+            "sent": 0,
+            "filtered": 0,
+            "failed": 0,
+        }
+        self.webhook_last_status: str | None = None
+        self.webhook_last_error: str | None = None
         logger.info(
             "supervisor_initialized",
             mode=settings.mode.value,
             diagnostic_enabled=self.service.diagnostic_enabled,
-            stubs=settings.models_.use_ml_stubs,
+            stubs=settings.models.use_ml_stubs,
+            deepseek_enabled=settings.reviewers.deepseek.enabled,
+            deepseek_keyed=bool(settings.reviewers.deepseek.api_key),
         )
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     def close(self) -> None:
+        with suppress(Exception):
+            self._deepseek_pool.shutdown(wait=False, cancel_futures=True)
+        with suppress(Exception):
+            self._webhook_pool.shutdown(wait=False, cancel_futures=True)
         with suppress(Exception):
             self.storage.close()
 
@@ -49,7 +101,90 @@ class Supervisor:
     def process_capture(self, cap: AwarenessCaptureView) -> FinancialImpactRecord:
         rec = self.service.process(cap)
         self.storage.insert_record(rec)
+        self._maybe_schedule_second_opinion(cap, rec)
+        self._maybe_dispatch_webhook(rec)
         return rec
+
+    # ── webhook fire-and-forget ──────────────────────────────────────────
+    def _maybe_dispatch_webhook(self, rec: FinancialImpactRecord) -> None:
+        """Dispatch a Slack/Discord/Teams webhook for high-score arrivals.
+
+        Filtering (score floor, asset_class, reason_code) lives in
+        `webhook.should_send`. The thread pool ensures slow HTTP never
+        blocks ingestion. The supervisor counter aggregates outcomes so
+        the UI can show "12 sent · 3 filtered · 1 failed" without
+        scraping logs.
+        """
+        cfg = self.settings.webhook
+        if not cfg.enabled or not cfg.url:
+            return
+        try:
+            payload = rec.model_dump(mode="json")
+        except Exception as exc:
+            logger.warning("webhook_serialize_failed", error=str(exc))
+            return
+        self.webhook_stats["attempted"] += 1
+        try:
+            self._webhook_pool.submit(self._webhook_runner, payload)
+        except RuntimeError:
+            # Executor shut down during teardown — no need to log loudly.
+            logger.debug("webhook_executor_unavailable", capture_id=rec.capture_id)
+
+    def _webhook_runner(self, record: dict[str, Any]) -> None:
+        """Thread-pool entry point. Updates counters; never raises."""
+        ok, status = send_webhook(record, self.settings.webhook)
+        self.webhook_last_status = status
+        if ok:
+            self.webhook_stats["sent"] += 1
+            self.webhook_last_error = None
+        elif status == "filtered":
+            # filtered is the by-design "skipped" path — don't count it
+            # as a failure. The `attempted` counter still ticked because
+            # we *tried* to dispatch.
+            self.webhook_stats["filtered"] += 1
+        else:
+            self.webhook_stats["failed"] += 1
+            self.webhook_last_error = status
+            logger.info(
+                "webhook_post_failed",
+                status=status,
+                capture_id=record.get("capture_id"),
+            )
+
+    # ── second-opinion hook (deterministic sampling + budget guard) ──────
+    def _maybe_schedule_second_opinion(
+        self, cap: AwarenessCaptureView, rec: FinancialImpactRecord
+    ) -> None:
+        """Persist the stub review row, then async-fire DeepSeek if sampled.
+
+        Errors (network/parse/budget) write a row with `error_code` set
+        so the compare page can still render the slot — they never
+        propagate back to ingestion.
+        """
+        if not self.reviewers.should_sample_for_deepseek(cap.capture_id):
+            return
+        # Stub row paired with the primary record so the compare page has
+        # both sides. We project — no re-run of `service.process()`.
+        try:
+            stub_payload = record_to_review_payload(
+                rec,
+                reviewer_id=self.reviewers.stub().reviewer_id,
+                reviewer_version=self.reviewers.stub().reviewer_version,
+            )
+            self.storage.upsert_review(stub_payload.to_storage_row())
+        except Exception as exc:
+            logger.warning("stub_review_persist_failed", error=str(exc))
+            return
+        # Fire-and-forget DeepSeek call. The registry handles persistence
+        # and budget accounting; we don't block ingestion on the result.
+        try:
+            self._deepseek_pool.submit(
+                self.reviewers.run_and_persist_deepseek, cap
+            )
+        except RuntimeError:
+            # Executor shut down — happens during process teardown. Log
+            # and move on; the row is just missing the DeepSeek side.
+            logger.debug("deepseek_executor_unavailable", capture_id=cap.capture_id)
 
     # ── replay ───────────────────────────────────────────────────────────
     def run_replay(self, max_records: int | None = None) -> dict[str, Any]:
@@ -64,7 +199,11 @@ class Supervisor:
             nonlocal inserted, replaced
             rec = self.service.process(cap)
             was_inserted = self.storage.insert_record(rec)
+            self._maybe_schedule_second_opinion(cap, rec)
+            # Webhook only on freshly-inserted records — replaying the
+            # same JSONL shouldn't spam the channel with duplicate alerts.
             if was_inserted:
+                self._maybe_dispatch_webhook(rec)
                 inserted += 1
             else:
                 replaced += 1
@@ -110,8 +249,12 @@ class Supervisor:
         return {
             "mode": self.settings.mode.value,
             "diagnostic_enabled": self.service.diagnostic_enabled,
-            "use_ml_stubs": self.settings.models_.use_ml_stubs,
+            "use_ml_stubs": self.settings.models.use_ml_stubs,
             "records": counts,
             "dlq": self.storage.dlq_count(),
             "model_versions": dict(self.service.model_versions),
+            "reviewers": self.reviewers.status(),
         }
+
+    # Re-export for tests / API: which reviewer ID the second-opinion path uses.
+    DEEPSEEK_REVIEWER_ID = REVIEWER_DEEPSEEK

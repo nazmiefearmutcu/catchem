@@ -31,6 +31,7 @@ dependencies = [
   "langdetect>=1.0.9",
   # obs
   "structlog>=24.1",
+  "psutil>=5.9",                     # /api/stats process telemetry (CPU% / threads / VMS)
   # awareness (editable install handled by bootstrap)
 ]
 
@@ -82,8 +83,34 @@ markers = [
   "regression: source-repo regression-safety tests",
 ]
 filterwarnings = [
+  # Surface DeprecationWarnings raised from inside the catchem package as
+  # errors so future-removal warnings (e.g. `asyncio.get_event_loop` slated
+  # for removal in Python 3.16) fail CI loudly instead of disappearing under
+  # the blanket ignore below. The catch-all keeps third-party
+  # DeprecationWarning noise out of the test stream.
+  "error::DeprecationWarning:catchem",
   "ignore::DeprecationWarning",
   "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/catchem"]
+branch = true
+omit = [
+  "*/tests/*",
+  "*/static/*",
+  "src/catchem/__main__.py",
+]
+
+[tool.coverage.report]
+skip_covered = false
+show_missing = false
+precision = 2
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
 ]
 
 [tool.ruff]

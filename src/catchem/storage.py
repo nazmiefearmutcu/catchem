@@ -14,12 +14,14 @@ Design priorities:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -31,6 +33,35 @@ logger = get_logger("catchem.storage")
 
 
 SCHEMA_VERSION = 1
+
+
+# User-defined tag validation: 1-50 chars, alphanumeric + `-_.`, no whitespace.
+# The leading/trailing strip happens in :meth:`Storage.add_record_tag` /
+# :meth:`Storage.remove_record_tag` (and the API layer) so callers can pass
+# raw form input without thinking about it.
+_TAG_PATTERN = re.compile(r"^[a-zA-Z0-9_\-.]+$")
+
+
+def _validate_tag(tag: str) -> str:
+    """Normalize + validate a user-tag. Raises :class:`ValueError` on reject.
+
+    Rules:
+      * 1-50 characters after stripping leading/trailing whitespace.
+      * `[a-zA-Z0-9_\\-.]` only — no whitespace, no slashes, no unicode
+        punctuation. Matches the API regex so the storage layer is the
+        single source of truth and the API just re-checks for HTTP-422
+        framing.
+    """
+    if not isinstance(tag, str):
+        raise ValueError("tag must be a string")
+    cleaned = tag.strip()
+    if not cleaned:
+        raise ValueError("tag must not be empty")
+    if len(cleaned) > 50:
+        raise ValueError("tag must be <= 50 characters")
+    if not _TAG_PATTERN.match(cleaned):
+        raise ValueError("tag must match [a-zA-Z0-9_-.]+ (no whitespace)")
+    return cleaned
 
 
 _SCHEMA_SQL = """
@@ -100,6 +131,25 @@ CREATE TABLE IF NOT EXISTS record_labels (
     PRIMARY KEY (capture_id, kind, value)
 );
 CREATE INDEX IF NOT EXISTS idx_record_labels ON record_labels(kind, value);
+
+-- Second-opinion reviewer outputs (DeepSeek etc.). Composite PK on
+-- (capture_id, reviewer_id) lets multiple reviewers coexist; the
+-- compare page joins on capture_id and pivots by reviewer_id.
+CREATE TABLE IF NOT EXISTS reviews (
+    capture_id TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL,
+    reviewer_version TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    usd_cost REAL NOT NULL DEFAULT 0.0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    error_code TEXT,
+    PRIMARY KEY (capture_id, reviewer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewer ON reviews(reviewer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_capture ON reviews(capture_id);
 """
 
 
@@ -131,6 +181,15 @@ class Storage:
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30.0)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        # SQLite ships with foreign keys disabled per-connection (legacy
+        # default the project maintainers refuse to change). Without this
+        # PRAGMA, ``ON DELETE CASCADE`` declarations like the one on
+        # ``record_tags.capture_id`` are silently ignored — deleting a
+        # row from ``records`` leaves orphan tag rows behind, which then
+        # corrupt ``top_tags()`` counts and the Tags page totals.
+        # The pragma is per-connection, so it MUST be set on every
+        # connection this class hands out, not just the schema init.
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -144,9 +203,24 @@ class Storage:
             conn.close()
 
     def _init_db(self) -> None:
+        from .migrations import apply_migrations
+
         with self._lock, self._connection() as conn:
             conn.executescript(_SCHEMA_SQL)
             self._migrate_records_table(conn)
+            # Apply versioned migrations after the legacy ``IF NOT EXISTS``
+            # bootstrap. A pre-existing DB from before the migration
+            # framework lands at ``user_version = 0``; baseline migration
+            # #1 claims it idempotently. Future ALTER/CREATE INDEX work
+            # ships as appended entries in ``catchem.migrations``.
+            applied = apply_migrations(conn)
+        if applied:
+            logger.info(
+                "schema_migrated",
+                count=len(applied),
+                versions=[m.version for m in applied],
+                names=[m.name for m in applied],
+            )
         logger.info("storage_initialized", db=str(self.db_path), parquet=str(self.parquet_dir))
 
     def _migrate_records_table(self, conn: sqlite3.Connection) -> None:
@@ -156,6 +230,47 @@ class Storage:
 
     @contextmanager
     def cursor(self) -> Iterator[sqlite3.Cursor]:
+        """**Deprecated** — short-lived sqlite cursor helper.
+
+        .. danger::
+            **Do not use in new code.** This helper holds
+            ``self._lock`` (a re-entrant lock) for the ENTIRE yield
+            duration. The known failure modes are:
+
+            * **Deadlock across threads.** If thread A is inside the
+              ``with cursor():`` block and calls into ANY other code
+              path that also acquires ``self._lock`` from a different
+              thread (e.g. a background worker that does
+              ``insert_record``), the second thread blocks. If the
+              first thread is itself waiting on the second (e.g. an
+              ``asyncio.to_thread`` round-trip), the deadlock is
+              permanent. This was the root cause of the v33 archive
+              hang and is the reason the archive code path now uses
+              ``self._lock`` + ``self._connection()`` explicitly
+              instead of going through ``cursor()``.
+
+            * **Lock-held-across-IO**. A slow iterator or any network
+              IO inside the ``with`` block stalls every other writer
+              and reader on the storage layer, which is fatal for the
+              news poller's insert rate.
+
+            * **No auto-commit semantics.** ``yield cursor`` from a
+              raw ``conn`` without a wrapping ``with conn:`` means
+              the caller must remember to commit. Forgetting it
+              silently drops the write — the connection close on the
+              ``finally`` path will not commit either.
+
+            Use :meth:`_connection` instead. It correctly scopes the
+            transaction via ``with conn:`` and you can opt INTO the
+            lock by wrapping the ``with`` in ``with self._lock:`` if
+            you really need writer-serialisation. That pattern is
+            what every modern callsite uses.
+
+            This method is kept for binary-compatibility with any
+            external consumer that imported ``Storage.cursor()`` from
+            an older API version. There are no in-tree callers as of
+            v45 (verified via ``grep -rn '\\.cursor()' src/catchem/``).
+        """
         with self._lock:
             conn = self._connect()
             try:
@@ -241,7 +356,7 @@ class Storage:
                 conn.execute(
                     """INSERT OR REPLACE INTO model_versions (component, version, updated_at)
                        VALUES (?, ?, ?)""",
-                    (component, ver, datetime.now(timezone.utc).isoformat()),
+                    (component, ver, datetime.now(UTC).isoformat()),
                 )
 
             self._pending_rows.append(_record_to_row(rec))
@@ -257,7 +372,7 @@ class Storage:
         if not self._pending_rows:
             return
         table = pa.Table.from_pylist(self._pending_rows)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         path = self.parquet_dir / f"records-{int(now.timestamp())}-{len(self._pending_rows):05d}.parquet"
         pq.write_table(table, path)
         logger.info("parquet_flushed", path=str(path), rows=len(self._pending_rows))
@@ -320,7 +435,7 @@ class Storage:
                     offset.source_path,
                     int(offset.line_offset),
                     offset.last_capture_id,
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
 
@@ -330,12 +445,246 @@ class Storage:
             conn.execute(
                 """INSERT INTO dlq (capture_id, error, payload_excerpt, created_at)
                    VALUES (?,?,?,?)""",
-                (capture_id, error, payload_excerpt[:4000], datetime.now(timezone.utc).isoformat()),
+                (capture_id, error, payload_excerpt[:4000], datetime.now(UTC).isoformat()),
             )
 
     def dlq_count(self) -> int:
         with self._lock, self._connection() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM dlq").fetchone()[0])
+
+    # ── reviews (second-opinion) ─────────────────────────────────────────────
+    def upsert_review(self, row: dict[str, Any]) -> None:
+        """Persist a `ReviewPayload.to_storage_row()` dict.
+
+        Idempotent via the (capture_id, reviewer_id) primary key — a
+        re-run of the same reviewer against the same capture replaces
+        the prior row in-place so the compare page never shows stale
+        token/cost data after a model bump.
+        """
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO reviews (
+                    capture_id, reviewer_id, reviewer_version, payload_json,
+                    input_tokens, output_tokens, usd_cost, latency_ms,
+                    created_at, error_code
+                ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    row["capture_id"],
+                    row["reviewer_id"],
+                    row["reviewer_version"],
+                    json.dumps(row["payload_json"]),
+                    int(row.get("input_tokens", 0)),
+                    int(row.get("output_tokens", 0)),
+                    float(row.get("usd_cost", 0.0)),
+                    int(row.get("latency_ms", 0)),
+                    row["created_at"],
+                    row.get("error_code"),
+                ),
+            )
+
+    def get_reviews_for_capture(self, capture_id: str) -> list[dict[str, Any]]:
+        """All reviewer rows attached to a capture (stable order by reviewer_id)."""
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM reviews WHERE capture_id = ? ORDER BY reviewer_id""",
+                (capture_id,),
+            ).fetchall()
+            return [_row_to_review(dict(r)) for r in rows]
+
+    def recent_reviews(self, reviewer_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Recent rows for a single reviewer — feeds the compare dashboard."""
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM reviews WHERE reviewer_id = ?
+                    ORDER BY created_at DESC LIMIT ?""",
+                (reviewer_id, int(limit)),
+            ).fetchall()
+            return [_row_to_review(dict(r)) for r in rows]
+
+    def reviews_with_pair(
+        self, reviewer_a: str, reviewer_b: str, limit: int = 500
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        """Captures where BOTH reviewers have a row — paired for compare.
+
+        Returns a list of (row_a, row_b) tuples ordered by reviewer_b's
+        created_at DESC (the "newer" reviewer typically being DeepSeek).
+        """
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                """SELECT a.payload_json AS a_payload, a.reviewer_id AS a_id,
+                          a.reviewer_version AS a_ver, a.created_at AS a_ts,
+                          a.error_code AS a_err,
+                          b.payload_json AS b_payload, b.reviewer_id AS b_id,
+                          b.reviewer_version AS b_ver, b.created_at AS b_ts,
+                          b.error_code AS b_err,
+                          b.input_tokens AS b_in_tokens,
+                          b.output_tokens AS b_out_tokens,
+                          b.usd_cost AS b_usd_cost,
+                          b.latency_ms AS b_latency_ms,
+                          a.capture_id AS capture_id
+                     FROM reviews a
+                     JOIN reviews b ON a.capture_id = b.capture_id
+                    WHERE a.reviewer_id = ? AND b.reviewer_id = ?
+                    ORDER BY b.created_at DESC LIMIT ?""",
+                (reviewer_a, reviewer_b, int(limit)),
+            ).fetchall()
+            out: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for r in rows:
+                d = dict(r)
+                a = {
+                    "capture_id": d["capture_id"],
+                    "reviewer_id": d["a_id"],
+                    "reviewer_version": d["a_ver"],
+                    "created_at": d["a_ts"],
+                    "error_code": d["a_err"],
+                    "payload": json.loads(d["a_payload"]) if d["a_payload"] else {},
+                }
+                b = {
+                    "capture_id": d["capture_id"],
+                    "reviewer_id": d["b_id"],
+                    "reviewer_version": d["b_ver"],
+                    "created_at": d["b_ts"],
+                    "error_code": d["b_err"],
+                    "input_tokens": int(d["b_in_tokens"] or 0),
+                    "output_tokens": int(d["b_out_tokens"] or 0),
+                    "usd_cost": float(d["b_usd_cost"] or 0.0),
+                    "latency_ms": int(d["b_latency_ms"] or 0),
+                    "payload": json.loads(d["b_payload"]) if d["b_payload"] else {},
+                }
+                out.append((a, b))
+            return out
+
+    def sum_review_cost(self, reviewer_id: str) -> float:
+        """Cumulative USD spend for a reviewer (used by the budget guard)."""
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(usd_cost), 0.0) FROM reviews WHERE reviewer_id = ?",
+                (reviewer_id,),
+            ).fetchone()
+            return float(row[0]) if row else 0.0
+
+    def review_token_totals(self, reviewer_id: str) -> dict[str, int]:
+        """Cumulative token counts for a reviewer (compare dashboard footer)."""
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(input_tokens), 0),
+                          COALESCE(SUM(output_tokens), 0),
+                          COUNT(*),
+                          COUNT(CASE WHEN error_code IS NOT NULL THEN 1 END)
+                     FROM reviews WHERE reviewer_id = ?""",
+                (reviewer_id,),
+            ).fetchone()
+            if not row:
+                return {"input": 0, "output": 0, "calls": 0, "errors": 0}
+            return {
+                "input": int(row[0]),
+                "output": int(row[1]),
+                "calls": int(row[2]),
+                "errors": int(row[3]),
+            }
+
+    def prune_dlq(self, max_rows: int) -> int:
+        """Drop oldest DLQ rows past `max_rows`. Returns count deleted.
+
+        `record_failure` is unbounded by design — every handler exception
+        gets a row with the original payload excerpt. Long-running
+        deployments with chronic upstream failures grew the table to GB
+        scale, which (a) bloated the sqlite file backups had to copy and
+        (b) slowed unrelated INSERTs as the file grew. Pruning oldest-first
+        preserves debug value (recent failures are most useful) while
+        bounding the worst case.
+
+        Idempotent: a second call within cap returns 0. `max_rows=0` wipes
+        the table entirely (useful in tests).
+        """
+        max_rows = max(0, int(max_rows))
+        with self._lock, self._connection() as conn:
+            # Single-statement prune so a crash mid-execution can't leave
+            # us with a gap. Uses DELETE ... WHERE id NOT IN (SELECT id
+            # ORDER BY id DESC LIMIT N) because sqlite has no LIMIT on
+            # plain DELETE.
+            cur = conn.execute(
+                "DELETE FROM dlq WHERE id NOT IN ("
+                "  SELECT id FROM dlq ORDER BY id DESC LIMIT ?"
+                ")",
+                (max_rows,),
+            )
+            return int(cur.rowcount or 0)
+
+    # ── user-defined record tags ────────────────────────────────────────────
+    def add_record_tag(self, capture_id: str, tag: str) -> bool:
+        """Attach a user tag to a record.
+
+        Returns ``True`` when the (capture_id, tag) pair was new, ``False``
+        when it already existed (INSERT OR IGNORE). Raises :class:`ValueError`
+        if the tag fails validation — see :func:`_validate_tag` for rules.
+        """
+        cleaned = _validate_tag(tag)
+        with self._lock, self._connection() as conn:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO record_tags (capture_id, tag, created_at)
+                   VALUES (?, ?, ?)""",
+                (capture_id, cleaned, datetime.now(UTC).isoformat()),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def remove_record_tag(self, capture_id: str, tag: str) -> bool:
+        """Detach a user tag from a record.
+
+        Returns ``True`` when a row was deleted, ``False`` when the pair was
+        already absent. Invalid-shape tags are normalized through
+        :func:`_validate_tag`; an out-of-range value can never have matched
+        a stored row so we'd return False either way, but normalizing keeps
+        the API and storage layers consistent.
+        """
+        cleaned = _validate_tag(tag)
+        with self._lock, self._connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM record_tags WHERE capture_id = ? AND tag = ?",
+                (capture_id, cleaned),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def get_record_tags(self, capture_id: str) -> list[str]:
+        """Sorted list of tag strings attached to ``capture_id``."""
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                "SELECT tag FROM record_tags WHERE capture_id = ? ORDER BY tag",
+                (capture_id,),
+            ).fetchall()
+            return [str(r["tag"]) for r in rows]
+
+    def top_tags(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return the most-used tags as ``[{tag, count}, ...]`` — count desc.
+
+        Powers the Feed sidebar facet group; ties broken by alphabetical
+        order so the list is stable across snapshots.
+        """
+        limit = max(1, int(limit))
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                """SELECT tag, COUNT(*) AS n
+                     FROM record_tags
+                    GROUP BY tag
+                    ORDER BY n DESC, tag ASC
+                    LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            return [{"tag": str(r["tag"]), "count": int(r["n"])} for r in rows]
+
+    def records_by_tag(self, tag: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Records whose user-tags include ``tag`` — newest first."""
+        cleaned = _validate_tag(tag)
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                """SELECT records.* FROM records
+                     JOIN record_tags ON records.capture_id = record_tags.capture_id
+                    WHERE record_tags.tag = ?
+                    ORDER BY records.created_at DESC
+                    LIMIT ?""",
+                (cleaned, int(limit)),
+            ).fetchall()
+            return [_row_to_payload(dict(r)) for r in rows]
 
     # ── housekeeping ---------------------------------------------------------
     def close(self) -> None:
@@ -408,7 +757,32 @@ def _row_to_payload(r: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_storage_from_settings(settings: "Any") -> Storage:
+def _row_to_review(r: dict[str, Any]) -> dict[str, Any]:
+    """Hydrate a SQLite `reviews` row into the API-shaped dict.
+
+    The `payload_json` column is decoded inline so the API layer never
+    touches JSON parsing — keeps the FastAPI handlers thin.
+    """
+    payload_text = r.get("payload_json") or "{}"
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        payload = {}
+    return {
+        "capture_id": r["capture_id"],
+        "reviewer_id": r["reviewer_id"],
+        "reviewer_version": r["reviewer_version"],
+        "payload": payload,
+        "input_tokens": int(r.get("input_tokens") or 0),
+        "output_tokens": int(r.get("output_tokens") or 0),
+        "usd_cost": float(r.get("usd_cost") or 0.0),
+        "latency_ms": int(r.get("latency_ms") or 0),
+        "created_at": r["created_at"],
+        "error_code": r.get("error_code"),
+    }
+
+
+def load_storage_from_settings(settings: Any) -> Storage:
     """Helper: build a Storage from a Settings object."""
     out_dir = settings.paths.catchem_output_dir
     return Storage(

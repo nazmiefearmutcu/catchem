@@ -9,8 +9,43 @@ import pytest
 from fastapi.testclient import TestClient
 
 from catchem.api import create_app
-from catchem.schemas import AwarenessCaptureView
 from catchem.settings import load_settings, reload_settings
+
+
+def _write_quarantined_governance_index(root: Path) -> Path:
+    """Plant a read-only NewsImpact governance index so the guard system can
+    compute a *real* snapshot in a fresh checkout.
+
+    The default ``paths.newsimpact_repo`` points at ``/tmp/merged_news-missing``
+    and the real quarantined repo lives in a sibling checkout that is absent
+    here. Without this fixture ``snapshot_guard_state`` raises
+    ``missing_governance_index`` and the guard payload degrades to
+    ``{"ok": False, "error_code": "missing_governance_index"}``. The shape below
+    mirrors ``tests/test_newsimpact_guard.py::_make_fake_quarantined_root`` so
+    the guard reports the canonical quarantined state.
+    """
+    idx_dir = root / "models" / "governance_index"
+    idx_dir.mkdir(parents=True, exist_ok=True)
+    idx = {
+        "candidates": [
+            {
+                "candidate_id": "fake",
+                "governance_status": "QUARANTINED_REGRESSIVE_MULTIMODAL",
+                "fusion_verdict_class": "FUSION_REGRESSIVE",
+                "forbidden_operations": ["benchmark", "export", "promotion", "training"],
+                "allowed_operations": ["eval", "diagnostic"],
+                "gate_failure_status": {
+                    "release_gate_passed": False,
+                    "candidate_status": "failed_gate_diagnostic",
+                    "failure_codes": ["PERMUTED_LABEL_TOO_CLOSE_TO_CHART_ONLY"],
+                },
+            }
+        ],
+        "deterministic": True,
+        "safeguards": {"no_external_publish": True, "no_governance_mutation": True},
+    }
+    (idx_dir / "governance_index.json").write_text(json.dumps(idx), encoding="utf-8")
+    return root
 
 
 @pytest.fixture
@@ -26,6 +61,11 @@ def client_with_records(tmp_path: Path, write_jsonl, synth_capture, monkeypatch:
     )
     write_jsonl([json.loads(c.model_dump_json()) for c in (cap, cap2)])
     monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path))
+    # Point the guard system at a planted quarantined governance index so the
+    # guard endpoints report a real snapshot regardless of which machine /
+    # checkout the suite runs on.
+    newsimpact_root = _write_quarantined_governance_index(tmp_path / "newsimpact")
+    monkeypatch.setenv("CATCHEM_PATHS__NEWSIMPACT_REPO", str(newsimpact_root))
     reload_settings()
     s = load_settings()
 

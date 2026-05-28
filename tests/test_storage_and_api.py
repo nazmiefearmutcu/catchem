@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -40,7 +40,7 @@ def _record(capture_id: str = "c1") -> FinancialImpactRecord:
         component_scores={"asset_class_max": 0.8, "raw_relevance_score": 0.7},
         processing_mode=ProcessingMode.REPLAY_EXISTING,
         model_versions={"zero_shot": "stub-zero-shot/v1"},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -105,3 +105,158 @@ def test_api_process_one_and_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
         r = client.get("/records/by-asset-class/rates")
         assert r.status_code == 200
+
+
+def test_api_process_one_rejects_malformed_input_with_422(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /process-one with a body missing required AwarenessCaptureView
+    fields MUST surface a 422 with structured pydantic errors — not a 500
+    Internal Server Error.
+
+    Pre-fix bug: the route signature was `capture: dict = Body(...)`, which
+    bypassed FastAPI's request-body validation. The route then called
+    `AwarenessCaptureView.model_validate(capture)` manually, raising a
+    pydantic ValidationError that escaped as a 500 with a noisy traceback
+    in the sidecar log instead of a clean 422 for the client.
+    """
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    reload_settings()
+    from catchem.api import create_app
+
+    app = create_app(load_settings())
+    with TestClient(app) as client:
+        r = client.post("/process-one", json={"bogus": 1})
+        assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"
+        body = r.json()
+        assert "detail" in body
+        # Field-level errors must call out the missing required fields.
+        errs = body["detail"] if isinstance(body["detail"], list) else []
+        missing = {e.get("loc", [None, None])[-1] for e in errs if e.get("type") == "missing"}
+        assert {"capture_id", "doc_id", "text"} <= missing, missing
+
+
+def test_storage_prune_dlq_keeps_most_recent_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pre-fix: `record_failure` only inserted — no prune. On a long-running
+    deployment with many handler failures, the `dlq` table grew unbounded
+    (one row per failure, 4 KB+ payload excerpt each). This test pins the
+    contract for the new `prune_dlq(max_rows)` method: it keeps the most
+    recent N rows and drops the rest.
+    """
+    s = Storage(
+        db_path=tmp_path / "catchem.sqlite3",
+        parquet_dir=tmp_path / "parq",
+        dlq_dir=tmp_path / "dlq",
+    )
+    # Insert 20 failures, ascending by created_at.
+    for i in range(20):
+        s.record_failure(capture_id=f"c{i:02d}", error=f"err{i}", payload_excerpt=f"body {i}")
+    assert s.dlq_count() == 20
+
+    # Prune to keep newest 5.
+    dropped = s.prune_dlq(max_rows=5)
+    assert dropped == 15
+    assert s.dlq_count() == 5
+
+    # No-op when already under cap.
+    dropped_again = s.prune_dlq(max_rows=5)
+    assert dropped_again == 0
+    assert s.dlq_count() == 5
+
+    # max_rows=0 wipes the table.
+    dropped_zero = s.prune_dlq(max_rows=0)
+    assert dropped_zero == 5
+    assert s.dlq_count() == 0
+
+    s.close()
+
+
+def test_crypto_only_text_does_not_get_equities_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, synth_capture
+) -> None:
+    """BUG-BB.1 regression: the first BUG-BB fix treated EVERY ticker hit
+    as evidence of equity. EntityLinker resolves alias 'Bitcoin' → ticker
+    'BTC-USD', so a crypto-only headline used to come back with
+    asset_classes=['crypto', 'equities']. The refinement filters tickers
+    by format: -USD/=X/=F/^ prefixes are not equity.
+    """
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    reload_settings()
+    from catchem.api import create_app
+
+    app = create_app(load_settings())
+    cap = synth_capture(
+        title="Bitcoin rallies past $80,000 amid ETF inflows",
+        text=(
+            "Bitcoin pushed past the mark as spot ETF flows accelerated. "
+            "Analysts attribute the move to institutional demand."
+        ),
+        domain="coindesk.com",
+    )
+    with TestClient(app) as client:
+        r = client.post("/process-one", json=cap.model_dump(mode="json"))
+        assert r.status_code == 200, r.text
+        rec = r.json()
+        assert "equities" not in rec["asset_classes"], (
+            f"Crypto-only text must not be tagged equities. "
+            f"asset_classes={rec['asset_classes']}"
+        )
+        assert "crypto" in rec["asset_classes"], (
+            f"Crypto-only text must surface crypto. "
+            f"asset_classes={rec['asset_classes']}"
+        )
+
+
+def test_cashtag_in_text_pushes_equities_into_asset_classes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, synth_capture
+) -> None:
+    """BUG-BB regression: pre-fix the zero-shot stub only flagged equities
+    when the literal alias set (`stocks`/`shares`/`equity`) appeared in
+    the text. A press release that read `$AAPL rose 4% in after-hours
+    trading` carried the ticker but none of the aliases, so the record
+    came back with `asset_classes=[]` despite obvious equity relevance.
+    The fix bridges entity-linker cashtag/ticker hits into ac_scores
+    so equities surfaces alongside the symbol on the record.
+    """
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    reload_settings()
+    from catchem.api import create_app
+
+    app = create_app(load_settings())
+    cap = synth_capture(
+        title="Apple beats earnings and raises full-year guidance",
+        text=(
+            "Apple Inc reported revenue above consensus and raised guidance. "
+            "$AAPL rose 4% in after-hours trading on the news."
+        ),
+    )
+    with TestClient(app) as client:
+        r = client.post("/process-one", json=cap.model_dump(mode="json"))
+        assert r.status_code == 200, r.text
+        rec = r.json()
+        assert "equities" in rec["asset_classes"], (
+            f"Cashtag/ticker hit must surface 'equities' in asset_classes. "
+            f"asset_classes={rec['asset_classes']}"
+        )
+
+
+def test_api_process_one_accepts_extra_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, synth_capture
+) -> None:
+    """AwarenessCaptureView has `extra='allow'` — extra fields on the
+    inbound payload must NOT trigger a 422. This pins the back-compat
+    surface the Awareness producer relies on.
+    """
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    reload_settings()
+    from catchem.api import create_app
+
+    app = create_app(load_settings())
+    with TestClient(app) as client:
+        cap = synth_capture()
+        payload = cap.model_dump(mode="json")
+        payload["unknown_future_field"] = "still allowed"
+        r = client.post("/process-one", json=payload)
+        assert r.status_code == 200, r.text

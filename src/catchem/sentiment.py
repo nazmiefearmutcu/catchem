@@ -36,14 +36,38 @@ _NEG_TERMS = (
 )
 
 
+# BUG-FF: pre-fix the stub used `t in text` substring matching, which made
+# any English word containing a term-as-substring fire the wrong polarity:
+#   "miss"  → dismiss / mission / submission / transmission  (false negative)
+#   "fell"  → fellowship / fellow / felled                   (false negative)
+#   "lower" → follower / flowering                            (false negative)
+#   "loss"  → glossary                                        (false negative)
+#   "weak"  → tweak                                           (false negative)
+#   "cut"   → executor / cutting                              (false negative)
+#   "raise" → fundraiser (only if exact "fundraise" not "fundraising")
+# Pre-compiled word-boundary regexes are O(N*M) like the substring check
+# but with O(N) compilation amortized over the process lifetime — and we
+# need `re.escape` anyway for multi-word terms ("record high", "record-high")
+# whose internal whitespace/hyphen would break a naive `\b` flank.
+def _compile(terms: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    return tuple(
+        re.compile(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])")
+        for t in terms
+    )
+
+
+_POS_PATTERNS = _compile(_POS_TERMS)
+_NEG_PATTERNS = _compile(_NEG_TERMS)
+
+
 class SentimentStub:
     model_version = "stub-sentiment/v1"
 
     @staticmethod
     def classify(cap: AwarenessCaptureView) -> SentimentResult:
         text = ((cap.title or "") + " " + (cap.text or "")[:3000]).lower()
-        pos = sum(1 for t in _POS_TERMS if t in text)
-        neg = sum(1 for t in _NEG_TERMS if t in text)
+        pos = sum(1 for p in _POS_PATTERNS if p.search(text))
+        neg = sum(1 for p in _NEG_PATTERNS if p.search(text))
         if pos == 0 and neg == 0:
             return SentimentResult(label=SentimentLabel.NEUTRAL, score=0.5, model_version="stub-sentiment/v1")
         if pos > neg:

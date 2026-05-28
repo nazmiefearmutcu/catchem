@@ -23,6 +23,58 @@ def test_central_bank_and_index_detected() -> None:
     assert any("S&P 500" in s or s == "S&P" for s in idxs)
 
 
+# ── BUG-V regression: word-boundary, not substring, for central banks/indices ──
+#
+# Pre-fix: `if cb in joined` was a plain Python substring check, so "Fed"
+# (a known central-bank token) matched "Federation", "Federated", "Federalist".
+# Symmetric bug on indices: "Dow" matched "Down", "Dowager". Other entity
+# kinds (commodity/crypto) already used \b...\b — the inconsistency was the
+# real tell.
+
+
+def test_fed_central_bank_does_not_match_federation() -> None:
+    e = EntityLinker()
+    h = e.extract(title="UN Federation of Trade Unions condemns sanctions",
+                  text="The federation released a statement.")
+    cbs = h.by_kind("central_bank")
+    assert "Fed" not in cbs, (
+        "Substring 'Fed' inside 'Federation' must NOT trigger central-bank match. "
+        f"Got cbs={cbs}. Use word-boundary regex (\\bFed\\b) like commodities/crypto."
+    )
+
+
+def test_fed_central_bank_does_match_real_fed_mention() -> None:
+    e = EntityLinker()
+    h = e.extract(title="Fed hikes rates again", text="The Fed surprised markets.")
+    assert "Fed" in h.by_kind("central_bank")
+
+
+def test_dow_index_does_not_match_inside_down() -> None:
+    e = EntityLinker()
+    h = e.extract(title="Markets are down on rate fears", text="The shutdown weighs on sentiment.")
+    idxs = h.by_kind("index")
+    assert "Dow" not in idxs, (
+        f"Substring 'Dow' inside 'down'/'shutdown' must NOT trigger index match. "
+        f"Got idxs={idxs}."
+    )
+
+
+def test_dow_index_does_match_real_dow_mention() -> None:
+    e = EntityLinker()
+    h = e.extract(title="Dow Jones closes at record", text="The Dow gained 1%.")
+    idxs = h.by_kind("index")
+    assert any("Dow" in i for i in idxs), idxs
+
+
+def test_sp_index_with_special_chars_still_word_bounded() -> None:
+    """`S&P 500` has `&` (non-alnum) — word-boundary regex must still match it.
+    `re.escape` handles the `&`, and `\\b` anchors on the surrounding text."""
+    e = EntityLinker()
+    h = e.extract(title="S&P 500 hits new high", text="S&P 500 rose 2%.")
+    idxs = h.by_kind("index")
+    assert any("S&P" in i for i in idxs)
+
+
 def test_company_alias_maps_to_ticker() -> None:
     e = EntityLinker(company_aliases={"Apple": "AAPL"})
     h = e.extract(title="Apple unveils new chip", text="Apple held an event.")

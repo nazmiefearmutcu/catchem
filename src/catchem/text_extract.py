@@ -22,8 +22,6 @@ import json
 from html.parser import HTMLParser
 from io import StringIO
 from pathlib import Path
-from typing import Iterable
-
 
 # Cap upload bytes to keep DoS / accidental huge files contained.
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024     # 5 MB
@@ -171,4 +169,4 @@ def extract_text(filename: str, body: bytes) -> tuple[str | None, str]:
     return title_hint, text
 
 
-__all__ = ["extract_text", "ALLOWED_SUFFIXES", "MAX_UPLOAD_BYTES"]
+__all__ = ["ALLOWED_SUFFIXES", "MAX_UPLOAD_BYTES", "extract_text"]

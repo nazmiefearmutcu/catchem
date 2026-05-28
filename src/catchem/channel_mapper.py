@@ -5,8 +5,7 @@ is to surface a routable signal rather than make a market-impact claim.
 
 from __future__ import annotations
 
-from typing import Iterable
-
+from collections.abc import Iterable
 
 # (asset_class, reason_code) → channel id. Wildcard "*" matches any.
 _CHANNEL_RULES: list[tuple[str, str, str]] = [
@@ -18,6 +17,12 @@ _CHANNEL_RULES: list[tuple[str, str, str]] = [
     ("equities", "litigation", "equities.litigation"),
     ("equities", "regulation", "equities.regulation"),
     ("equities", "esg_reputation", "equities.esg"),
+    # BUG-Z: every other asset class had a `*` wildcard catch-all; equities
+    # was the lone exception. A record `asset=[equities]` with no recognised
+    # reason code (or only reasons we don't have an equities-specific bucket
+    # for) used to return `channels=[]`. Now it lands in `equities.general`,
+    # matching the policy of every other asset class.
+    ("equities", "*", "equities.general"),
     ("indices", "*", "indices.macro"),
     ("rates", "central_bank", "rates.policy"),
     ("rates", "inflation", "rates.inflation"),

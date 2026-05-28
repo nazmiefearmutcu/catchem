@@ -7,7 +7,8 @@ Both implementations expose the same surface: ``rank(query, candidates) -> list[
 
 from __future__ import annotations
 
-from typing import Iterable, Protocol
+from collections.abc import Iterable
+from typing import Protocol
 
 from rapidfuzz import fuzz
 
@@ -49,7 +50,8 @@ class RerankerModel:
             return []
         pairs = [(query, c) for c in cands]
         scores = self._model.predict(pairs)
-        out = [(c, float(s)) for c, s in zip(cands, scores)]
+        # strict=True — CrossEncoder.predict returns exactly len(pairs) scores.
+        out = [(c, float(s)) for c, s in zip(cands, scores, strict=True)]
         out.sort(key=lambda kv: -kv[1])
         return out
 

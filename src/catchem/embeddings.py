@@ -11,12 +11,19 @@ self-contained — vectors live as files keyed by capture_id).
 from __future__ import annotations
 
 import hashlib
-import json
-import math
+import re
+from collections.abc import Iterable
+from itertools import pairwise
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 import numpy as np
+
+# Alphanumeric-run tokenizer. Pre-fix `text.lower().split()` retained
+# punctuation on every token, so "fed," and "fed" hashed to different
+# buckets — the embedding lost most of its signal whenever publishers
+# included commas/periods adjacent to words (i.e. always).
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 EMBED_DIM_STUB = 64   # blake2b max digest size
@@ -50,7 +57,9 @@ class EmbedderStub:
         arr = np.zeros(cls.DIM, dtype=np.float32)
         if not text:
             return arr
-        toks = [t for t in text.lower().split() if any(c.isalpha() for c in t)]
+        # Alphanumeric-only tokens — strips punctuation so "fed," and "fed"
+        # produce the same hash bucket.
+        toks = _TOKEN_RE.findall(text.lower())
         if not toks:
             return arr
         for t in toks:
@@ -58,8 +67,10 @@ class EmbedderStub:
             idx = h % cls.DIM
             sign = 1.0 if (h >> 32) & 1 else -1.0
             arr[idx] += sign
-        # Also add bigram features for stronger phrase signal
-        for a, b in zip(toks, toks[1:]):
+        # Also add bigram features for stronger phrase signal.
+        # `itertools.pairwise` yields (toks[0], toks[1]), (toks[1], toks[2]), ...
+        # so the last token has no pair (same shape as the old zip-with-slice).
+        for a, b in pairwise(toks):
             h = cls._hash_token(a + " " + b)
             idx = h % cls.DIM
             sign = 1.0 if (h >> 32) & 1 else -1.0
@@ -110,26 +121,46 @@ def cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 
 class VectorIndex:
-    """Tiny on-disk vector cache. capture_id → vector (.npy)."""
+    """On-disk vector cache with an in-memory hot layer.
+
+    BUG-DD: the previous `nearest()` re-read every `.npy` from disk on
+    every query. At 10k records that is 10k disk seeks per call — fine for
+    the test suite, painful in production. The in-memory `_cache` is
+    populated on `save` and lazily filled by `load`/`nearest` so subsequent
+    queries are pure-memory cosine sweeps.
+    """
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        self._cache: dict[str, np.ndarray] = {}
 
     def save(self, capture_id: str, vec: np.ndarray) -> None:
         path = self.root / f"{capture_id}.npy"
-        np.save(path, vec.astype(np.float32))
+        as_f32 = vec.astype(np.float32)
+        np.save(path, as_f32)
+        # Cache the write so the next nearest() doesn't have to re-read it
+        # from disk just to score it.
+        self._cache[capture_id] = as_f32
 
     def load(self, capture_id: str) -> np.ndarray | None:
+        cached = self._cache.get(capture_id)
+        if cached is not None:
+            return cached
         path = self.root / f"{capture_id}.npy"
         if not path.exists():
             return None
-        return np.load(path)
+        vec = np.load(path)
+        self._cache[capture_id] = vec
+        return vec
 
     def nearest(self, vec: np.ndarray, k: int = 5) -> list[tuple[str, float]]:
-        results: list[tuple[str, float]] = []
+        # Lazy-load any vectors on disk that haven't entered the cache yet.
+        # First query pays the disk cost; subsequent queries are pure RAM.
         for p in sorted(self.root.glob("*.npy")):
-            other = np.load(p)
-            results.append((p.stem, cosine(vec, other)))
+            cid = p.stem
+            if cid not in self._cache:
+                self._cache[cid] = np.load(p)
+        results = [(cid, cosine(vec, other)) for cid, other in self._cache.items()]
         results.sort(key=lambda kv: -kv[1])
         return results[:k]

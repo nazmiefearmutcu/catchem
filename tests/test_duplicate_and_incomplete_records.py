@@ -7,10 +7,8 @@ cannot be parsed without crashing the API. DLQ must capture failures.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from catchem.awareness_reader import iter_captures, parse_capture_line
 from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
@@ -39,7 +37,7 @@ def _make_record(capture_id: str, score: float, title: str) -> FinancialImpactRe
         component_scores={"raw_relevance_score": score},
         processing_mode=ProcessingMode.REPLAY_EXISTING,
         model_versions={"zero_shot": "stub"},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

@@ -8,10 +8,8 @@ ISO 8601 strings on the wire.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from catchem.awareness_reader import parse_capture_line
 from catchem.schemas import AwarenessCaptureView
@@ -50,7 +48,7 @@ def test_storage_serializes_published_ts_as_iso_string(tmp_path: Path) -> None:
     from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
     s = Storage(db_path=tmp_path / "catchem.sqlite3",
                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
-    pub = datetime(2026, 5, 16, 10, 0, 0, tzinfo=timezone.utc)
+    pub = datetime(2026, 5, 16, 10, 0, 0, tzinfo=UTC)
     rec = FinancialImpactRecord(
         capture_id="ts1", doc_id="d", title="t", text_excerpt="x",
         published_ts=pub, domain="x.com", url="https://x.com/1",
@@ -60,7 +58,7 @@ def test_storage_serializes_published_ts_as_iso_string(tmp_path: Path) -> None:
         component_scores={"raw_relevance_score": 0.4},
         processing_mode=ProcessingMode.PRODUCTION_SAFE,
         model_versions={"x": "v"},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     s.insert_record(rec)
     row = s.get_record("ts1")
@@ -85,7 +83,7 @@ def test_storage_handles_record_with_no_published_ts(tmp_path: Path) -> None:
         component_scores={"raw_relevance_score": 0.1},
         processing_mode=ProcessingMode.PRODUCTION_SAFE,
         model_versions={"x": "v"},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     s.insert_record(rec)
     row = s.get_record("ts2")

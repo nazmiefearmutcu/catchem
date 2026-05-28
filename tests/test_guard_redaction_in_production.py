@@ -9,7 +9,7 @@ diagnostic data, the API surface MUST scrub it.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,7 +18,6 @@ from fastapi.testclient import TestClient
 
 from catchem.api import create_app
 from catchem.redaction import (
-    PRODUCTION_SAFE_DIAGNOSTIC_FIELDS,
     SAFE_GUARD_KEYS,
     redact_record_for_mode,
     redact_records_for_mode,
@@ -55,7 +54,7 @@ def _record_with_diagnostic_truthy(capture_id: str = "diag-leak") -> FinancialIm
         diagnostic_multimodal_result={"label": "should_be_scrubbed_in_prod"},   # truthy on purpose
         processing_mode=ProcessingMode.RESEARCH_DIAGNOSTIC,
         model_versions={"zero_shot": "stub-zero-shot/v1"},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -137,7 +136,6 @@ def prod_safe_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Test
     client.__enter__()
     # Inject a truthy-diagnostic record straight into storage to bypass the
     # service layer's safety. The API surface must still scrub.
-    sup = client.app.state if hasattr(client.app, "state") else None  # type: ignore[attr-defined]
     # We need the live supervisor; it was created by lifespan.
     from catchem import api as api_mod
     storage = api_mod._SUPERVISOR.storage  # type: ignore[union-attr]

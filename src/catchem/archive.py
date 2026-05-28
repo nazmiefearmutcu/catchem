@@ -38,7 +38,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +128,7 @@ def fallback_drive_dir() -> Path:
 
 
 def csv_path_for_today(root: Path) -> Path:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     return root / f"news_archive_{today}.csv"
 
 
@@ -137,7 +137,10 @@ def _list_from_json(raw: str | None) -> str:
         return ""
     try:
         parts = json.loads(raw)
-    except Exception:
+    except json.JSONDecodeError:
+        # Narrow: only JSON parse failures are an expected failure mode here.
+        # A broader `except Exception` would swallow programming bugs
+        # (TypeError if `raw` is not a string, etc.) — those should surface.
         return ""
     if not isinstance(parts, list):
         return ""
@@ -150,13 +153,14 @@ def row_to_csv_dict(row: dict[str, Any]) -> dict[str, str]:
     evidence_raw = row.get("evidence_json") or "[]"
     try:
         evidence = json.loads(evidence_raw)
-    except Exception:
+    except json.JSONDecodeError:
+        # See _list_from_json: narrow to the actual expected failure mode.
         evidence = []
     if isinstance(evidence, list):
         evidence_parts = [str(e).strip()[:240] for e in evidence[:3] if e]
     else:
         evidence_parts = []
-    reasoning = " // ".join(p for p in ([reason_text] + evidence_parts) if p)
+    reasoning = " // ".join(p for p in [reason_text, *evidence_parts] if p)
 
     score = row.get("finance_relevance_score")
     sent_score = row.get("sentiment_score")
@@ -253,12 +257,16 @@ class DriveArchiver:
         try:
             self._drive_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            logger.warning("archive_dir_create_failed dir=%s error=%s", self._drive_dir, exc)
-        loop = asyncio.get_event_loop()
+            logger.warning("archive_dir_create_failed", dir=str(self._drive_dir), error=str(exc))
+        # See news_poller.NewsPoller.start — `get_running_loop` is the
+        # 3.10+ idiom and surfaces misuse from sync context.
+        loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._run(), name="catchem-drive-archiver")
         logger.info(
-            "drive_archiver_started dir=%s cap=%d interval=%.0fs",
-            self._drive_dir, self._local_cap, self._interval,
+            "drive_archiver_started",
+            dir=str(self._drive_dir),
+            cap=self._local_cap,
+            interval=self._interval,
         )
 
     async def stop(self) -> None:
@@ -281,7 +289,7 @@ class DriveArchiver:
         try:
             await asyncio.wait_for(self._stop.wait(), timeout=5.0)
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         while not self._stop.is_set():
@@ -292,18 +300,19 @@ class DriveArchiver:
                 self.last_error = result.error
                 if result.archived:
                     logger.info(
-                        "archive_swept count=%d path=%s",
-                        result.archived, result.csv_path,
+                        "archive_swept",
+                        count=result.archived,
+                        path=str(result.csv_path),
                     )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self.last_error = repr(exc)
-                logger.warning("archive_tick_failed error=%s", exc, exc_info=False)
+                logger.warning("archive_tick_failed", error=str(exc))
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
                 break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     def _archive_once(self) -> ArchiveResult:
@@ -326,97 +335,148 @@ class DriveArchiver:
             return ArchiveResult(archived=0, csv_path=None, error="already running")
         self.is_archiving = True
         try:
-            # Pull rows older than the live-cache cap. Oldest-first so the
-            # CSV is naturally chronological. The outer LIMIT caps the
-            # per-tick batch so a huge backlog drains over multiple ticks.
-            with self._sup.storage.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT * FROM records
-                    WHERE capture_id NOT IN (
-                        SELECT capture_id FROM records
-                        ORDER BY created_at DESC
+            # ── Step 1: SELECT inside the storage lock ───────────────────
+            #
+            # Previously the SELECT ran on a short-lived connection
+            # OUTSIDE ``storage._lock`` with the justification that "WAL
+            # readers don't block writers". That is correct for sqlite's
+            # own concurrency semantics, but it leaves a logical race:
+            # ``news_poller.insert_record`` calls
+            # ``INSERT OR REPLACE INTO records`` between our SELECT and
+            # our DELETE, and the new row's capture_id can hit a SELECTed
+            # capture_id (the inserts are upserts keyed on capture_id).
+            # The new row supersedes the original, the CSV writer writes
+            # the OLD row's column values, the DELETE drops the row
+            # silently, and the user-visible record from the poller's
+            # second-ingest is lost as well — we now have a CSV row that
+            # doesn't reflect the DB's last-known state and a missing
+            # DB row that should still be live.
+            #
+            # Fix: take ``storage._lock`` once, run SELECT + write +
+            # DELETE under it. WAL still keeps reader-vs-reader queries
+            # fast (no blocking), the lock just gates the SELECT/DELETE
+            # pair against concurrent writers so the row we delete is
+            # the same row we wrote to CSV. The lock is held across the
+            # CSV-write fsync (up to ~1 s on cold disks) which is a
+            # known regression vs the prior fast-path — acceptable
+            # because the news poller's insert_record uses a 30 s
+            # SQLite timeout and we never breach 30 s in practice. If
+            # this becomes a hot path, the right answer is "checksum the
+            # SELECTed rows by rowid, re-read under lock to confirm
+            # they're unchanged, then DELETE" — not "don't take the
+            # lock". We pick correctness now.
+            #
+            # The lock is acquired ONCE; ``_connection()`` opens a fresh
+            # short-lived connection inside it. We hand the SELECT result
+            # off as a plain list-of-dicts before the connection closes
+            # so the CSV write does not reach back into sqlite mid-fsync.
+            with self._sup.storage._lock, self._sup.storage._connection() as conn:
+                # Old query was a correlated `WHERE capture_id NOT IN
+                # (SELECT capture_id ...)` — O(n×m) because SQLite re-runs
+                # the inner SELECT for every candidate row in the outer
+                # scan. Rewriting against the integer rowid lets the
+                # planner hash-set the keep-list once and seek by primary
+                # index, turning the lookup into O(n + m). Same semantics:
+                # keep the newest `_local_cap` rows by created_at DESC,
+                # archive everything older, oldest-first, capped per tick.
+                rows = [
+                    dict(r)
+                    for r in conn.execute(
+                        """
+                        SELECT * FROM records
+                        WHERE rowid NOT IN (
+                            SELECT rowid FROM records
+                            ORDER BY created_at DESC
+                            LIMIT ?
+                        )
+                        ORDER BY created_at ASC
                         LIMIT ?
-                    )
-                    ORDER BY created_at ASC
-                    LIMIT ?
-                    """,
-                    (self._local_cap, self._per_tick_cap),
-                )
-                rows = [dict(r) for r in cur.fetchall()]
+                        """,
+                        (self._local_cap, self._per_tick_cap),
+                    ).fetchall()
+                ]
 
-            if not rows:
-                self.last_run_at = datetime.now(timezone.utc)
-                return ArchiveResult(archived=0, csv_path=None, error=None)
+                if not rows:
+                    self.last_run_at = datetime.now(UTC)
+                    return ArchiveResult(archived=0, csv_path=None, error=None)
 
-            # Ensure the target dir exists, falling back to a known-good
-            # path if the configured one is read-only (most common cause:
-            # the FileProvider iCloud mount at ~/Library/CloudStorage/
-            # iCloudDrive-*, which rejects writes from un-entitled apps).
-            try:
-                self._drive_dir.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                fallback = fallback_drive_dir()
-                if self._drive_dir == fallback:
-                    return ArchiveResult(archived=0, csv_path=None, error=f"mkdir failed: {exc}")
-                logger.warning(
-                    "archive_dir_unwritable falling_back from=%s to=%s error=%s",
-                    self._drive_dir, fallback, exc,
-                )
-                self._drive_dir = fallback
+                # Ensure the target dir exists, falling back to a known-good
+                # path if the configured one is read-only (most common cause:
+                # the FileProvider iCloud mount at ~/Library/CloudStorage/
+                # iCloudDrive-*, which rejects writes from un-entitled apps).
                 try:
                     self._drive_dir.mkdir(parents=True, exist_ok=True)
-                except OSError as exc2:
-                    return ArchiveResult(archived=0, csv_path=None, error=f"fallback mkdir failed: {exc2}")
+                except OSError as exc:
+                    fallback = fallback_drive_dir()
+                    if self._drive_dir == fallback:
+                        return ArchiveResult(archived=0, csv_path=None, error=f"mkdir failed: {exc}")
+                    logger.warning(
+                        "archive_dir_unwritable falling_back from=%s to=%s error=%s",
+                        self._drive_dir, fallback, exc,
+                    )
+                    self._drive_dir = fallback
+                    try:
+                        self._drive_dir.mkdir(parents=True, exist_ok=True)
+                    except OSError as exc2:
+                        return ArchiveResult(archived=0, csv_path=None, error=f"fallback mkdir failed: {exc2}")
 
-            # Now that the dir is settled (primary or fallback), compute today's
-            # CSV path. Must come AFTER the fallback may have swapped drive_dir,
-            # otherwise we'd try to open the original (blocked) path.
-            csv_path = csv_path_for_today(self._drive_dir)
-            self.current_csv_path = csv_path
-            try:
-                file_exists = csv_path.exists() and csv_path.stat().st_size > 0
-                # Open in binary+text-mode-equivalent with newline="" — required
-                # so csv.writer handles line endings correctly across platforms.
-                with csv_path.open("a", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=list(CSV_COLUMNS))
-                    if not file_exists:
-                        writer.writeheader()
-                    for row in rows:
-                        writer.writerow(row_to_csv_dict(row))
-                    f.flush()
-                    # fsync at the file-descriptor level guarantees the data is
-                    # actually on disk before we delete locally. Without this,
-                    # a crash between write() and the OS flush would lose rows.
-                    os.fsync(f.fileno())
-            except OSError as exc:
-                # Don't delete locally on any I/O failure. Try again next tick.
-                return ArchiveResult(
-                    archived=0,
-                    csv_path=csv_path,
-                    error=f"write failed: {exc}",
-                )
+                # Now that the dir is settled (primary or fallback), compute today's
+                # CSV path. Must come AFTER the fallback may have swapped drive_dir,
+                # otherwise we'd try to open the original (blocked) path.
+                csv_path = csv_path_for_today(self._drive_dir)
+                self.current_csv_path = csv_path
+                try:
+                    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
+                    # Open in binary+text-mode-equivalent with newline="" — required
+                    # so csv.writer handles line endings correctly across platforms.
+                    with csv_path.open("a", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=list(CSV_COLUMNS))
+                        if not file_exists:
+                            writer.writeheader()
+                        for row in rows:
+                            writer.writerow(row_to_csv_dict(row))
+                        f.flush()
+                        # fsync at the file-descriptor level guarantees the data is
+                        # actually on disk before we delete locally. Without this,
+                        # a crash between write() and the OS flush would lose rows.
+                        os.fsync(f.fileno())
+                except OSError as exc:
+                    # Don't delete locally on any I/O failure. Try again next tick.
+                    return ArchiveResult(
+                        archived=0,
+                        csv_path=csv_path,
+                        error=f"write failed: {exc}",
+                    )
 
-            # Now safe to delete from local. SQLite's host-parameter ceiling
-            # is 999 (default) — anything bigger errors with "too many SQL
-            # variables". Chunk at 900 to leave headroom and keep each
-            # DELETE's wall-clock under ~50 ms.
-            archived_ids = [r["capture_id"] for r in rows]
-            chunk_size = 900
-            with self._sup.storage.cursor() as cur:
+                # Now safe to delete from local. SQLite's host-parameter ceiling
+                # is 999 (default) — anything bigger errors with "too many SQL
+                # variables". Chunk at 900 to leave headroom and keep each
+                # DELETE's wall-clock under ~50 ms.
+                #
+                # Same connection that ran SELECT — so the SELECT/DELETE
+                # pair is one logical operation under the lock and a
+                # concurrent INSERT OR REPLACE cannot slip in.
+                archived_ids = [r["capture_id"] for r in rows]
+                chunk_size = 900
                 for i in range(0, len(archived_ids), chunk_size):
                     chunk = archived_ids[i:i + chunk_size]
                     placeholders = ",".join("?" * len(chunk))
-                    cur.execute(
+                    # record_labels first so a partial DELETE doesn't
+                    # leave orphan label rows; the ``foreign_keys=ON``
+                    # PRAGMA enabled in storage._connect would also
+                    # cascade on the records DELETE, but explicit DELETE
+                    # is cheaper than the cascade trigger and matches
+                    # the historical contract.
+                    conn.execute(
                         f"DELETE FROM record_labels WHERE capture_id IN ({placeholders})",
                         chunk,
                     )
-                    cur.execute(
+                    conn.execute(
                         f"DELETE FROM records WHERE capture_id IN ({placeholders})",
                         chunk,
                     )
 
-            self.last_run_at = datetime.now(timezone.utc)
+            self.last_run_at = datetime.now(UTC)
             return ArchiveResult(archived=len(rows), csv_path=csv_path, error=None)
         finally:
             self.is_archiving = False
@@ -425,8 +485,8 @@ class DriveArchiver:
 
 __all__ = [
     "CSV_COLUMNS",
-    "DriveArchiver",
     "ArchiveResult",
+    "DriveArchiver",
     "csv_path_for_today",
     "detect_drive_dir",
     "row_to_csv_dict",

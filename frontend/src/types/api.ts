@@ -307,6 +307,16 @@ export interface NewsSourceRow {
   cooldown_until?: string | null;
   /** True if the most recent tick skipped this feed due to cooldown. */
   backed_off?: boolean;
+  /**
+   * Adaptive poll cadence — how many poller cycles between attempts. The
+   * poller stretches the interval for feeds that keep coming back empty
+   * (publishers quiet) to save bandwidth. 1 (or absent) = every cycle.
+   */
+  adaptive_cadence?: number;
+  /** Consecutive ticks this feed returned zero NEW items. */
+  consecutive_empty?: number;
+  /** Cumulative NEW (deduped) items ingested from this feed since boot. */
+  total_new_items?: number;
 }
 
 export interface NewsSourcesResponse {
@@ -349,6 +359,34 @@ export interface NewsAwareness {
   total_ingested: number;
   /** poll_interval + median_publisher_lag; null when no fresh lag this tick. */
   window_estimate_seconds: number | null;
+}
+
+/**
+ * One watched term that HAS been seen recently — part of the coverage map.
+ * ``last_seen_age_seconds`` is how stale the freshest mention is;
+ * ``mention_count`` is how many records inside the window referenced it.
+ */
+export interface NewsCoverageCovered {
+  term: string;
+  last_seen_age_seconds: number;
+  mention_count: number;
+}
+
+/**
+ * Blind-spot detector — answers "what am I NOT seeing?". Compares the set
+ * of watched terms against what actually arrived inside ``window_seconds``.
+ * ``gaps`` are watched terms with ZERO recent coverage; ``covered`` carries
+ * each seen term with its freshest-mention age + mention count.
+ *
+ * Degraded / freshly-booted shape: empty ``gaps`` and ``covered`` — which
+ * the UI renders as the benign "all covered" empty state.
+ */
+export interface NewsCoverageGaps {
+  schema_version: number;
+  generated_at: string;
+  window_seconds: number;
+  covered: NewsCoverageCovered[];
+  gaps: string[];
 }
 
 export interface ArchiveStatus {

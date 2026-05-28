@@ -253,7 +253,7 @@ import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UIBacktest, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot, MarketQuote, MarketQuoteBatchResponse,
   DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
-  NewsSourcesResponse,
+  NewsSourcesResponse, NewsAwareness,
   ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
   SymbolSentimentTrend,
 } from "@/types/api";
@@ -425,6 +425,13 @@ export const api = {
   newsStatus: () => request<NewsStatus>("/ui/news-status"),
   /** Per-feed source health — drives /sources page. */
   newsSources: () => request<NewsSourcesResponse>("/api/news/sources"),
+  /**
+   * Live "awareness window" — how fresh + how broad is awareness right now.
+   * window_estimate_seconds ≈ poll_interval + median_publisher_lag. Always
+   * 200 (degraded envelope when the poller is disabled). Drives the
+   * "Awareness window" panel on /sources.
+   */
+  newsAwareness: () => request<NewsAwareness>("/api/news/awareness"),
   /**
    * Highest-scoring recent records — analyst attention triage.
    *

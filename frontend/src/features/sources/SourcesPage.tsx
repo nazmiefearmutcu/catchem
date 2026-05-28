@@ -131,6 +131,107 @@ export function formatCooldownRemaining(
   return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
 }
 
+/**
+ * Format a duration in seconds as a compact "Xm Ys" / "Xs" / "Xh Ym"
+ * string for the awareness-window panel. Returns "—" for null / negative /
+ * non-finite so the cell never renders "NaNs". Pure + pinned in tests.
+ *
+ * Exported so the test file can pin behaviour without mounting the page.
+ */
+export function formatWindowSeconds(secs: number | null | undefined): string {
+  if (secs == null || !Number.isFinite(secs) || secs < 0) return "—";
+  const total = Math.round(secs);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m < 60) return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
+}
+
+/**
+ * Small live "awareness window" panel — answers "how fresh / how broad is
+ * awareness right now?". Reads /api/news/awareness (always 200; degraded
+ * envelope when the poller is off). Card styling mirrors the per-feed
+ * table card below it.
+ */
+function AwarenessWindowPanel() {
+  const awareness = useQuery({
+    queryKey: ["news-awareness"],
+    queryFn: () => api.newsAwareness(),
+    refetchInterval: 15_000,
+  });
+
+  const data = awareness.data;
+  if (awareness.isLoading) return <Skeleton className="h-28" />;
+  if (!data) return null;
+
+  const parserEntries = Object.entries(data.sources_by_parser).sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+  const windowLabel =
+    data.window_estimate_seconds == null
+      ? "—"
+      : `~${formatWindowSeconds(data.window_estimate_seconds)} to now`;
+
+  return (
+    <section className="card" data-testid="awareness-window">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="label">
+          awareness window{" "}
+          <span className="text-[color:var(--fg-muted)] font-normal">
+            how fresh · how broad
+          </span>
+        </h2>
+        {data.last_new_at && (
+          <span className="text-[10px] text-[color:var(--fg-dim)] tabular-nums">
+            last new arrival {fmtRel(data.last_new_at)}
+          </span>
+        )}
+      </div>
+      {!data.configured ? (
+        <EmptyState
+          title="news poller disabled"
+          hint="Enable the RSS poller (CATCHEM_NEWS__POLLER_ENABLED=true) to see the live awareness window."
+        />
+      ) : (
+        <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 text-[11px]">
+          <SourcesStat
+            label="total sources"
+            value={data.sources_total.toLocaleString()}
+            hint="configured feeds"
+          />
+          <SourcesStat
+            label="effective window"
+            value={windowLabel}
+            hint="poll interval + publisher lag"
+            tone="good"
+          />
+          <SourcesStat
+            label="median publisher lag"
+            value={formatWindowSeconds(data.median_publisher_lag_seconds)}
+            hint={
+              data.poll_interval_seconds != null
+                ? `polls every ${formatWindowSeconds(data.poll_interval_seconds)}`
+                : "publisher-side delay"
+            }
+          />
+          <SourcesStat
+            label="by parser"
+            value={
+              parserEntries.length === 0
+                ? "—"
+                : parserEntries.map(([p, n]) => `${p}:${n}`).join(" · ")
+            }
+            hint={`${data.total_ingested.toLocaleString()} items ingested`}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SourcesStat({
   label,
   value,
@@ -400,6 +501,9 @@ export function SourcesPage() {
           />
         </div>
       </section>
+
+      {/* Live awareness window — how fresh + how broad, right now. */}
+      <AwarenessWindowPanel />
 
       {/* Per-feed table. */}
       <section className="card">

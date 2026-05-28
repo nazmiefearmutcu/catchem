@@ -292,7 +292,8 @@ export const PAGE_HELP: Record<string, HelpContent> = {
   },
   "/help": {
     quickTips: [
-      "This is the long-form glossary",
+      "This is the long-form glossary and quick-start",
+      "New here? Hit 'Replay welcome tour' at the top to re-watch the first-run intro",
       "For quick contextual help on any page, click the floating ? button bottom-right",
       "Press '?' anywhere for the keyboard shortcut overlay",
     ],

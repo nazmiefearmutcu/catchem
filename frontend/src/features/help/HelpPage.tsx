@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { requestOpenOnboarding } from "@/lib/onboarding";
 
 /**
  * Help-surface. Round 8 redesign: this page used to duplicate Settings
@@ -79,6 +80,19 @@ export function HelpPage() {
               </div>
             </div>
           </div>
+          {/* Re-open the first-run tour. Uses the reload-free event path
+              (lib/onboarding) so the welcome overlay pops instantly over
+              this page — no navigation, no lost state. The command palette's
+              "Restart onboarding" is the heavier reset-and-reload variant. */}
+          <button
+            type="button"
+            onClick={requestOpenOnboarding}
+            data-testid="help-replay-tour"
+            title="Replay the first-run welcome tour"
+            className="btn shrink-0 text-xs"
+          >
+            ↺ Replay welcome tour
+          </button>
         </div>
         <div className="relative grid gap-2 grid-cols-2 md:grid-cols-4 text-[11px]">
           <HelpStat to="/feed" label="step 1" value="Open Live Feed →" hint="watch ingest in real time" />

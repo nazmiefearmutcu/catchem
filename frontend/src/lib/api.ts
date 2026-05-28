@@ -253,7 +253,7 @@ import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UIBacktest, UISymbol,
   UIConfig, UIMetrics, FinancialRecord, GuardSnapshot, MarketQuote, MarketQuoteBatchResponse,
   DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
-  NewsSourcesResponse, NewsAwareness,
+  NewsSourcesResponse, NewsAwareness, NewsCoverageGaps,
   ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
   SymbolSentimentTrend,
 } from "@/types/api";
@@ -432,6 +432,15 @@ export const api = {
    * "Awareness window" panel on /sources.
    */
   newsAwareness: () => request<NewsAwareness>("/api/news/awareness"),
+  /**
+   * Blind-spot detector — "what am I NOT seeing?". Compares the watched
+   * term set against what actually arrived inside the window; returns
+   * ``gaps`` (watched terms with no recent coverage) + ``covered`` (each
+   * seen term with freshest-mention age + count). Always 200 (empty
+   * gaps + covered on a fresh boot / disabled poller). Drives the "Blind
+   * spots" panel on /sources.
+   */
+  newsCoverageGaps: () => request<NewsCoverageGaps>("/api/news/coverage-gaps"),
   /**
    * Highest-scoring recent records — analyst attention triage.
    *

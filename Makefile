@@ -5,7 +5,7 @@ PIP := $(VENV)/bin/uv pip
 PYTEST := $(VENV)/bin/pytest
 CATCHEM := $(VENV)/bin/catchem
 
-.PHONY: help bootstrap install test test-fast test-guards test-smoke run-replay run-api lint clean nuke
+.PHONY: help bootstrap install test test-fast test-guards test-smoke coverage run-replay run-api lint clean nuke
 
 help:
 	@echo "Targets:"
@@ -15,6 +15,7 @@ help:
 	@echo "  test-fast     – unit-only (skip ml, smoke, integration)"
 	@echo "  test-guards   – guard tests only (must always pass)"
 	@echo "  test-smoke    – smoke tests"
+	@echo "  coverage      – run full suite with line+branch coverage (term-missing)"
 	@echo "  run-replay    – run replay mode against awareness JSONL"
 	@echo "  run-api       – start catchem HTTP API"
 	@echo "  lint          – ruff check"
@@ -39,6 +40,9 @@ test-guards:
 
 test-smoke:
 	$(PYTEST) -ra -m "smoke"
+
+coverage:
+	$(PYTEST) --cov=src/catchem --cov-report=term-missing
 
 run-replay:
 	$(CATCHEM) run --mode replay_existing

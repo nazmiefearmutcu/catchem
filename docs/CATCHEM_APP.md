@@ -88,9 +88,14 @@ The sidecar is always launched with:
 CATCHEM_MODE=production_safe
 CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=false
 CATCHEM_USE_ML_STUBS=true
-CATCHEM_API_HOST=127.0.0.1
-CATCHEM_API_PORT=8087
+CATCHEM_API__HOST=127.0.0.1
+CATCHEM_API__PORT=8087
 ```
+
+The double-underscore form `CATCHEM_API__HOST` matters: the single-underscore
+form `CATCHEM_API_HOST` is silently ignored by pydantic-settings (the contract
+is pinned by
+`tests/test_settings_live_env_override.py::test_catchem_api_single_underscore_is_silently_ignored`).
 
 The shell **cannot** enable diagnostic mode. There is no UI surface for it.
 To run in `research_diagnostic`, the user must launch the bare CLI manually

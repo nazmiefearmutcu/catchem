@@ -151,7 +151,7 @@ rm -f data/logs/api.pid
 
 | Symptom | Probable cause | Fix |
 |---|---|---|
-| `bootstrap` exits with `FAIL: governance_index.json missing` | merged_news not present or path wrong | Set `NEWSIMPACT_REPO_PATH` or place the repo at the default path. |
+| `bootstrap` exits with `FAIL: governance_index.json missing` | merged_news not present or path wrong | Set `CATCHEM_PATHS__NEWSIMPACT_REPO=/path/to/merged_news` (double underscore) or place the repo at the default path. |
 | `release_gate_passed_unexpectedly_true` | Someone (or something) mutated governance metadata. | Investigate. Do **not** suppress the check. |
 | `catchem run` exits with `awareness path missing` | Awareness data dir not where expected | `CATCHEM_PATHS__AWARENESS_DATA_DIR=...` |
 | No records appearing | All inputs may be filtered. Run `catchem run --mode replay_existing --max-records 50` and inspect `data/results/dlq/`. |

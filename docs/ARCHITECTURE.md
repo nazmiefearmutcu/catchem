@@ -1,6 +1,6 @@
 # Catchem Architecture
 
-Catchem is a local-first macOS desktop cockpit that ingests financial-news streams (Awareness JSONL captures, RSS/Atom feeds, paste/upload), runs a deterministic finance-relevance pipeline, layers a quant-analytics engine on top, and surfaces every signal through a premium React UI served by a co-located FastAPI sidecar. Everything — captures, models, SQLite, logs — lives on the analyst's laptop; nothing leaves the machine unless the user clicks an article link or wires the optional DeepSeek reviewer / webhook outputs. This document reflects the codebase after v15–v51 polish iterations (~1147 tests, ~37 release cycles, three full audit rounds).
+Catchem is a local-first macOS desktop cockpit that ingests financial-news streams (Awareness JSONL captures, a ~375-source awareness ingestion engine, an optional real-time push channel, paste/upload), runs a deterministic finance-relevance pipeline, layers a quant-analytics engine on top, and surfaces every signal through a premium React UI served by a co-located FastAPI sidecar. Everything — captures, models, SQLite, logs — lives on the analyst's laptop; nothing leaves the machine unless the user clicks an article link or wires the optional DeepSeek reviewer / webhook outputs. Beyond raw ingestion the sidecar runs awareness telemetry (live-window estimate + blind-spot detection), a GDELT global-tone macro signal, and a read-only portfolio subsystem that joins analyst holdings to the awareness layer. This document reflects the codebase after the awareness-engine + quant + portfolio expansion (Sections 3a–3d below).
 
 > Companion docs: [`CATCHEM_ARCHITECTURE.md`](CATCHEM_ARCHITECTURE.md) (mermaid diagrams, threat model details), [`FRONTEND_ARCHITECTURE.md`](FRONTEND_ARCHITECTURE.md), [`CATCHEM_HARDENING.md`](CATCHEM_HARDENING.md), [`KEYBOARD_SHORTCUTS.md`](KEYBOARD_SHORTCUTS.md).
 
@@ -21,10 +21,14 @@ Catchem is a local-first macOS desktop cockpit that ingests financial-news strea
                 ┌──────────────────┴───────────────────┐
                 │  FastAPI sidecar  (Python 3.11+)     │
                 │  ─────────────────────────────────   │
-                │  - 95 HTTP routes (/api, /ui, /)     │
+                │  - 100+ HTTP routes (/api, /ui, /)   │
                 │  - SQLite WAL store + parquet sink   │
-                │  - News poller (53 RSS/Atom + breaker)│
-                │  - QuantEngine (17 signal families)  │
+                │  - Awareness engine (~375 feeds,     │
+                │    6 parsers, breaker + adaptive)    │
+                │  - Real-time PUSH channel (WS+SSE,off)│
+                │  - Awareness telemetry + blind-spot  │
+                │  - QuantEngine + global-tone signal  │
+                │  - Portfolio subsystem (read-only)   │
                 │  - DeepSeek reviewer (opt-in)        │
                 │  - Drive archiver (CSV export)       │
                 │  - Webhook fan-out (SSRF-guarded)    │
@@ -50,7 +54,11 @@ Catchem is a local-first macOS desktop cockpit that ingests financial-news strea
 | Sidecar | FastAPI 0.111 + uvicorn + sse-starlette | `src/catchem/api.py` |
 | Storage | SQLite (WAL) + pyarrow parquet + JSONL DLQ | `src/catchem/storage.py` |
 | Pipeline | pure-Python finance filter / zero-shot / sentiment / evidence / entity | `src/catchem/{pipeline,finance_filter,zero_shot_classifier,sentiment,evidence,entity_linker,symbol_mapper}.py` |
-| Quant | pandas + numpy + scikit-learn + rapidfuzz | `src/catchem/quant/**` |
+| Awareness engine | pluggable parsers + feed-provider registry + auto-discovered source packs | `src/catchem/news_poller.py`, `src/catchem/news_sources/**` |
+| Real-time push | lazy-imported `websockets`/`httpx_ws` + httpx SSE | `src/catchem/ws_push.py` |
+| Awareness intelligence | pure blind-spot detector + live-window telemetry | `src/catchem/awareness_gaps.py` |
+| Quant | pandas + numpy + scikit-learn + rapidfuzz (+ GDELT global-tone) | `src/catchem/quant/**` |
+| Portfolio | pure read-only holdings→awareness join | `src/catchem/portfolio.py` |
 
 ---
 
@@ -59,8 +67,11 @@ Catchem is a local-first macOS desktop cockpit that ingests financial-news strea
 ```
               ┌──── Awareness JSONL inbox (post-commit hook upstream)
               │      env: CATCHEM_PATHS__AWARENESS_DATA_DIR
-   captures ─┼──── RSS/Atom poller (53 default feeds, 60s tick)
-              │      news_poller.py → DEFAULT_FEEDS
+   captures ─┼──── Awareness ingestion engine (~375 feeds, 10s tick)
+              │      news_poller.assemble_feeds() → 6 pluggable parsers
+              │      (DEFAULT_FEEDS + auto-discovered news_sources/* packs)
+              ├──── Real-time PUSH channel (ws_push.py, OFF by default)
+              │      WebSocket + Wikimedia SSE → same ingest path
               └──── UI paste / upload  (/ui/demo/paste, /ui/demo/upload)
                      │
                      ▼
@@ -111,6 +122,90 @@ Catchem is a local-first macOS desktop cockpit that ingests financial-news strea
 | DeepSeek (`reviewers/deepseek.py`) | Async, sampled, budget-capped | USD/token | ~1–3 s | `/api/reviews/{capture_id}/run`, narrative endpoints |
 
 Agreement scoring lives in `_compute_agreement()` (api.py:238): Jaccard over asset_classes / reason_codes / candidate_symbols, plus relevance/sentiment match and inverted score delta — surfaced on `/reviews`.
+
+---
+
+## 2a. Awareness ingestion engine
+
+The original "53-feed RSS poller" has grown into a self-extending **awareness ingestion engine**: ~375 configured feeds across six parser types, assembled from a hand-curated core plus auto-discovered source packs. The loop is unchanged (`fetch → parse → dedup → finance_filter → ingest`); what scaled is the *plug-in surface* around it.
+
+```
+catchem/news_sources/*.py  (25 packs, auto-discovered)
+   │  each calls at import time:
+   │    register_feed_provider(fn -> [FeedSpec(..., parser="gdelt")])
+   │    register_parser("gdelt", _parse_gdelt)
+   ▼
+news_poller.assemble_feeds()                      ← DEFAULT_FEEDS (53) + every provider
+   │  de-dupe by name (DEFAULT_FEEDS wins collisions)
+   ▼
+AsyncNewsPoller loop (10s tick, interval floored to 10s)
+   │  per-feed: _adaptive_cadence(consecutive_empty) → skip-multiplier ladder
+   │            circuit breaker (5 fails → 60/300/900/1800/3600s backoff)
+   ▼
+get_parser(spec.parser)(body, fallback_domain) → list[ParsedItem]   (6 parsers)
+   │  rss · gdelt · gdelt_gkg · hn_algolia · reddit · twitter
+   ▼
+dedup:  _canonical_url() LRU (_SeenCache)   +   _normalize_title() cross-source title window
+   │      (strips www./trailing-slash/utm_*)     (strips " - Source" suffix; skips <5-char titles)
+   ▼
+finance_filter (deterministic keyword + score)  →  supervisor.process_capture()  →  SQLite / quant / UI
+```
+
+### Pluggable registries (`news_poller.py`)
+
+| Mechanism | Symbol | Behavior |
+|---|---|---|
+| Parser registry | `register_parser(name, fn)` / `get_parser(name)` (`_PARSERS` dict) | Maps a `FeedSpec.parser` key to a `bytes -> list[ParsedItem]` function. `"rss"` is registered at import; packs add `"gdelt"`, `"gdelt_gkg"`, `"hn_algolia"`, `"reddit"`, `"twitter"`. Unknown key falls back to the rss parser. |
+| Feed-provider registry | `register_feed_provider(fn)` (decorator; `_FEED_PROVIDERS` list) | Zero-arg callable returning extra `FeedSpec`s. `assemble_feeds()` merges `DEFAULT_FEEDS` + every provider, de-duped by name — a pack only ever *adds* a file, never edits the shared tuple, so parallel authorship stays collision-free. |
+| `FeedSpec` | dataclass: `name`, `url`, `fallback_domain`, `parser="rss"` | The `parser` field is the join key to the parser registry. |
+| Auto-discovery | `news_sources/__init__.py::_discover()` | `pkgutil.iter_modules` imports every non-`_` submodule so its `register_*` side effects fire. One broken pack is logged + skipped (`news_source_pack_failed`), never blocks the poller. `DISCOVERED` lists packs that loaded — surfaced in telemetry/tests. |
+| Adaptive cadence | `_adaptive_cadence(consecutive_empty)` | Pure ladder mapping a feed's consecutive-empty count to a poll-cycle multiplier, so a chronically-quiet feed is fetched less often. Floor 10s tick is preserved. |
+| Cross-source title dedup | `_normalize_title(title)` + a time-windowed `_seen_titles` `OrderedDict` | Lowercase, strip ONE trailing `" - Source"`/`" | Source"` attribution suffix, strip punctuation, collapse whitespace. Returns `""` (bypass) for titles under `_TITLE_DEDUP_MIN_CHARS` (5). Collapses the SAME story carried by multiple outlets within `dedup_title_window` seconds. |
+| Canonical-URL dedup | `_canonical_url(url)` + `_SeenCache` LRU | Strips `www.`, trailing slash, and tracking params (`utm_*`/`gclid`/`fbclid`/`mc_*`) before keying, so the same article surfaced via multiple feeds dedups once. Backstopped by the storage PRIMARY KEY. |
+
+### Source packs (`news_sources/`, 25 auto-discovered)
+
+`gdelt`, `gdelt_gkg`, `hn_algolia`, `reddit`, `x_twitter`, `gnews_global`, `gnews_sectors`, `gnews_tickers`, `global_wires`, `regulators`, `crypto_depth`, `tech_depth`, `macro`, `regional_em`, `earnings_ir`, `healthcare`, `govdata`, `sectors_defense_travel`, `sectors_realestate_industrials`, `intl_filings`, `commodities_energy`, `watchlist_dynamic`, `podcasts`, `youtube`, `specialist`.
+
+Live composition (`assemble_feeds()`): **375 total feeds** — by parser: `rss` 341 · `twitter` 12 · `reddit` 7 · `gdelt_gkg` 6 · `hn_algolia` 6 · `gdelt` 3. The poller can be disabled with `CATCHEM_NEWS__POLLER_ENABLED=false`.
+
+---
+
+## 2b. Real-time PUSH channel
+
+`src/catchem/ws_push.py` adds a latency-optimized complement to the poll loop: long-lived WebSocket (and Server-Sent-Events) readers that ingest a frame the instant a source emits it, instead of waiting for the next 10s tick. It is **OFF by default** and adds **no hard dependency**.
+
+| Aspect | Detail |
+|---|---|
+| Opt-in | `settings.news.websocket_enabled` is `False` and `websocket_sources` is empty; the channel constructs but connects to nothing until the operator flips it. |
+| Transports | `WsSourceSpec.kind` ∈ `{"ws", "sse"}`. WS needs an importable client lib (`websockets` / `httpx_ws`, lazy-imported); if neither is present every WS-kind source is marked `disabled` while SSE sources (httpx, always present) still run. |
+| Frame parsers | `WsSourceSpec.parser` ∈ `{"generic", "wikimedia"}`. `parse_ws_message` is the tolerant squawk/news-frame probe; `parse_wikimedia_event` filters the Wikimedia recentchange firehose to finance/company-relevant edits. |
+| Default source | `DEFAULT_WS_SOURCES` = one entry: Wikimedia EventStreams SSE (`stream.wikimedia.org/v2/stream/recentchange`) — a genuine public, auth-free stream that proves the SSE path end-to-end. Used only when enabled with no explicit sources. |
+| Same ingest path | Each parsed frame goes through `build_capture → write_jsonl → supervisor.process_capture` — identical to the poller — reusing `_canonical_url` LRU + deterministic `capture_id`, so a WS arrival dedups against a polled one within the process. |
+| Resilience | Per-source exponential backoff (`WS_BACKOFF_LADDER_SECONDS` 1/2/5/15/30/60s); a malformed frame, dead source, or parse error never tears down the channel or another source's task; clean cancel on `stop()`. |
+| Telemetry | `WebSocketNewsChannel.stats()` → `{schema_version, enabled, library, running, sources_total, connected_count, messages_received, ingested, last_message_at, sources[...]}` exposed at `GET /api/news/ws-status` (`{"enabled": false}` when off). |
+
+---
+
+## 2c. Awareness telemetry + blind-spot detection
+
+Two awareness-intelligence surfaces invert the firehose: instead of "what arrived?", they answer "how far back does *now* reach?" and "what am I **not** seeing?".
+
+**Live awareness window** — `GET /api/news/awareness` tallies the configured feeds two ways (`sources_by_parser` from `FeedSpec.parser`; `sources_by_category` via `_classify_feed_category()` into watchlist / tickers / wire / regulator / crypto / macro / social / google_news / global_firehose / regional / specialist / podcast / video) and estimates the effective awareness span as `window_estimate_seconds ≈ poll_interval + median_publisher_lag`. Degrades to a 200 with `sources_total: 0` and null lags when the poller is not built. The `catchem awareness` CLI prints the breadth offline (sources × parsers × cadence); `catchem awareness --live` queries the running sidecar's endpoint for the live window.
+
+**Blind-spot detector** — `src/catchem/awareness_gaps.py::find_coverage_gaps()` is a pure, deterministic, I/O-free function. Given storage records + a watchlist of terms (tickers / keywords / sectors) and an injected `now`, it classifies each watched term as **covered** (with `last_seen_age_seconds` freshness + `mention_count`, sorted freshest-first) or a **gap** (zero in-window mentions). Matching is case-insensitive: substring over text fields (`title`/`text`/`text_excerpt`/`summary`/`body`) OR exact token over symbol-list fields (`symbols`/`candidate_symbols`/`tickers`/`candidate_entities`). Tolerant of malformed records (never raises). Surfaced at `GET /api/news/coverage-gaps` (watchlist from `settings.news.priority_tickers`, fallback mega-cap set) and the `catchem coverage-gaps` CLI.
+
+---
+
+## 2d. Global-tone signal & portfolio subsystem
+
+**Global-tone macro signal** — `src/catchem/quant/global_tone.py` reads GDELT DOC 2.0 `mode=TimelineTone` (the free, no-auth average-article-tone timeline) as the macro-sentiment complement to the corpus-local sentiment signals: where `sentiment_momentum` reads catchem's own ingested records, `global_tone` reads the entire global press firehose. Three entry points: `summarize_tone()` (pure — latest/mean/min/max + recent-window trend slope + `tone_state` ∈ improving/deteriorating/stable, threshold `_STATE_THRESHOLD=0.5`), `fetch_tone()` (async GET, fail-soft → `[]`), and `compute_global_tone()` (orchestrator fanning out over `DEFAULT_THEMES` = markets / economy / crypto / fed, rolling per-theme latests into `overall_tone` + `overall_state`). Surfaced at `GET /api/quant/global-tone` with a ~120s in-process TTL cache (comfortably inside GDELT's ~15-min re-index) and a `degraded: true` flag when every theme's fetch fails — it never 500s on an upstream outage. Unlike the dashboard signals it is called directly by its endpoint, not through the `QuantEngine` fan-out.
+
+**Portfolio subsystem** — a **read-only** holdings tracker: analyst-entered positions joined to the awareness/quant layers for context. **No order execution, no money movement** — purely a watchlist with cost-basis bookkeeping.
+
+- **Storage**: migration #3 (`add_portfolio_table`) creates `portfolio` (`id` PK AUTOINCREMENT, `symbol` NOT NULL, nullable `label`/`shares`/`weight`/`cost_basis`/`notes`, `added_at`) + `idx_portfolio_symbol`. CRUD via `storage.{list_holdings,add_holding,delete_holding}`.
+- **Enrichment**: `src/catchem/portfolio.py::enrich_holdings()` is pure + deterministic (injected `now` + `quote_fn`). Each holding is annotated with `recent_news_count`, `recent_top` (up to 3 highest-relevance matching records), `coverage` (reusing `awareness_gaps` match rules so news count and coverage flag never disagree), and `quote` (`{last, prev_close, change_pct}`, failure-tolerant — a flaky provider collapses to `None`).
+- **Surfaces**: `GET /api/portfolio` (list), `POST /api/portfolio` (add), `DELETE /api/portfolio/{holding_id}`, `GET /api/portfolio/enriched` (join over recent records + fixture quote). Frontend route `/portfolio` (`features/portfolio/PortfolioPage`). CLI Typer sub-app `catchem portfolio {list,add,remove,show}`.
 
 ---
 
@@ -221,7 +316,7 @@ Shell-level chrome: `Shell.tsx` (header, sidebar, route fade-in via `animate-pag
 
 ## 5. API endpoints
 
-95 routes total (`grep "@app." src/catchem/api.py | wc -l`). Categorized by prefix:
+107 routes total (`grep "@app." src/catchem/api.py | wc -l`). Categorized by prefix:
 
 ### Health & discovery
 - `GET /healthz` — light liveness (always 200 once process is alive)
@@ -261,6 +356,7 @@ Shell-level chrome: `Shell.tsx` (header, sidebar, route fade-in via `animate-pag
 - `GET /api/quant/cluster/{cluster_id}/members`, `/api/quant/heatmap/records`
 - `GET /api/quant/live-read`, `/api/quant/live-read-stream` — narrative hero (deterministic fallback + DeepSeek streaming; rate-limited)
 - `GET /api/quant/diagnostics` — fail-soft observability: last-50 signal-failure ring buffer + per-signal counts (`schema_version` + `generated_at` envelope around `engine.diagnostics()`) — v72
+- `GET /api/quant/global-tone` — GDELT `TimelineTone` macro-sentiment lens: per-theme (markets/economy/crypto/fed) latest/mean/trend/state + rolled-up `overall_tone`/`overall_state`; ~120s TTL cache; `degraded: true` (never 500s) on upstream outage. Standalone — not part of the dashboard fan-out.
 - `POST /api/quant/explain` — per-signal narrative explainer
 - `POST /api/quant/invalidate` — cache bust
 
@@ -277,6 +373,12 @@ Shell-level chrome: `Shell.tsx` (header, sidebar, route fade-in via `animate-pag
 ### Backtest
 - `GET /api/backtest` — score-bin calibration
 
+### Portfolio (read-only — no order execution)
+- `GET /api/portfolio` — list analyst-entered holdings
+- `POST /api/portfolio` — add a holding (`symbol` required; rest nullable) → 201
+- `DELETE /api/portfolio/{holding_id}` — remove (404 if absent)
+- `GET /api/portfolio/enriched` — holdings joined to recent records + coverage + live quote via pure `portfolio.enrich_holdings()`
+
 ### UI-internal aggregations (`/ui/*`) and per-feed health
 - `/ui/app-info`, `/ui/sidecar-status`, `/ui/log-tail` — sidecar metadata
 - `/ui/summary`, `/ui/facets`, `/ui/timeline`, `/ui/top-symbols`, `/ui/top-reasons`, `/ui/trends`, `/ui/matrix`, `/ui/guards`
@@ -287,6 +389,9 @@ Shell-level chrome: `Shell.tsx` (header, sidebar, route fade-in via `animate-pag
 - `/ui/news-status`, `/ui/news-poll-now` — poller diagnostics + force tick
 - `/api/news/sources` — per-feed health array (status, last_ok, consecutive_errors, cooldown_until, sample_titles) — v42
 - `POST /api/news/sources/probe` — single-feed manual probe (rate-limited bucket) — v44
+- `GET /api/news/awareness` — live awareness window: `sources_by_parser` + `sources_by_category` breadth, `poll_interval_seconds`, median/avg publisher lag, `window_estimate_seconds` (≈ interval + median lag). Degrades to `sources_total: 0` when the poller is unbuilt.
+- `GET /api/news/coverage-gaps` — blind-spot detector: watched terms classified `covered` (freshness + mention count) vs `gaps`; watchlist from `settings.news.priority_tickers`. Pure `awareness_gaps.find_coverage_gaps()` over recent records.
+- `GET /api/news/ws-status` — real-time PUSH channel diagnostics (`{"enabled": false}` when off; full per-source stats envelope when on).
 - `/ui/archive-status`, `/ui/archive-now` — Drive archiver diagnostics + force run
 - `/ui/stream` — Server-Sent Events: `summary` (on count change or every 30s) + `tick` heartbeat every 3s
 
@@ -320,6 +425,7 @@ Shell-level chrome: `Shell.tsx` (header, sidebar, route fade-in via `animate-pag
 | `dlq` | Failed-capture queue | Auto-increment id, payload excerpt, error string. |
 | `offsets` | Awareness JSONL replay cursor | PK `source_path`; tracks `line_offset` + `last_capture_id`. |
 | `model_versions` | Per-component model versions | PK `component`; surfaces under `/ui/app-info`. |
+| `portfolio` | Read-only analyst holdings (watchlist + cost basis) | Added by migration v3. `id` PK AUTOINCREMENT, `symbol` NOT NULL (join key), nullable `label`/`shares`/`weight`/`cost_basis`/`notes`, `added_at`. `idx_portfolio_symbol`. No order execution. |
 
 ### Migration registry — `src/catchem/migrations.py`
 
@@ -328,7 +434,8 @@ Versioned migrations applied via `PRAGMA user_version`. Append-only, idempotent 
 | Version | Name | Effect |
 |---|---|---|
 | 1 | `baseline_records_table` | No-op claim; the pre-migration bootstrap already created every table. |
-| 2 | `add_record_tags_table` | Creates `record_tags` + 2 indices. **Current max**. |
+| 2 | `add_record_tags_table` | Creates `record_tags` + 2 indices. |
+| 3 | `add_portfolio_table` | Creates read-only `portfolio` table + `idx_portfolio_symbol`. **Current max**. |
 
 `api_health_deep()` cross-checks `current_version(conn)` vs `max_known_version()` and reports `schema_outdated` if behind.
 
@@ -446,7 +553,7 @@ Filterwarnings in `pyproject.toml` upgrade catchem-package `DeprecationWarning` 
 
 | Adversary surface | Concrete attack | Mitigation |
 |---|---|---|
-| Malicious RSS feed item | XSS in title (`<script>` in title) | Title is rendered as text, never HTML. Default allow-list of 53 feeds; user-supplied URLs sanitized through the same stdlib `xml.etree` parser (no external entities). |
+| Malicious RSS feed item | XSS in title (`<script>` in title) | Title is rendered as text, never HTML. Curated allow-list (~375 assembled feeds, no arbitrary user URLs in the default set); RSS bodies parsed through the stdlib `xml.etree` parser (no external entities). |
 | Malicious article body | XSS via JS link, drive-by via meta-refresh | Webview `on_navigation` blocks `javascript:`/`file:`/`data:` and routes external http(s) to system browser via `open::that_detached`. Links rendered with `rel="noopener noreferrer"`. |
 | Snapshot JSON tampering | Plant attacker keys in localStorage | `frontend/src/lib/snapshot.ts` strictly allow-lists `SNAPSHOT_KEYS`. Unknown keys are reported under `rejected[]` on import, never written. |
 | Writable `.env` file | DeepSeek key exfiltration via group/world-writable file | Pydantic-settings loads on startup; recommended posture is `chmod 600`. CSP `connect-src 'self'` prevents browser-side exfiltration channels. |
@@ -465,12 +572,17 @@ Filterwarnings in `pyproject.toml` upgrade catchem-package `DeprecationWarning` 
 
 | Concern | File |
 |---|---|
-| HTTP surface | `src/catchem/api.py` (3820 LOC, 95 routes) |
+| HTTP surface | `src/catchem/api.py` (~4420 LOC, 107 routes) |
 | Pipeline orchestration | `src/catchem/supervisor.py`, `service.py`, `pipeline.py` |
 | Storage | `src/catchem/storage.py`, `migrations.py` |
 | Quant facade | `src/catchem/quant/engine.py` (+ 16 signal modules in `quant/`, 1 top-level `backtest.py`) |
 | Reviewer registry | `src/catchem/reviewers/{base,stub,deepseek,registry,prompts}.py` |
-| News poller | `src/catchem/news_poller.py` (53 default feeds, 5-tier circuit breaker) |
+| Awareness engine | `src/catchem/news_poller.py` (~375 assembled feeds, 6 pluggable parsers, `register_parser`/`register_feed_provider`/`assemble_feeds`, adaptive cadence, cross-source title dedup, 5-tier breaker) |
+| Source packs | `src/catchem/news_sources/**` (25 auto-discovered packs; `__init__.py::_discover()`) |
+| Real-time push channel | `src/catchem/ws_push.py` (WS + Wikimedia SSE, OFF-default, `WebSocketNewsChannel.stats()`) |
+| Awareness blind-spot detector | `src/catchem/awareness_gaps.py` (`find_coverage_gaps`, pure) |
+| Global-tone signal | `src/catchem/quant/global_tone.py` (GDELT `TimelineTone`; `summarize_tone`/`fetch_tone`/`compute_global_tone`) |
+| Portfolio subsystem | `src/catchem/portfolio.py` (`enrich_holdings`, pure) + migration #3 (`portfolio` table) |
 | Drive archiver | `src/catchem/archive.py` (CSV export, 17 cols, 30 s tick) |
 | Webhook | `src/catchem/webhook.py` (SSRF-guarded) |
 | Rate limits | `src/catchem/rate_limit.py` |

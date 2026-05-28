@@ -211,6 +211,15 @@ pub fn release_awareness_data_dir() -> PathBuf {
     dir
 }
 
+/// `<app_data_dir>/reviewers.env` — optional persistent reviewer config
+/// (DeepSeek API key, sampling rate, etc.). Read by `sidecar.rs::load_persistent_env_file`
+/// on every launch and forwarded as process env to the sidecar. Lets the
+/// operator persist `CATCHEM_REVIEWERS__DEEPSEEK__API_KEY=sk-...` without
+/// hardcoding it into the bundle.
+pub fn release_reviewers_env_path() -> PathBuf {
+    app_data_dir().join("reviewers.env")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

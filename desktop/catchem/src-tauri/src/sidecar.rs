@@ -94,6 +94,20 @@ impl SidecarState {
                 out_dir.display(),
                 aw_dir.display()
             );
+            // Optional persistent reviewer config — drop a key=value file
+            // at `~/Library/Application Support/Catchem/reviewers.env` and
+            // every launch reads it. Lets the operator set the DeepSeek
+            // API key once instead of re-pasting it via Settings after
+            // every relaunch. We INTENTIONALLY only forward CATCHEM_*
+            // variables so the file can't smuggle in arbitrary process
+            // env (e.g., PATH, HOME).
+            if let Some(extra) = load_persistent_env_file() {
+                for (k, v) in extra {
+                    if k.starts_with("CATCHEM_") {
+                        cmd.env(&k, &v);
+                    }
+                }
+            }
         }
 
         // Redirect stdout+stderr to a log file we can tail. Piped+undrained
@@ -124,9 +138,24 @@ impl SidecarState {
         cmd.stdout(Stdio::from(log_file));
         cmd.stderr(Stdio::from(log_file_err));
 
-        let child = cmd
-            .spawn()
-            .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
+        let child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                // Surface the spawn failure into the same sidecar.log file so
+                // the user (and we, during debug) can see *why* the child
+                // never came up. env_logger writes to stderr which launchd
+                // discards for `open`-launched bundles.
+                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                    let _ = writeln!(
+                        f,
+                        "[SPAWN FAILURE] failed to spawn {} cwd={}: {e}",
+                        cfg.python.display(),
+                        cfg.cwd.display()
+                    );
+                }
+                return Err(format!("failed to spawn sidecar: {e}"));
+            }
+        };
         log::info!(
             "sidecar spawned pid={} log={}",
             child.id(),
@@ -166,6 +195,87 @@ pub struct WaitForHealthOutcome {
 
 /// ISO-ish timestamp using only stdlib — avoids pulling chrono just for a
 /// log banner. Format: `1970-01-01T00:00:00Z` style at second resolution.
+/// Read `~/Library/Application Support/Catchem/reviewers.env` and parse
+/// it as a list of `KEY=VALUE` pairs. Missing file is a normal "nothing
+/// to inject" state — returns None silently. Lines beginning with `#` or
+/// blank lines are skipped. Values are NOT shell-evaluated; the file is
+/// read as plain `KEY=VALUE` text so a leading `$` stays literal.
+///
+/// Security: refuses to load the file if its POSIX mode includes any
+/// group- or world-write bit (mask `0o022`). The file feeds env vars
+/// (DeepSeek API keys, etc.) into the sidecar process; if any other
+/// local user can write to it they can inject arbitrary CATCHEM_*
+/// settings at launch. Owner-write only.
+fn load_persistent_env_file() -> Option<Vec<(String, String)>> {
+    let path = paths::release_reviewers_env_path();
+    load_env_file_from_path(&path)
+}
+
+/// Path-parameterised variant of [`load_persistent_env_file`] used for
+/// unit testing the world-writable guard. Behaves identically to the
+/// public function: missing file → None, group/world-writable file →
+/// None plus a warn-level log, otherwise parses KEY=VALUE lines.
+fn load_env_file_from_path(path: &std::path::Path) -> Option<Vec<(String, String)>> {
+    // Check permissions BEFORE reading. On macOS/Unix, refuse to load if
+    // group or world has write access — that means another user on the
+    // box can inject env vars into our sidecar.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mode = meta.permissions().mode();
+            if mode & 0o022 != 0 {
+                log::warn!(
+                    "refusing to load reviewers.env: mode {:o} grants group/world write (path={}); fix with `chmod 600`",
+                    mode & 0o777,
+                    path.display()
+                );
+                return None;
+            }
+        }
+        // Missing-file case falls through to the read_to_string below,
+        // which returns the same "nothing to inject" None path.
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+    let mut out: Vec<(String, String)> = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            // Strip optional surrounding double or single quotes so the
+            // operator can write API_KEY="sk-..." OR API_KEY=sk-... and
+            // both work identically.
+            let key = k.trim().to_string();
+            let mut val = v.trim().to_string();
+            if (val.starts_with('"') && val.ends_with('"'))
+                || (val.starts_with('\'') && val.ends_with('\''))
+            {
+                if val.len() >= 2 {
+                    val = val[1..val.len() - 1].to_string();
+                }
+            }
+            if !key.is_empty() {
+                out.push((key, val));
+            }
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        log::info!(
+            "loaded {} persistent reviewer env entries from {}",
+            out.len(),
+            path.display()
+        );
+        Some(out)
+    }
+}
+
 fn chrono_like_now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -232,5 +342,63 @@ pub async fn wait_for_health(cfg: &SidecarConfig, timeout: Duration) -> WaitForH
         elapsed_ms: started.elapsed().as_millis(),
         last_status,
         last_error,
+    }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod tests {
+    use super::load_env_file_from_path;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn write_tmp(name: &str, body: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        p.push(format!("catchem-test-{}-{}-{}", name, std::process::id(), nonce));
+        let mut f = std::fs::File::create(&p).expect("create tmp");
+        f.write_all(body.as_bytes()).expect("write tmp");
+        p
+    }
+
+    #[test]
+    fn loads_keys_when_mode_is_owner_only() {
+        let p = write_tmp("ok", "CATCHEM_FOO=bar\nCATCHEM_BAZ=\"q\"\n# comment\n\n");
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let out = load_env_file_from_path(&p).expect("should parse");
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], ("CATCHEM_FOO".to_string(), "bar".to_string()));
+        assert_eq!(out[1], ("CATCHEM_BAZ".to_string(), "q".to_string()));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn refuses_group_writable_file() {
+        let p = write_tmp("groupw", "CATCHEM_FOO=bar\n");
+        // 0o620 = owner rw, group w, world none — group-write bit set.
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o620)).unwrap();
+        assert!(load_env_file_from_path(&p).is_none(),
+            "group-writable env file must be skipped");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn refuses_world_writable_file() {
+        let p = write_tmp("worldw", "CATCHEM_FOO=bar\n");
+        // 0o602 = owner rw, group none, world w — world-write bit set.
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o602)).unwrap();
+        assert!(load_env_file_from_path(&p).is_none(),
+            "world-writable env file must be skipped");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn missing_file_returns_none() {
+        let mut p = std::env::temp_dir();
+        p.push("catchem-test-missing-does-not-exist-xyz");
+        assert!(load_env_file_from_path(&p).is_none());
     }
 }

@@ -3,8 +3,9 @@
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::menu::open_secondary_window as menu_open_secondary_window;
 use crate::security::is_safe_external_url;
 use crate::sidecar::{wait_for_health, WaitForHealthOutcome};
 use crate::state::AppState;
@@ -63,4 +64,28 @@ pub fn open_external(url: String) -> Result<(), String> {
     }
     // Hand to system browser via tauri-plugin-opener / `open` crate
     open::that_detached(&url).map_err(|e| e.to_string())
+}
+
+/// Open a secondary analyst dashboard window pointing at the same sidecar.
+///
+/// Exposed as a Tauri command so a frontend command-palette action can
+/// trigger it via `invoke('open_secondary_window')`. The webview at
+/// `http://127.0.0.1:8087` is cross-origin from the Tauri runtime, so
+/// reaching this command from JS requires either `withGlobalTauri: true`
+/// or a remote `dangerousRemoteUrlIpcAccess` grant. Today the canonical
+/// pathway is the native menu File→New Window (⌘N), which routes
+/// through `lib.rs::on_menu_event` and calls `menu::open_secondary_window`
+/// directly without crossing the IPC boundary. This command exists so a
+/// future palette wire-up only needs the capability flip, not new Rust.
+///
+/// Returns the new window's label on success so the caller can correlate
+/// it with a `tauri://created` event if desired.
+#[tauri::command]
+pub fn open_secondary_window(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let cfg = state.sidecar_config.read().map_err(|e| e.to_string())?.clone();
+    menu_open_secondary_window(&app, &cfg.endpoint(), &cfg.host, cfg.port)
+        .map_err(|e| e.to_string())
 }

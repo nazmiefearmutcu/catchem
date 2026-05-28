@@ -729,6 +729,220 @@ def cli_tag_by(
         storage.close()
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Portfolio command group (mirrors /api/portfolio + /api/portfolio/enriched).
+#
+# READ-ONLY holdings tracker — NO order execution, NO money movement. Mounted
+# as a Typer sub-app so the surface reads as `catchem portfolio <verb>`, the
+# same verb-per-subcommand shape as the HTTP routes. All verbs open Storage
+# directly (no Supervisor / sidecar): list/add/remove are plain CRUD, and
+# `show` runs the pure `enrich_holdings` join over recent records + the
+# fixture market provider's quote — identical to /api/portfolio/enriched but
+# offline.
+# ──────────────────────────────────────────────────────────────────────────────
+
+portfolio_app = typer.Typer(
+    no_args_is_help=False,
+    help="Read-only holdings tracker (mirrors /api/portfolio). No order execution.",
+)
+app.add_typer(portfolio_app, name="portfolio")
+
+
+def _print_holdings_text(holdings: list[dict]) -> None:
+    """Tabular text render shared by ``portfolio list`` (default + explicit)."""
+    if not holdings:
+        typer.echo("(no holdings — add one with: catchem portfolio add SYMBOL)")
+        return
+    for h in holdings:
+        hid = h.get("id")
+        sym = h.get("symbol") or "?"
+        label = h.get("label") or "—"
+        shares = h.get("shares")
+        shares_str = f"{float(shares):g}" if shares is not None else "—"
+        cost = h.get("cost_basis")
+        cost_str = f"{float(cost):g}" if cost is not None else "—"
+        added = (h.get("added_at") or "")[:19] or "?"
+        typer.echo(f"  [{hid}] {sym:<10} {label:<16} shares={shares_str:<10} cost={cost_str:<10} added={added}")
+
+
+@portfolio_app.callback(invoke_without_command=True)
+def portfolio_main(
+    ctx: typer.Context,
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
+) -> None:
+    """Default action (no subcommand) = ``portfolio list``.
+
+    Mirrors the HTTP root GET /api/portfolio. With a subcommand given, this
+    callback is a no-op and the subcommand runs as usual.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _portfolio_list_impl(json_out)
+
+
+def _portfolio_list_impl(json_out: bool) -> None:
+    storage = _open_storage()
+    try:
+        holdings = storage.list_holdings()
+    finally:
+        storage.close()
+    if json_out:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "holdings": holdings,
+        }, default=str))
+        return
+    _print_holdings_text(holdings)
+
+
+@portfolio_app.command("list")
+def cli_portfolio_list(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
+    enriched: bool = typer.Option(
+        False, "--enriched",
+        help="Run the awareness + quote join (same as `portfolio show`).",
+    ),
+) -> None:
+    """List holdings (symbol, label, shares, cost_basis, added_at)."""
+    if enriched:
+        _portfolio_show_impl(json_out, window_seconds=86400.0, record_limit=500)
+        return
+    _portfolio_list_impl(json_out)
+
+
+@portfolio_app.command("add")
+def cli_portfolio_add(
+    symbol: str = typer.Argument(..., help="Ticker / symbol to track (required)."),
+    shares: float | None = typer.Option(None, "--shares", help="Share / unit count."),
+    label: str | None = typer.Option(None, "--label", help="Human-readable label."),
+    cost_basis: float | None = typer.Option(None, "--cost-basis", help="Per-position cost basis."),
+    weight: float | None = typer.Option(None, "--weight", help="Optional portfolio weight."),
+    notes: str | None = typer.Option(None, "--notes", help="Free-text notes."),
+    json_out: bool = typer.Option(False, "--json", help="Emit the created holding as JSON."),
+) -> None:
+    """Add a holding — mirrors POST /api/portfolio."""
+    storage = _open_storage()
+    try:
+        try:
+            holding = storage.add_holding(
+                symbol,
+                label=label,
+                shares=shares,
+                weight=weight,
+                cost_basis=cost_basis,
+                notes=notes,
+            )
+        except ValueError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(1) from exc
+    finally:
+        storage.close()
+
+    if json_out:
+        typer.echo(json.dumps(holding, default=str))
+        return
+    typer.echo(f"+ [{holding['id']}] {holding['symbol']} added")
+    _print_holdings_text([holding])
+
+
+@portfolio_app.command("remove")
+def cli_portfolio_remove(
+    holding_id: int = typer.Argument(..., help="Numeric id of the holding to delete."),
+) -> None:
+    """Delete a holding by id — mirrors DELETE /api/portfolio/{id}. Exit 1 if absent."""
+    storage = _open_storage()
+    try:
+        removed = storage.delete_holding(holding_id)
+    finally:
+        storage.close()
+    if not removed:
+        typer.echo(f"error: no holding with id {holding_id}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"- holding {holding_id} removed")
+
+
+def _portfolio_show_impl(json_out: bool, *, window_seconds: float, record_limit: int) -> None:
+    """Shared body for ``portfolio show`` and ``portfolio list --enriched``.
+
+    Runs the pure :func:`catchem.portfolio.enrich_holdings` over recent records
+    with the fixture market-data quote fn — the offline twin of
+    /api/portfolio/enriched. Records may be empty (no sidecar / fresh DB);
+    enrichment then returns each holding with empty news + None quote, still
+    exit 0.
+    """
+    from .market_data import LocalFixtureMarketDataProvider
+    from .portfolio import enrich_holdings
+
+    storage = _open_storage()
+    try:
+        holdings = storage.list_holdings()
+        records = storage.recent_records(limit=record_limit, relevant_only=False)
+    finally:
+        storage.close()
+
+    provider = LocalFixtureMarketDataProvider()
+    enriched = enrich_holdings(
+        holdings,
+        records=records,
+        quote_fn=provider.quote,
+        now=datetime.now(UTC),
+        window_seconds=window_seconds,
+    )
+
+    if json_out:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "holdings": enriched,
+        }, default=str))
+        return
+
+    if not enriched:
+        typer.echo("(no holdings — add one with: catchem portfolio add SYMBOL)")
+        return
+    for h in enriched:
+        sym = h.get("symbol") or "?"
+        quote = h.get("quote") or {}
+        last = quote.get("last")
+        change_pct = quote.get("change_pct")
+        if last is not None:
+            chg = f" ({change_pct * 100:+.2f}%)" if change_pct is not None else ""
+            price_str = f"{float(last):g}{chg}"
+        else:
+            price_str = "no quote"
+        cov = h.get("coverage") or {}
+        cov_str = "covered" if cov.get("covered") else "BLIND SPOT"
+        news_n = int(h.get("recent_news_count") or 0)
+        top = h.get("recent_top") or []
+        headline = (top[0].get("title") if top and top[0].get("title") else "—")
+        if headline and len(headline) > 60:
+            headline = headline[:57] + "..."
+        typer.echo(
+            f"  [{h.get('id')}] {sym:<10} {price_str:<22} {cov_str:<11} "
+            f"news={news_n:<3} top={headline}"
+        )
+
+
+@portfolio_app.command("show")
+def cli_portfolio_show(
+    window_seconds: float = typer.Option(
+        86400.0, "--window-seconds", "-w", min=1.0,
+        help="Coverage / news-count horizon in seconds (default 24h).",
+    ),
+    record_limit: int = typer.Option(
+        500, "--record-limit", "-l", min=1, max=5000,
+        help="Records pulled from storage for the enrichment join.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
+) -> None:
+    """Holdings joined to recent news + coverage + a quote — offline twin of
+    /api/portfolio/enriched. Per holding: latest quote (last + change_pct),
+    coverage (covered / blind-spot), recent_news_count, and top headline.
+    """
+    _portfolio_show_impl(json_out, window_seconds=window_seconds, record_limit=record_limit)
+
+
 @app.command("watch")
 def cli_watch(
     interval: float = typer.Option(3.0, "--interval", "-n", min=0.5, max=60.0, help="Refresh cadence in seconds."),

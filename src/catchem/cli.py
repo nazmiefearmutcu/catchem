@@ -1158,6 +1158,95 @@ def cli_top_recent(
         typer.echo(f"  [{score:.2f}] {sent:<8}  {title}  · {domain}  · {syms}")
 
 
+# Mega-cap fallback when the operator hasn't configured a priority watchlist
+# yet — verbatim from api.py's `_DEFAULT_WATCH_TERMS` so the CLI and the HTTP
+# twin (/api/news/coverage-gaps) answer against the same out-of-the-box set.
+_DEFAULT_WATCH_TERMS: tuple[str, ...] = (
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA",
+)
+
+
+@app.command("coverage-gaps")
+def cli_coverage_gaps(
+    window_hours: float = typer.Option(
+        24.0, "--window-hours", "-w", min=0.1,
+        help="Coverage horizon in hours — a watched term with no mention this fresh is a blind spot.",
+    ),
+    limit: int = typer.Option(
+        500, "--limit", "-l", min=1, max=2000,
+        help="Records pulled from storage for the scan.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
+) -> None:
+    """Awareness BLIND-SPOT detector — which watched terms have NO recent coverage?
+
+    Inverts the firehose question. With hundreds of sources arriving, the
+    valuable thing to know is "what am I *not* seeing?". Reads recent records
+    straight from Storage (offline — no sidecar), takes the watchlist from
+    ``settings.news.priority_tickers`` (falling back to a small mega-cap set
+    when unconfigured), and classifies every watched term as either *covered*
+    (with freshness + mention count) or a *gap*. Mirrors /api/news/coverage-gaps.
+    """
+    from .awareness_gaps import find_coverage_gaps
+
+    settings = load_settings()
+    watch_terms = list(settings.news.priority_tickers) or list(_DEFAULT_WATCH_TERMS)
+    window_seconds = float(window_hours) * 3600.0
+
+    storage = _open_storage()
+    try:
+        records = storage.recent_records(limit, relevant_only=False)
+    finally:
+        storage.close()
+
+    now = datetime.now(UTC)
+    result = find_coverage_gaps(
+        records,
+        watch_terms,
+        window_seconds=window_seconds,
+        now=now,
+    )
+
+    if json_out:
+        payload = {
+            "schema_version": 1,
+            "window_hours": window_hours,
+            "limit": limit,
+            "watch_terms": watch_terms,
+            **result,
+        }
+        typer.echo(json.dumps(payload, default=str))
+        return
+
+    covered = result["covered"]
+    gaps = result["gaps"]
+    typer.echo(
+        f"catchem coverage-gaps · {len(watch_terms)} watched · "
+        f"window {window_hours:g}h · scanned {len(records)} record(s)\n"
+    )
+
+    typer.echo(f"gaps ({len(gaps)}) — no coverage in window:")
+    if gaps:
+        for term in gaps:
+            typer.echo(f"  ✗ {term}")
+    else:
+        typer.echo("  (none — every watched term has fresh coverage)")
+
+    typer.echo(f"\ncovered ({len(covered)}) — freshest first:")
+    if covered:
+        for c in covered:
+            age_s = float(c["last_seen_age_seconds"] or 0.0)
+            if age_s < 3600:
+                age_str = f"{age_s / 60:.0f}m ago"
+            elif age_s < 86400:
+                age_str = f"{age_s / 3600:.1f}h ago"
+            else:
+                age_str = f"{age_s / 86400:.1f}d ago"
+            typer.echo(f"  ✓ {c['term']:<10}  {age_str:<10}  ({c['mention_count']} mention(s))")
+    else:
+        typer.echo("  (none — no watched term seen in window)")
+
+
 @app.command("status")
 def cli_status(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),

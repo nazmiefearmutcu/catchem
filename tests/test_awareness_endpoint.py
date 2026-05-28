@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from catchem.api import create_app
+from catchem.api import _classify_feed_category, create_app
 from catchem.news_poller import FeedSpec, NewsPoller
 from catchem.settings import load_settings, reload_settings
 
@@ -42,6 +42,12 @@ def _make_poller(feeds: list[FeedSpec]) -> NewsPoller:
     class _StubSettings:
         class paths:
             catchem_output_dir = Path("/tmp")
+
+        # NewsPoller.__init__ reads settings.news.dedup_title_window_seconds
+        # (via getattr with a default); the namespace itself must exist so the
+        # real constructor runs against this stub without an AttributeError.
+        class news:
+            dedup_title_window_seconds = 0.0
 
     return NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
@@ -81,12 +87,16 @@ def test_awareness_returns_degraded_envelope_when_poller_disabled(
     assert body["configured"] is False
     assert body["sources_total"] == 0
     assert body["sources_by_parser"] == {}
+    # Category breakdown is additive and degrades to an empty dict (not absent).
+    assert body["sources_by_category"] == {}
     assert body["poll_interval_seconds"] is None
     assert body["median_publisher_lag_seconds"] is None
     assert body["avg_publisher_lag_seconds"] is None
     assert body["last_run_at"] is None
     assert body["last_new_at"] is None
     assert body["total_ingested"] == 0
+    # Null-safe dedupe passthrough is present (and null) on the degraded path.
+    assert body["dupe_titles_skipped"] is None
     assert body["window_estimate_seconds"] is None
     # Always produce a generated_at so the UI can render "as of" with no guard.
     assert isinstance(body["generated_at"], str) and body["generated_at"]
@@ -107,6 +117,9 @@ def test_awareness_full_envelope_and_window_estimate(
         FeedSpec("rss-b", "https://b.example.com/rss", "b.example.com"),
         FeedSpec("gdelt-1", "https://g.example.com/json", "g.example.com", parser="gdelt"),
         FeedSpec("reddit-1", "https://r.example.com/.json", "r.example.com", parser="reddit"),
+        FeedSpec("gnews-watch-aapl", "https://news.google.com/rss", "news.google.com"),
+        FeedSpec("rem-tr", "https://tr.example.com/rss", "tr.example.com"),
+        FeedSpec("fed-rss", "https://www.federalreserve.gov/feed", "federalreserve.gov"),
     ]
     poller = _make_poller(feeds)
     # Simulate one tick's worth of stats.
@@ -115,6 +128,9 @@ def test_awareness_full_envelope_and_window_estimate(
     poller.total_ingested = 137
     poller.last_median_publisher_lag_seconds = 90.0
     poller.last_avg_publisher_lag_seconds = 120.0
+    # Some pollers track title-level dedupe skips; assert the passthrough
+    # surfaces the value verbatim when the attribute exists.
+    poller.last_dupe_titles_skipped = 12  # type: ignore[attr-defined]
     monkeypatch.setattr(api_module, "_NEWS_POLLER", poller, raising=False)
 
     r = client.get("/api/news/awareness")
@@ -122,9 +138,25 @@ def test_awareness_full_envelope_and_window_estimate(
     body = r.json()
 
     assert body["configured"] is True
-    assert body["sources_total"] == 4
-    # Tally by parser: 2 rss + 1 gdelt + 1 reddit.
-    assert body["sources_by_parser"] == {"rss": 2, "gdelt": 1, "reddit": 1}
+    assert body["sources_total"] == 7
+    # Tally by parser: 4 rss (a/b/gnews/rem/fed are all rss-parsed → 5) ...
+    assert body["sources_by_parser"] == {"rss": 5, "gdelt": 1, "reddit": 1}
+    # Category breakdown classifies by name prefix / domain, independent of
+    # parser: regulator (fed domain), watchlist (gnews-watch-), regional
+    # (rem-), social (reddit parser), global_firehose (gdelt), wire (rss-a/b).
+    cats = body["sources_by_category"]
+    assert cats == {
+        "wire": 2,
+        "global_firehose": 1,
+        "social": 1,
+        "watchlist": 1,
+        "regional": 1,
+        "regulator": 1,
+    }
+    # The category tally must account for every configured feed.
+    assert sum(cats.values()) == body["sources_total"]
+    # Null-safe dedupe passthrough reflects the poller's tracked value.
+    assert body["dupe_titles_skipped"] == 12
     # interval is clamped to a 10s floor at construction time.
     assert body["poll_interval_seconds"] == poller.interval_seconds
     assert body["median_publisher_lag_seconds"] == 90.0
@@ -166,3 +198,45 @@ def test_awareness_does_not_break_news_status_contract(client: TestClient) -> No
     body = r.json()
     for key in ("enabled", "feeds", "interval_seconds", "total_ingested"):
         assert key in body, f"missing {key} from /ui/news-status"
+
+
+# ── _classify_feed_category pure-helper mapping ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("name", "parser", "domain", "expected"),
+    [
+        # Google News sub-streams — specific prefixes win over the generic one.
+        ("gnews-watch-aapl", "rss", "news.google.com", "watchlist"),
+        ("gnews-tkr-msft", "rss", "news.google.com", "tickers"),
+        ("gnews-topstories", "rss", "news.google.com", "google_news"),
+        # Social: by parser OR by name prefix.
+        ("x-elonmusk", "rss", "x.com", "social"),
+        ("acct-handle", "twitter", "twitter.com", "social"),
+        ("reddit-wallstreetbets", "reddit", "reddit.com", "social"),
+        # Firehose + domain-flavored prefixes.
+        ("gdelt-doc", "gdelt", "gdeltproject.org", "global_firehose"),
+        ("rem-emea", "rss", "example.eu", "regional"),
+        ("macro-cpi", "rss", "example.com", "macro"),
+        ("spec-semiconductors", "rss", "example.com", "specialist"),
+        ("yt-channel", "rss", "youtube.com", "video"),
+        ("pod-daily", "rss", "example.fm", "podcast"),
+        # Regulator + crypto resolved by domain (no recognizable prefix).
+        ("fed-rss", "rss", "federalreserve.gov", "regulator"),
+        ("sec-litigation", "rss", "www.sec.gov", "regulator"),
+        ("coindesk-feed", "rss", "coindesk.com", "crypto"),
+        # Fallback bucket.
+        ("acme-wire", "rss", "acme.example.com", "wire"),
+    ],
+)
+def test_classify_feed_category_mapping(
+    name: str, parser: str, domain: str, expected: str
+) -> None:
+    assert _classify_feed_category(name, parser, domain) == expected
+
+
+def test_classify_feed_category_subdomain_matches_regulator() -> None:
+    """A subdomain of a regulator domain still buckets as 'regulator', but a
+    look-alike that merely ends in the same letters does not."""
+    assert _classify_feed_category("x", "rss", "press.sec.gov") == "regulator"
+    assert _classify_feed_category("x", "rss", "notsec.gov") == "wire"

@@ -307,6 +307,57 @@ def _canonical_url(url: str) -> str:
         return raw
 
 
+# Minimum number of meaningful characters a normalized title needs before it's
+# eligible for cross-source near-duplicate suppression. Below this, the title
+# is too generic ("Live updates", "Markets", "Watch") to safely collapse two
+# distinct stories, so such titles bypass title-dedup entirely.
+_TITLE_DEDUP_MIN_CHARS: int = 5
+
+# Trailing "source attribution" suffix many aggregators append, e.g.
+# "Apple beats earnings - The Verge" or "Bitcoin tops $90k | CoinDesk".
+# Stripped before normalization so the SAME story carried by two outlets
+# (each appending its own brand) collapses to one key. Only the LAST such
+# segment is removed; an interior dash/pipe in a real headline is kept.
+# Separators: ASCII hyphen, pipe, en-dash (U+2013), em-dash (U+2014) — the
+# dashes are written as escapes (not literal glyphs) to avoid RUF001
+# "ambiguous unicode" noise while still matching real-world titles.
+_SOURCE_SUFFIX_RE = re.compile(r"\s+[-|\u2013\u2014]\s+[^-|\u2013\u2014]{1,40}$")
+# Anything that isn't a word char or whitespace → dropped during normalization.
+_TITLE_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+
+
+def _normalize_title(title: str) -> str:
+    """Return a normalized dedup key for a headline (or "" to skip dedup).
+
+    Normalization, in order:
+      1. lowercase + Unicode-aware,
+      2. strip ONE trailing " - Source"/" | Source" attribution suffix,
+      3. remove punctuation (keeps word chars + whitespace),
+      4. collapse runs of whitespace to single spaces, strip ends.
+
+    Returns the empty string when the result has fewer than
+    `_TITLE_DEDUP_MIN_CHARS` meaningful characters (whitespace removed) — such
+    titles are too generic to collapse safely and therefore bypass title-dedup
+    (callers treat "" as "never suppress"). Defensive: any failure returns ""
+    so a pathological title can never crash the poller tick.
+    """
+    try:
+        raw = (title or "").strip().lower()
+        if not raw:
+            return ""
+        # Drop the trailing source-attribution segment, if present.
+        raw = _SOURCE_SUFFIX_RE.sub("", raw).strip()
+        # Strip punctuation, then collapse whitespace.
+        stripped = _TITLE_PUNCT_RE.sub(" ", raw)
+        normalized = re.sub(r"\s+", " ", stripped).strip()
+        # Too few meaningful chars (spaces don't count) → skip dedup.
+        if len(normalized.replace(" ", "")) < _TITLE_DEDUP_MIN_CHARS:
+            return ""
+        return normalized
+    except Exception:
+        return ""
+
+
 @dataclass
 class _SeenCache:
     """Small LRU set so we don't re-emit obviously-duplicate items each tick.
@@ -590,6 +641,27 @@ class NewsPoller:
         self._grace = max(0.0, float(startup_grace_seconds))
         self._max_item_age_seconds = max(0.0, float(max_item_age_seconds))
         self._seen = _SeenCache()
+        # Cross-source near-duplicate TITLE suppression. When many of the 187
+        # sources carry the SAME story, exact-URL dedup (`self._seen`) lets
+        # each through (different canonical URLs), so the feed floods with
+        # near-identical headlines. This window collapses them: the FIRST
+        # occurrence of a normalized title ingests; later ones within the
+        # window are skipped. 0 disables (getattr fallback keeps old callers
+        # that construct NewsPoller without the setting working unchanged).
+        self._dedup_title_window = max(
+            0.0,
+            float(
+                getattr(
+                    getattr(settings, "news", None),
+                    "dedup_title_window_seconds",
+                    0.0,
+                )
+            ),
+        )
+        # Bounded LRU mapping normalized-title → first-seen time. Capped so a
+        # long-running poller can't grow it without bound; oldest evicted.
+        self._seen_titles: OrderedDict[str, datetime] = OrderedDict()
+        self._seen_titles_cap: int = 5000
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._poke = asyncio.Event()      # signals "skip the sleep, poll now"
@@ -618,6 +690,10 @@ class NewsPoller:
         self.last_median_publisher_lag_seconds: float | None = None
         self.feed_health: dict[str, dict[str, object]] = {}
         self.last_stale_skipped: int = 0
+        # Per-tick count of items dropped by cross-source near-duplicate TITLE
+        # suppression (mirrors last_stale_skipped). Surfaced in tick logging so
+        # an operator can see how much the 187-source firehose is collapsing.
+        self.last_dupe_titles_skipped: int = 0
 
     # ── public read-only accessors ─────────────────────────────────────────
     # External callers (api.py news-status endpoint) need these for their
@@ -745,6 +821,7 @@ class NewsPoller:
             now = datetime.now(UTC)
             new_items: list[ParsedItem] = []
             stale_skipped = 0
+            dupe_titles_skipped = 0
             for item in result.items:
                 if _is_stale_published_ts(item.published_ts, now, self._max_item_age_seconds):
                     stale_skipped += 1
@@ -756,7 +833,14 @@ class NewsPoller:
                 cap_id = _deterministic_capture_id(item.text, item.url)
                 if self._sup.storage.get_record(cap_id) is not None:
                     continue
+                # Same cross-source near-duplicate TITLE gate the regular tick
+                # uses, so a manual probe can't smuggle in a headline a recent
+                # poll already ingested (and vice versa — shared _seen_titles).
+                if self._is_duplicate_title(item.title, now):
+                    dupe_titles_skipped += 1
+                    continue
                 new_items.append(item)
+            self.last_dupe_titles_skipped = dupe_titles_skipped
 
             for item in new_items:
                 try:
@@ -917,6 +1001,7 @@ class NewsPoller:
         # storage). This happens on the event loop — both checks are cheap.
         new_items: list[tuple[FeedSpec, ParsedItem]] = []
         stale_skipped = 0
+        dupe_titles_skipped = 0
         now = datetime.now(UTC)
         for result in results:
             for item in result.items:
@@ -930,8 +1015,16 @@ class NewsPoller:
                 cap_id = _deterministic_capture_id(item.text, item.url)
                 if self._sup.storage.get_record(cap_id) is not None:
                     continue
+                # Cross-source near-duplicate TITLE suppression — runs AFTER
+                # the exact-URL + storage guards so the first occurrence of a
+                # story still ingests; later outlets carrying the same headline
+                # within the window are dropped here.
+                if self._is_duplicate_title(item.title, now):
+                    dupe_titles_skipped += 1
+                    continue
                 new_items.append((result.spec, item))
         self.last_stale_skipped = stale_skipped
+        self.last_dupe_titles_skipped = dupe_titles_skipped
 
         if not new_items:
             return 0
@@ -980,9 +1073,11 @@ class NewsPoller:
             self.last_median_publisher_lag_seconds = None
         if ingested:
             logger.info(
-                "news_poll_ingested count=%d fresh_count=%d avg_pub_lag=%.0fs median_pub_lag=%.0fs",
+                "news_poll_ingested count=%d fresh_count=%d dupe_titles=%d stale=%d avg_pub_lag=%.0fs median_pub_lag=%.0fs",
                 ingested,
                 len(fresh_lags),
+                self.last_dupe_titles_skipped,
+                self.last_stale_skipped,
                 self.last_avg_publisher_lag_seconds or 0,
                 self.last_median_publisher_lag_seconds or 0,
             )
@@ -1022,6 +1117,43 @@ class NewsPoller:
         # Hot path: warm supervisor → service → storage. The capture_id is
         # deterministic so insert_record is upsert-safe (PRIMARY KEY).
         self._sup.process_capture(cap)
+
+    def _is_duplicate_title(self, title: str, now: datetime) -> bool:
+        """Cross-source near-duplicate gate. Returns True → caller skips item.
+
+        Disabled (always False) when `self._dedup_title_window <= 0`. A title
+        that normalizes to "" (too generic / too short) also returns False —
+        we never suppress those. Otherwise: if the normalized title was seen
+        within the window, this is a later duplicate → True (skip, keep the
+        earliest). On a first/expired sighting it records title→now (LRU,
+        oldest evicted past the cap) and returns False so the item ingests.
+
+        Side-effecting by design: it both DECIDES and RECORDS, so the two
+        ingest paths (`_poll_once`, `probe_feed_async`) share one source of
+        truth and can't drift. Both call sites run under `self._lock` already,
+        so the OrderedDict mutation here is race-free.
+        """
+        if self._dedup_title_window <= 0:
+            return False
+        key = _normalize_title(title)
+        if not key:
+            return False  # generic/short title → bypass title-dedup
+        prev = self._seen_titles.get(key)
+        if prev is not None:
+            elapsed = (now - prev).total_seconds()
+            if 0 <= elapsed <= self._dedup_title_window:
+                # Within window → later duplicate. Refresh recency so the LRU
+                # keeps a hot story resident, but DON'T move first-seen time
+                # forward (we keep suppressing relative to the earliest sight).
+                self._seen_titles.move_to_end(key)
+                return True
+        # First sighting (or the prior one aged out of the window): record now
+        # as the new first-seen time and let this item through.
+        self._seen_titles[key] = now
+        self._seen_titles.move_to_end(key)
+        while len(self._seen_titles) > self._seen_titles_cap:
+            self._seen_titles.popitem(last=False)
+        return False
 
     def _record_feed_result(self, result: FeedFetchResult) -> None:
         prev = self.feed_health.get(result.spec.name, {})
@@ -1124,6 +1256,7 @@ __all__ = [
     "ParsedItem",
     "_compute_cooldown_until",
     "_is_stale_published_ts",
+    "_normalize_title",
     "fetch_feed",
     "fetch_feed_result",
     "parse_feed",

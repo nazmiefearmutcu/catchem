@@ -112,12 +112,58 @@ export interface UIBenchmark {
   ran_at: string;
 }
 
+/**
+ * Backtest response (matches `GET /api/backtest`).
+ *
+ * `summary` is always populated (zero-valued shape on empty storage); the
+ * UI never needs to branch on null. `calibration_bins` is a sparse list —
+ * a quintile that holds zero predictions is omitted, NOT included with
+ * count: 0, so iteration produces only meaningful rows.
+ */
+export interface UIBacktest {
+  schema_version: number;
+  ran_at: string;
+  sample_size: number;
+  summary: {
+    items_evaluated: number;
+    mean_abs_error: number;
+    mean_signed_error: number;
+    max_abs_error: number;
+  };
+  calibration_bins: {
+    bin_low: number;
+    bin_high: number;
+    predicted_count: number;
+    avg_predicted_score: number;
+    avg_ground_truth_score: number;
+    calibration_gap: number;
+  }[];
+  predictions_sample: {
+    capture_id: string;
+    predicted_score: number;
+    ground_truth_score: number;
+    delta: number;
+  }[];
+}
+
 export interface UISymbol {
   symbol: string;
   count: number;
   reason_distribution: Record<string, number>;
   sentiment_distribution: Record<string, number>;
   items: FinancialRecord[];
+}
+
+/** Daily sentiment counts for one symbol — backs the stacked area + sparkline. */
+export interface SymbolSentimentTrend {
+  symbol: string;
+  days: number;
+  series: Array<{
+    day: string; // YYYY-MM-DD (UTC)
+    positive: number;
+    neutral: number;
+    negative: number;
+  }>;
 }
 
 export interface MarketQuote {
@@ -224,6 +270,59 @@ export interface NewsStatus {
 export interface NewsPollNowResponse {
   ingested: number;
   total_ingested: number;
+}
+
+/**
+ * One row in the per-feed health table. ``last_status`` is one of
+ *   - "ok"      — most recent poll returned 200
+ *   - "error"   — most recent poll failed
+ *   - "unknown" — feed registered but no poll has happened yet
+ *
+ * ``success_rate`` is in [0, 1]. ``items_total`` is cumulative since
+ * sidecar boot (in-memory only — resets on restart).
+ */
+export interface NewsSourceRow {
+  name: string;
+  url: string;
+  fallback_domain: string;
+  polls: number;
+  successes: number;
+  failures: number;
+  success_rate: number;
+  items_total: number;
+  item_count: number;
+  last_status: "ok" | "error" | "unknown" | "backed_off";
+  last_status_code: number | null;
+  last_error: string | null;
+  last_status_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  consecutive_errors: number;
+  elapsed_ms: number | null;
+  /**
+   * ISO timestamp of when the poller will next attempt this feed, when
+   * the circuit breaker is open. Null if the feed is healthy or merely
+   * degraded but not yet over the threshold.
+   */
+  cooldown_until?: string | null;
+  /** True if the most recent tick skipped this feed due to cooldown. */
+  backed_off?: boolean;
+}
+
+export interface NewsSourcesResponse {
+  schema_version: number;
+  generated_at: string;
+  /** false when the poller is disabled / not yet booted. */
+  configured: boolean;
+  total: number;
+  healthy_count: number;
+  degraded_count: number;
+  /** Number of feeds currently in circuit-breaker cooldown. */
+  backed_off_count?: number;
+  total_items?: number;
+  interval_seconds?: number;
+  last_run_at?: string | null;
+  sources: NewsSourceRow[];
 }
 
 export interface ArchiveStatus {

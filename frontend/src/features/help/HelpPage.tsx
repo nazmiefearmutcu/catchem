@@ -1,75 +1,125 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { NAV_SHORTCUTS, chordLabel } from "@/lib/nav-shortcuts";
 
 /**
- * Help-surface shortcut docs. Built from the canonical NAV_SHORTCUTS
- * registry so future renames or additions don't drift. Round 7 found
- * this list previously claimed `g m → Model Controls` and `g s → Settings`
- * — both wrong; the handler routed those keys to /map and /symbols
- * respectively.
+ * Help-surface. Round 8 redesign: this page used to duplicate Settings
+ * (same keyboard table, same mode list, same version block). Now it's
+ * the "how do I use Catchem" page — quick start, glossary, guard rules,
+ * troubleshooting. Settings keeps the keyboard table + theme toggle.
+ *
+ * The SHORTCUTS export is re-exported from SettingsPage so the Round-7
+ * "docs-against-canonical-registry" tests in src/tests/navShortcuts.test.ts
+ * still pass — keyboard docs only live in Settings now, but the contract
+ * stays addressable from HelpPage's module surface.
  */
-export const SHORTCUTS: { keys: string; description: string }[] = [
-  { keys: "⌘K / Ctrl+K", description: "Open the command palette" },
-  ...NAV_SHORTCUTS.map((s) => ({ keys: chordLabel(s), description: s.label })),
-  { keys: "Esc", description: "Close drawer / palette" },
+export { SHORTCUTS } from "@/features/settings/SettingsPage";
+
+const GLOSSARY: { term: string; body: string }[] = [
+  {
+    term: "asset class",
+    body:
+      "High-level category attached to a record (indices, equities, crypto, rates, fx, " +
+      "commodities, credit, macro). One record can carry several.",
+  },
+  {
+    term: "reason code",
+    body:
+      "Why the record matters — earnings, inflation, central_bank, regulation, " +
+      "fraud_governance, m_and_a, cyber_outage, geopolitics, etc.",
+  },
+  {
+    term: "finance relevance score",
+    body:
+      "Calibrated 0–1 score from the relevance scorer. Empirical max is ~0.80; the Overview + Feed " +
+      "color-bands ≥0.70 (top decile) and ≥0.40 (solid middle).",
+  },
+  {
+    term: "production_safe",
+    body:
+      "Default runtime. The diagnostic adapter is hard-refused; every diagnostic_* field on every " +
+      "record is forced to false/null at the API surface.",
+  },
+  {
+    term: "DLQ",
+    body:
+      "Dead-letter queue. Records that failed processing get parked here for re-tries — a non-zero " +
+      "DLQ during steady-state usually means a malformed JSONL chunk upstream.",
+  },
+  {
+    term: "fusion_verdict_class",
+    body:
+      "External governance contract owned by merged_news (newsimpact). Catchem mirrors the upstream " +
+      "class name verbatim — the FUSION_* prefix is intentional, not a Catchem-side typo.",
+  },
 ];
 
 export function HelpPage() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: api.appInfo });
 
   return (
-    <div className="grid gap-4 max-w-3xl">
-      <header>
-        <h1 className="text-lg font-bold">Help</h1>
-        <p className="text-xs text-[color:var(--fg-dim)] mt-1">
-          Catchem is a local-first desktop wrapper around the catchem pipeline.
-          Everything runs on this machine — no cloud services are contacted.
-        </p>
-      </header>
-
-      <section className="card">
-        <h2 className="label mb-2">version</h2>
-        <ul className="grid sm:grid-cols-2 gap-y-1 text-xs">
-          <li><span className="text-[color:var(--fg-dim)]">app</span> <span className="font-mono">{info.data?.name ?? "catchem"}</span></li>
-          <li><span className="text-[color:var(--fg-dim)]">version</span> <span className="font-mono">{info.data?.version ?? "—"}</span></li>
-          <li><span className="text-[color:var(--fg-dim)]">branch</span> <span className="font-mono">{info.data?.branch ?? "—"}</span></li>
-          <li><span className="text-[color:var(--fg-dim)]">commit</span> <span className="font-mono">{info.data?.commit_sha ?? "—"}</span></li>
-          <li><span className="text-[color:var(--fg-dim)]">mode</span> <span className="font-mono">{info.data?.mode ?? "—"}</span></li>
-          <li><span className="text-[color:var(--fg-dim)]">ML stubs</span> <span className="font-mono">{String(info.data?.use_ml_stubs ?? "—")}</span></li>
-        </ul>
+    <div className="grid gap-5 max-w-4xl">
+      <section className="relative overflow-hidden rounded-xl border border-accent/40 hero-gradient p-6">
+        <div aria-hidden className="pointer-events-none absolute -top-20 -left-20 h-48 w-48 rounded-full bg-accent/20 blur-3xl" />
+        <div className="relative flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+            </span>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">
+                Help · how to use Catchem
+              </div>
+              <h1 className="text-lg font-semibold mt-0.5 tracking-tight">
+                Local-first news-to-finance analyst workstation
+              </h1>
+              <div className="mt-1 text-[11px] text-[color:var(--fg-muted)]">
+                v{info.data?.version ?? "—"} · everything runs on this machine · {GLOSSARY.length} glossary terms · no cloud calls
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="relative grid gap-2 grid-cols-2 md:grid-cols-4 text-[11px]">
+          <HelpStat to="/feed" label="step 1" value="Open Live Feed →" hint="watch ingest in real time" />
+          <HelpStat to="/scan" label="step 2" value="Run a Quant Scan →" hint="deep cross-asset signals" />
+          <HelpStat to="/replay" label="step 3" value="Replay a sample →" hint="test specific article" />
+          <HelpStat to="/settings" label="config" value="DeepSeek setup →" hint="optional second opinion" />
+        </div>
       </section>
 
       <section className="card">
-        <h2 className="label mb-2">keyboard shortcuts</h2>
-        <ul className="grid gap-1.5">
-          {SHORTCUTS.map((s) => (
-            <li key={s.keys} className="grid grid-cols-[140px_1fr] gap-3 text-sm">
-              <span className="kbd">{s.keys}</span>
-              <span className="text-[color:var(--fg-dim)]">{s.description}</span>
-            </li>
+        <h2 className="label mb-2">quick start</h2>
+        <ol className="grid gap-3 list-decimal pl-5 text-sm text-[color:var(--fg-dim)]">
+          <li>
+            Open <Link className="text-accent hover:underline" to="/feed">Live Feed</Link> — the
+            news poller is already running. The status strip at the top shows whether ingestion is healthy.
+          </li>
+          <li>
+            Want to test a specific article? Go to{" "}
+            <Link className="text-accent hover:underline" to="/replay">Replay/Upload</Link> →{" "}
+            <strong>Paste article</strong>, paste the body, hit <strong>Analyze</strong>.
+          </li>
+          <li>
+            Need to re-run the supervisor over recent JSONL captures? Same page →{" "}
+            <strong>Replay JSONL</strong>. It's idempotent; already-processed IDs are skipped.
+          </li>
+          <li>
+            Check the runtime state on{" "}
+            <Link className="text-accent hover:underline" to="/ops">Ops</Link> if a count looks off.
+          </li>
+        </ol>
+      </section>
+
+      <section className="card">
+        <h2 className="label mb-2">glossary</h2>
+        <dl className="grid gap-3 text-sm">
+          {GLOSSARY.map((g) => (
+            <div key={g.term}>
+              <dt className="font-semibold">{g.term}</dt>
+              <dd className="text-[color:var(--fg-dim)] text-xs leading-relaxed mt-0.5">{g.body}</dd>
+            </div>
           ))}
-        </ul>
-      </section>
-
-      <section className="card">
-        <h2 className="label mb-2">modes</h2>
-        <dl className="grid gap-2 text-sm">
-          <dt className="font-semibold">production_safe</dt>
-          <dd className="text-[color:var(--fg-dim)] pl-3">
-            Default. NewsImpact diagnostic adapter is hard-refused even with the env flag on.
-            Every diagnostic field on every record is forced to <code className="font-mono">false</code>/<code className="font-mono">null</code>.
-          </dd>
-          <dt className="font-semibold">replay_existing</dt>
-          <dd className="text-[color:var(--fg-dim)] pl-3">One pass over finalized Awareness JSONL. Idempotent via persisted offsets.</dd>
-          <dt className="font-semibold">live_tail</dt>
-          <dd className="text-[color:var(--fg-dim)] pl-3">Long-running tail of newly committed JSONL chunks.</dd>
-          <dt className="font-semibold text-warn">research_diagnostic</dt>
-          <dd className="text-[color:var(--fg-dim)] pl-3">
-            Loads a labeled read-only diagnostic stamp from NewsImpact governance.
-            <strong className="text-warn ml-1">Can never override is_finance_relevant.</strong>
-            Catchem shows a yellow banner whenever this mode is active.
-          </dd>
         </dl>
       </section>
 
@@ -114,17 +164,103 @@ bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
             <p>See <code className="font-mono">docs/ML_FALLBACK.md</code> for the stub→HF mapping and why <code className="font-mono">--with-ml</code> may degrade gracefully to stubs.</p>
           </div>
         </details>
+        <details className="text-sm mt-2">
+          <summary className="cursor-pointer font-semibold">Symbols page shows "no live quotes"</summary>
+          <div className="mt-2 text-[color:var(--fg-dim)] pl-3 grid gap-1">
+            <p>
+              Expected on a fresh install — the default <code className="font-mono">local_fixture</code> quote
+              provider only has data for a small seed set of symbols. Symbol mentions still work
+              (they're extracted from the article text and don't need a quote feed).
+            </p>
+          </div>
+        </details>
       </section>
 
       <section className="card">
-        <h2 className="label mb-2">links</h2>
-        <ul className="text-sm grid gap-1">
-          <li><a className="text-accent hover:underline" href="/legacy" target="_blank" rel="noopener noreferrer">/legacy — vanilla dashboard</a></li>
-          <li><a className="text-accent hover:underline" href="/docs" target="_blank" rel="noopener noreferrer">/docs — OpenAPI</a></li>
-          <li><a className="text-accent hover:underline" href="/ui/summary" target="_blank" rel="noopener noreferrer">/ui/summary — JSON overview</a></li>
-          <li><a className="text-accent hover:underline" href="/ui/guards" target="_blank" rel="noopener noreferrer">/ui/guards — guard snapshot</a></li>
-        </ul>
+        <div className="flex items-baseline justify-between gap-2 mb-2">
+          <h2 className="label">developer references</h2>
+          <span className="text-[10px] text-[color:var(--fg-muted)]">opens in new tab</span>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3 text-xs">
+          <a
+            href="/api/docs"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block"
+          >
+            <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">swagger</div>
+            <div className="mt-0.5 text-sm font-semibold text-accent">API reference →</div>
+            <div className="text-[10px] text-[color:var(--fg-dim)]">interactive /api/docs</div>
+          </a>
+          <a
+            href="/api/redoc"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block"
+          >
+            <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">redoc</div>
+            <div className="mt-0.5 text-sm font-semibold text-accent">Readable docs →</div>
+            <div className="text-[10px] text-[color:var(--fg-dim)]">narrative /api/redoc</div>
+          </a>
+          <a
+            href="/api/_index"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block"
+          >
+            <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">json</div>
+            <div className="mt-0.5 text-sm font-semibold text-accent">Route index →</div>
+            <div className="text-[10px] text-[color:var(--fg-dim)]">programmatic /api/_index</div>
+          </a>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="flex items-baseline justify-between gap-2 mb-2">
+          <h2 className="label">build info</h2>
+          <Link to="/settings" className="text-[10px] text-accent hover:underline">
+            keyboard shortcuts + theme →
+          </Link>
+        </div>
+        <dl className="grid sm:grid-cols-2 gap-y-1 text-xs">
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-[color:var(--fg-dim)]">app</dt>
+            <dd className="font-mono">{info.data?.name ?? "catchem"}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-[color:var(--fg-dim)]">version</dt>
+            <dd className="font-mono">{info.data?.version ?? "—"}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-[color:var(--fg-dim)]">branch</dt>
+            <dd className="font-mono">{info.data?.branch ?? "—"}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-[color:var(--fg-dim)]">commit</dt>
+            <dd className="font-mono truncate" title={info.data?.commit_sha ?? ""}>
+              {info.data?.commit_sha?.slice(0, 10) ?? "—"}
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-[color:var(--fg-dim)]">mode</dt>
+            <dd className="font-mono">{info.data?.mode ?? "—"}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-[color:var(--fg-dim)]">ML stubs</dt>
+            <dd className="font-mono">{String(info.data?.use_ml_stubs ?? "—")}</dd>
+          </div>
+        </dl>
       </section>
     </div>
+  );
+}
+
+function HelpStat({ to, label, value, hint }: { to: string; label: string; value: string; hint?: string }) {
+  return (
+    <Link to={to} className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block">
+      <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">{label}</div>
+      <div className="mt-0.5 text-sm font-semibold text-accent">{value}</div>
+      {hint && <div className="text-[10px] text-[color:var(--fg-dim)] truncate">{hint}</div>}
+    </Link>
   );
 }

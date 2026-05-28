@@ -1,12 +1,16 @@
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Skeleton, ErrorBox } from "@/components/Skeleton";
+import { isBenignGuardState } from "@/lib/guardState";
+import { JargonTooltip } from "@/components/JargonTooltip";
+import type { Mode } from "@/types/api";
 
 export function ModelControlsPage() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ["app-info"], queryFn: api.appInfo, refetchInterval: 10_000 });
   const status = useQuery({ queryKey: ["sidecar-status"], queryFn: api.sidecarStatus, refetchInterval: 4_000 });
-  const logs = useQuery({ queryKey: ["log-tail"], queryFn: () => api.logTail(200), refetchInterval: 6_000 });
   const guards = useQuery({ queryKey: ["guards"], queryFn: api.guards, refetchInterval: 10_000 });
 
   if (info.isLoading || status.isLoading) return <Skeleton className="h-72" />;
@@ -17,25 +21,88 @@ export function ModelControlsPage() {
   const s = status.data;
   const usingStubs = a.use_ml_stubs;
 
-  return (
-    <div className="grid gap-4">
-      <header className="flex flex-wrap items-baseline gap-3">
-        <h1 className="text-lg font-bold">Model Controls</h1>
-        <button className="btn ml-auto" onClick={() => {
-          qc.invalidateQueries({ queryKey: ["app-info"] });
-          qc.invalidateQueries({ queryKey: ["sidecar-status"] });
-        }}>refresh</button>
-      </header>
+  // Hero synthesis: the loudest signal wins headline; sidecar down >>
+  // diagnostic-on >> stubs-on >> nominal.
+  const sidecarDown = !s.healthy;
+  const heroTone: "good" | "warn" | "bad" =
+    sidecarDown ? "bad"
+    : s.diagnostic_enabled ? "warn"
+    : usingStubs ? "warn"
+    : "good";
+  const heroHeadline =
+    sidecarDown ? "Sidecar is unreachable"
+    : s.diagnostic_enabled ? "Diagnostic path is enabled"
+    : usingStubs ? "Running on deterministic ML stubs"
+    : "Real HF models active";
+  const heroAccent =
+    heroTone === "good" ? "border-good/40 from-good/15"
+    : heroTone === "warn" ? "border-warn/40 from-warn/15"
+    : "border-bad/40 from-bad/15";
+  const dotAccent =
+    heroTone === "good" ? "bg-good" : heroTone === "warn" ? "bg-warn" : "bg-bad";
+  const eyebrowAccent =
+    heroTone === "good" ? "text-good" : heroTone === "warn" ? "text-warn" : "text-bad";
+  const uptimeMin = Math.round(s.uptime_seconds / 60);
+  const uptimeStr = uptimeMin >= 60 ? `${Math.floor(uptimeMin / 60)}h ${uptimeMin % 60}m` : `${uptimeMin}m`;
 
-      {/* Top strip: mode + ml + diagnostic */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card label="mode" value={a.mode} tone={a.mode === "production_safe" ? "good" : "warn"} mono />
-        <Card label="ML path" value={usingStubs ? "stubs" : "HF"} tone={usingStubs ? "warn" : "good"}
-              hint={usingStubs ? "deterministic; no network" : "real HF models active"} />
-        <Card label="diagnostic" value={s.diagnostic_enabled ? "ON" : "off"}
-              tone={s.diagnostic_enabled ? "bad" : "good"} />
-        <Card label="sidecar" value={s.healthy ? "healthy" : "down"} tone={s.healthy ? "good" : "bad"}
-              hint={`pid ${s.pid} · uptime ${Math.round(s.uptime_seconds)}s`} />
+  return (
+    <div className="grid gap-5">
+      {/* Hero: synthesized model/sidecar status + 4 critical KPI tiles. */}
+      <section className={`relative overflow-hidden rounded-xl border ${heroAccent} bg-gradient-to-br via-[color:var(--bg-elev)] to-[color:var(--bg-elev)] p-6`}>
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute -top-20 -left-20 h-48 w-48 rounded-full ${heroTone === "good" ? "bg-good/20" : heroTone === "warn" ? "bg-warn/20" : "bg-bad/20"} blur-3xl`}
+        />
+        <div className="relative flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-2 w-2">
+              <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotAccent} opacity-75`} />
+              <span className={`relative inline-flex h-2 w-2 rounded-full ${dotAccent}`} />
+            </span>
+            <div>
+              <div className={`text-[10px] uppercase tracking-[0.25em] ${eyebrowAccent} font-semibold`}>
+                Model Controls · runtime provenance
+              </div>
+              <h1 className="text-lg font-semibold mt-0.5 tracking-tight">
+                {heroHeadline}
+              </h1>
+              <div className="mt-1 text-[11px] text-[color:var(--fg-muted)]">
+                v{a.version} · {a.branch ?? "no branch"} · {(a.commit_sha ?? "—").slice(0, 7)} ·
+                pid {s.pid} · uptime {uptimeStr}
+              </div>
+            </div>
+          </div>
+          <button className="btn shrink-0" onClick={() => {
+            qc.invalidateQueries({ queryKey: ["app-info"] });
+            qc.invalidateQueries({ queryKey: ["sidecar-status"] });
+          }}>refresh</button>
+        </div>
+        <div className="relative grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 text-[11px]">
+          <MCStat
+            label="mode"
+            value={a.mode === "production_safe" ? "prod-safe" : a.mode}
+            hint={a.diagnostic_allowed ? "diagnostic allowed" : "diagnostic blocked"}
+            tone={a.mode === "production_safe" ? "good" : "warn"}
+          />
+          <MCStat
+            label="ML path"
+            value={usingStubs ? "stubs" : "HF"}
+            hint={usingStubs ? "deterministic · no net" : "real HF models"}
+            tone={usingStubs ? "warn" : "good"}
+          />
+          <MCStat
+            label="diagnostic"
+            value={s.diagnostic_enabled ? "ON" : "off"}
+            hint={s.diagnostic_enabled ? "writes diag stamps" : "writes are clean"}
+            tone={s.diagnostic_enabled ? "bad" : "good"}
+          />
+          <MCStat
+            label="sidecar"
+            value={s.healthy ? "healthy" : "down"}
+            hint={`${s.api_host}:${s.api_port}`}
+            tone={s.healthy ? "good" : "bad"}
+          />
+        </div>
       </section>
 
       {/* Connection details */}
@@ -47,7 +114,7 @@ export function ModelControlsPage() {
           <KV label="branch" value={a.branch ?? "—"} mono />
           <KV label="commit" value={a.commit_sha ?? "—"} mono />
           <KV label="bundle present" value={String(a.static_bundle_present)} tone={a.static_bundle_present ? "good" : "bad"} />
-          <KV label="diagnostic allowed" value={String(a.diagnostic_allowed)} tone={a.diagnostic_allowed ? "warn" : "good"} />
+          <KV label={<JargonTooltip term="diagnostic_allowed">diagnostic allowed</JargonTooltip>} value={String(a.diagnostic_allowed)} tone={a.diagnostic_allowed ? "warn" : "good"} />
         </ul>
       </section>
 
@@ -64,7 +131,7 @@ export function ModelControlsPage() {
         </ul>
         {usingStubs && (
           <p className="mt-2 text-[10px] text-[color:var(--fg-muted)]">
-            Stubs are deterministic, CPU-only, and explicitly labeled. They produce 100% on the
+            <JargonTooltip term="use_ml_stubs">Stubs</JargonTooltip> are deterministic, CPU-only, and explicitly labeled. They produce 100% on the
             synthetic golden set. To switch to real Hugging Face models, run the bootstrap with
             <code className="font-mono ml-1">--with-ml</code>.
           </p>
@@ -74,37 +141,42 @@ export function ModelControlsPage() {
       {/* Guards */}
       <section className="card">
         <h2 className="label mb-2">NewsImpact guard</h2>
-        {!guards.data ? <Skeleton className="h-12" /> : !guards.data.ok ? (
+        {!guards.data ? <Skeleton className="h-12" /> :
+          !guards.data.ok && isBenignGuardState(guards.data, a.mode as Mode) ? (
+            // BUG-OO: missing_governance_index + production_safe is the
+            // common fresh-install case. Show informational note, not error.
+            <p className="text-xs text-[color:var(--fg-dim)]">
+              <JargonTooltip term="NewsImpact" /> (merged_news) is not configured. Catchem operates in
+              <span> </span><JargonTooltip term="production_safe">production-safe</JargonTooltip> mode without it; diagnostic features stay off.
+            </p>
+          ) : !guards.data.ok ? (
           <ErrorBox err={guards.data.error ?? "guard error"} />
         ) : (
           <ul className="text-xs grid sm:grid-cols-2 gap-y-1">
-            <KVInline label="release_gate_passed" value={String(guards.data.release_gate_passed)}
+            <KVInline label={<JargonTooltip term="release_gate_passed" />} value={String(guards.data.release_gate_passed)}
                       tone={guards.data.release_gate_passed ? "bad" : "good"} />
-            <KVInline label="quarantine" value={guards.data.quarantine_state ?? "—"} />
-            <KVInline label="verdict" value={guards.data.fusion_verdict_class ?? "—"} />
+            <KVInline label={<JargonTooltip term="quarantine_state">quarantine</JargonTooltip>} value={guards.data.quarantine_state ?? "—"} />
+            <KVInline label={<JargonTooltip term="fusion_verdict_class">verdict</JargonTooltip>} value={guards.data.fusion_verdict_class ?? "—"} />
             <KVInline label="safe_to_publish" value={String(guards.data.safe_to_publish)}
                       tone={guards.data.safe_to_publish ? "bad" : "good"} />
             <KVInline label="safe_to_promote" value={String(guards.data.safe_to_promote)}
                       tone={guards.data.safe_to_promote ? "bad" : "good"} />
-            <KVInline label="governance sha256" value={(guards.data.governance_index_sha256 ?? "—").slice(0, 16) + "…"} mono />
+            <KVInline label={<JargonTooltip term="governance sha256" />} value={(guards.data.governance_index_sha256 ?? "—").slice(0, 16) + "…"} mono />
           </ul>
         )}
       </section>
 
-      {/* Log tail */}
+      {/* Log tail — promoted to its own /logs page in v24 so we link out
+          instead of duplicating the (now richer) viewer here. */}
       <section className="card">
-        <h2 className="label mb-2">log tail</h2>
-        {logs.isLoading ? <Skeleton className="h-32" /> :
-          (logs.data?.lines.length ?? 0) === 0 ? (
-            <p className="text-xs text-[color:var(--fg-dim)]">no log lines yet</p>
-          ) : (
-            <pre className="max-h-72 overflow-auto text-[10px] leading-relaxed bg-[color:var(--bg-elev2)] rounded p-2 font-mono">
-              {(logs.data!.lines).join("\n")}
-            </pre>
-          )}
-        {logs.data?.truncated && (
-          <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">log truncated to last 200 lines</div>
-        )}
+        <h2 className="label mb-2">sidecar logs</h2>
+        <p className="text-xs text-[color:var(--fg-dim)]">
+          Live tail with level filter, search, pause, auto-scroll, and copy
+          lives on the dedicated page.
+        </p>
+        <div className="mt-2">
+          <Link to="/logs" className="btn">View logs →</Link>
+        </div>
       </section>
 
       {/* Sidecar control note */}
@@ -120,18 +192,29 @@ export function ModelControlsPage() {
   );
 }
 
-function Card({ label, value, hint, tone, mono }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {
-  const cls = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "";
+function MCStat({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "good" | "warn" | "bad";
+}) {
+  const cls =
+    tone === "good" ? "text-good" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "";
   return (
-    <div className="card">
-      <div className="label">{label}</div>
-      <div className={`mt-1 text-xl font-semibold ${cls} ${mono ? "font-mono" : ""}`}>{value}</div>
-      {hint && <div className="text-[10px] text-[color:var(--fg-dim)] mt-0.5">{hint}</div>}
+    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
+      <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">{label}</div>
+      <div className={`mt-0.5 text-sm font-semibold tabular-nums ${cls}`}>{value}</div>
+      {hint && <div className="text-[10px] text-[color:var(--fg-dim)] truncate">{hint}</div>}
     </div>
   );
 }
 
-function KV({ label, value, tone, mono }: { label: string; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {
+function KV({ label, value, tone, mono }: { label: ReactNode; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {
   const cls = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "";
   return (
     <li>
@@ -141,6 +224,6 @@ function KV({ label, value, tone, mono }: { label: string; value: string; tone?:
   );
 }
 
-function KVInline({ label, value, tone, mono }: { label: string; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {
+function KVInline({ label, value, tone, mono }: { label: ReactNode; value: string; tone?: "good" | "bad" | "warn"; mono?: boolean }) {
   return <KV label={label} value={value} tone={tone} mono={mono} />;
 }

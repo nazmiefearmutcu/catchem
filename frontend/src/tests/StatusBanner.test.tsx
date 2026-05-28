@@ -49,8 +49,14 @@ describe("StatusBanner", () => {
     expect(screen.getByText(/missing governance_index/)).toBeInTheDocument();
   });
 
-  it("shows guard error code when raw error is redacted", () => {
-    render(
+  it("shows friendly NewsImpact-not-configured message in production_safe (BUG-OO)", () => {
+    // Pre-fix this exact state ({ok:false, error_code:"missing_governance_index"})
+    // rendered a red `<b>guard error</b> missing_governance_index` banner.
+    // For a fresh install without merged_news on the box, the catchem
+    // pipeline is fully operational — the diagnostic adapter is forbidden
+    // in production_safe regardless. Surface the state as informational,
+    // not as a critical error.
+    const { container } = render(
       <StatusBanner
         mode="production_safe"
         diagnosticAllowed={false}
@@ -58,6 +64,33 @@ describe("StatusBanner", () => {
         guards={{ ok: false, error_code: "missing_governance_index" }}
       />
     );
-    expect(screen.getByText(/missing_governance_index/)).toBeInTheDocument();
+    // The benign path uses the "NewsImpact" label + friendly status, NOT
+    // the alarming "guard error" wording.
+    expect(screen.queryByText(/guard error/i)).not.toBeInTheDocument();
+    // BUG-PP: the rendered text must NOT read "NewsImpact NewsImpact ..."
+    // (label-noun duplication). The label is the bold prefix; the message
+    // is the state phrase only.
+    expect(container.textContent).not.toMatch(/NewsImpact\s+NewsImpact/);
+    expect(screen.getByText(/not configured \(production-safe/i)).toBeInTheDocument();
+    // And the banner must render in the neutral muted tone, not bad.
+    const banner = container.querySelector('[role="status"]') as HTMLElement;
+    expect(banner.className).not.toMatch(/border-bad/);
+    expect(banner.className).toMatch(/border-\[color:var\(--border\)\]/);
+  });
+
+  it("still shows guard error tone for non-benign error_codes", () => {
+    // release_gate_flipped is a REAL concern — banner must stay red.
+    const { container } = render(
+      <StatusBanner
+        mode="production_safe"
+        diagnosticAllowed={false}
+        useMlStubs={true}
+        guards={{ ok: false, error_code: "release_gate_flipped" }}
+      />
+    );
+    expect(screen.getByText(/guard error/i)).toBeInTheDocument();
+    expect(screen.getByText(/release_gate_flipped/)).toBeInTheDocument();
+    const banner = container.querySelector('[role="status"]') as HTMLElement;
+    expect(banner.className).toMatch(/border-bad/);
   });
 });

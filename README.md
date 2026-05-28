@@ -63,13 +63,24 @@ flowchart LR
 
 > Native macOS `.app` (Tauri shell + Python FastAPI sidecar + React UI). Launch from `/Applications/Catchem.app`.
 
-| Analyst workstation overview | DeepSeek capture synthesis |
-| --- | --- |
-| ![Catchem overview pane with KPI strip (150 records, 60 finance-relevant, 100% benchmark F1), asset-class histogram, reason-code breakdown, and time-bucket relevance trend chart](docs/screenshots/01-overview.png) | ![Capture detail view showing DeepSeek synthesis output — long-form analyst writeup with stats footer and full nav](docs/screenshots/02-deepseek-synthesis.png) |
+#### Overview — Reading the tape
+![Catchem analyst workstation overview with mode / stubs / NewsImpact strip, "Reading the tape" status hero, KPI tiles for total records / finance-relevant / DLQ / distinct asset classes / benchmark F1, asset-class and reason-code distributions, trend chart per asset class, most recent relevant news feed with confidence scores](docs/screenshots/01-overview.png)
+
+#### Live Feed — News poller
+![Live feed view: news poller status "Polling 53 sources", ingested-this-session counters, last-fetch lag, filter sidebar for relevance / asset class / reason code / symbol / sentiment, scrolling table of news items with finance-impact tags and per-row confidence scores](docs/screenshots/02-live-feed.png)
+
+#### Symbols — Per-symbol news mentions
+![Symbols index view: searchable list of tickers with finance-related mention counts, latest mention timestamps, top contributing reason codes per symbol, paginated table](docs/screenshots/03-symbols.png)
+
+#### Backtest — Prediction calibration
+![Backtest view: 200-paired-reviews calibration chart comparing predicted vs ground truth across 5 score bins, items-evaluated and mean-abs-error metrics, signed-error and max-abs-error breakdown, predictions sample table with capture_id / predicted / ground truth / delta columns](docs/screenshots/04-backtest.png)
+
+#### Reviews — Analyst feedback workflow
+![Reviews queue view: analyst feedback workflow with per-capture predicted vs human-reviewed ground truth deltas, agreement strip, recent reviews stream](docs/screenshots/05-reviews.png)
 
 The Overview pane is the analyst's home: live KPIs, asset-class distribution,
-reason-code breakdown, and a relevance trend. Click any capture to drill into a
-full analyst writeup like the DeepSeek synthesis shown above.
+reason-code breakdown, and a relevance trend. Each panel — Live Feed, Symbols,
+Backtest, Reviews — is a dedicated workspace with the same dark-theme primitives.
 
 ## One-command bootstrap
 

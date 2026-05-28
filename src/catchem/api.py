@@ -1381,6 +1381,78 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return RecordListResponse(items=_to_summary_list(records, _is_production_safe()))
 
+    # ── Portfolio (READ-ONLY holdings tracker) ───────────────────────────
+    # Analyst-entered positions joined to the awareness/quant layers for
+    # context. There is NO order execution and NO money movement here — the
+    # subsystem is purely tracking + awareness enrichment. Holdings live in
+    # the ``portfolio`` table (migration v3); the enrichment join is the pure
+    # :func:`catchem.portfolio.enrich_holdings`.
+
+    @app.get("/api/portfolio")
+    def api_portfolio_list() -> dict[str, Any]:
+        sup = _get_supervisor()
+        return {
+            "schema_version": 1,
+            "generated_at": _dt.now(UTC).isoformat(),
+            "holdings": sup.storage.list_holdings(),
+        }
+
+    @app.post("/api/portfolio", status_code=201)
+    def api_portfolio_add(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        raw_symbol = payload.get("symbol")
+        symbol = raw_symbol.strip() if isinstance(raw_symbol, str) else ""
+        if not symbol:
+            raise HTTPException(status_code=400, detail="symbol must not be empty")
+        sup = _get_supervisor()
+        try:
+            holding = sup.storage.add_holding(
+                symbol,
+                label=payload.get("label"),
+                shares=payload.get("shares"),
+                weight=payload.get("weight"),
+                cost_basis=payload.get("cost_basis"),
+                notes=payload.get("notes"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return holding
+
+    @app.delete("/api/portfolio/{holding_id}")
+    def api_portfolio_delete(holding_id: int) -> dict[str, Any]:
+        sup = _get_supervisor()
+        if not sup.storage.delete_holding(holding_id):
+            raise HTTPException(status_code=404, detail="holding_not_found")
+        return {"ok": True}
+
+    @app.get("/api/portfolio/enriched")
+    def api_portfolio_enriched(
+        window_seconds: float = Query(86400.0, gt=0.0, le=2_592_000.0),
+        record_limit: int = Query(500, ge=1, le=5000),
+    ) -> dict[str, Any]:
+        """Holdings joined to recent records + coverage + a live quote.
+
+        Pure :func:`catchem.portfolio.enrich_holdings` is fed the supervisor's
+        recent records and the fixture market provider's quote. No writes, no
+        order execution.
+        """
+        from .portfolio import enrich_holdings
+
+        sup = _get_supervisor()
+        holdings = sup.storage.list_holdings()
+        records = sup.storage.recent_records(limit=record_limit, relevant_only=False)
+        enriched = enrich_holdings(
+            holdings,
+            records=records,
+            quote_fn=_MARKET_DATA.quote,
+            now=_dt.now(UTC),
+            window_seconds=window_seconds,
+        )
+        return {
+            "schema_version": 1,
+            "generated_at": _dt.now(UTC).isoformat(),
+            "holdings": enriched,
+        }
+
     @app.post("/replay")
     def replay(
         # Bounded both ends: ge=1 keeps `max_records=0` from sneaking

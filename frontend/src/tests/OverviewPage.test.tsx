@@ -9,6 +9,8 @@ import type {
   UITrends,
   UIBenchmark,
   FinancialRecord,
+  GlobalTone,
+  GlobalToneTheme,
 } from "@/types/api";
 import { OverviewPage } from "@/features/overview/OverviewPage";
 
@@ -35,6 +37,7 @@ const summaryMock = vi.fn();
 const trendsMock = vi.fn();
 const benchMock = vi.fn();
 const liveReadMock = vi.fn();
+const globalToneMock = vi.fn();
 
 vi.mock("@/lib/api", async (importOriginal) => {
   // Keep the real formatting/helper exports (fmtPct, fmtRel, fmtScore,
@@ -48,6 +51,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       trends: () => trendsMock(),
       benchmarkLatest: () => benchMock(),
       quantLiveRead: () => liveReadMock(),
+      quantGlobalTone: () => globalToneMock(),
     },
   };
 });
@@ -140,6 +144,38 @@ function makeLiveRead() {
   };
 }
 
+function makeToneTheme(overrides: Partial<GlobalToneTheme> = {}): GlobalToneTheme {
+  return {
+    latest_tone: 1.23,
+    mean_tone: 0.9,
+    min_tone: -1.0,
+    max_tone: 2.5,
+    tone_trend: 0.4,
+    tone_slope: 0.01,
+    tone_state: "improving",
+    n_points: 24,
+    generated_at: "2026-05-28T12:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeGlobalTone(overrides: Partial<GlobalTone> = {}): GlobalTone {
+  return {
+    schema_version: 1,
+    degraded: false,
+    generated_at: "2026-05-28T12:00:00Z",
+    overall_tone: 0.85,
+    overall_state: "improving",
+    by_theme: {
+      markets: makeToneTheme({ tone_state: "improving", latest_tone: 1.5 }),
+      economy: makeToneTheme({ tone_state: "stable", latest_tone: 0.2 }),
+      crypto: makeToneTheme({ tone_state: "deteriorating", latest_tone: -1.8 }),
+      fed: makeToneTheme({ tone_state: "stable", latest_tone: 0.0 }),
+    },
+    ...overrides,
+  };
+}
+
 // React-query client with retries OFF so a rejected/never-resolving query
 // surfaces deterministically instead of being retried.
 function renderOverview(): { container: HTMLElement } {
@@ -160,11 +196,13 @@ describe("OverviewPage (smoke)", () => {
     trendsMock.mockReset();
     benchMock.mockReset();
     liveReadMock.mockReset();
+    globalToneMock.mockReset();
     // Sensible happy-path defaults; individual tests override as needed.
     summaryMock.mockResolvedValue(makeSummary());
     trendsMock.mockResolvedValue(makeTrends());
     benchMock.mockResolvedValue(makeBench());
     liveReadMock.mockResolvedValue(makeLiveRead());
+    globalToneMock.mockResolvedValue(makeGlobalTone());
   });
 
   it("renders the dashboard with KPI tiles + hero from mocked data", async () => {
@@ -231,5 +269,33 @@ describe("OverviewPage (smoke)", () => {
 
     // Empty recent_top shows the "No records yet" empty state, not a crash.
     expect(screen.getByText(/no records yet/i)).toBeInTheDocument();
+  });
+
+  it("renders the global news tone panel: overall state + per-theme chips", async () => {
+    renderOverview();
+
+    // Panel mounts and shows the overall state (improving fixture).
+    expect(await screen.findByTestId("global-tone-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("global-tone-overall-state")).toHaveTextContent(/improving/i);
+
+    // All four themes render their own chip with their state.
+    for (const name of ["markets", "economy", "crypto", "fed"]) {
+      expect(screen.getByTestId(`global-tone-theme-${name}`)).toBeInTheDocument();
+    }
+    // The crypto theme carries the deteriorating state from the fixture.
+    expect(screen.getByTestId("global-tone-theme-crypto")).toHaveTextContent(/deteriorating/i);
+  });
+
+  it("renders the muted 'tone unavailable' state when global tone is degraded", async () => {
+    globalToneMock.mockResolvedValue(
+      makeGlobalTone({ degraded: true, overall_tone: null, overall_state: "stable", by_theme: {} }),
+    );
+
+    renderOverview();
+
+    expect(await screen.findByTestId("global-tone-panel")).toBeInTheDocument();
+    expect(screen.getByText(/tone unavailable/i)).toBeInTheDocument();
+    // No per-theme chips in the degraded state.
+    expect(screen.queryByTestId("global-tone-theme-markets")).toBeNull();
   });
 });

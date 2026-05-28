@@ -10,8 +10,10 @@ mod security;
 mod sidecar;
 mod state;
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::time::Duration;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::sidecar::SidecarConfig;
 use crate::state::AppState;
@@ -19,9 +21,33 @@ use crate::state::AppState;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8087;
 
+/// File-based boot breadcrumb — survives launchd-mediated stderr discard.
+///
+/// `env_logger` writes to stderr, but when a release-built `.app` is launched
+/// via Finder/Spotlight/`open`, stderr is silently discarded (launchd does
+/// not pipe it anywhere observable, not even to the unified `log show`). The
+/// effect is that `log::error!("sidecar start failed: {e}")` looks like it
+/// fires but produces nothing the user or a debugger can see.
+///
+/// `boot_log` appends a timestamped line to `~/Library/Logs/Catchem/boot.log`
+/// instead. The file is opened in append mode so successive launches stack,
+/// and the helper swallows its own errors so a logging failure can never
+/// crash the host process.
+fn boot_log(stage: &str, msg: &str) {
+    let path = paths::log_dir().join("boot.log");
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{now}] {stage}: {msg}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    boot_log("run", "entered");
 
     tauri::Builder::default()
         // No plugins registered — see Cargo.toml for the rationale. The
@@ -37,8 +63,10 @@ pub fn run() {
             commands::sidecar_wait_healthy,
             commands::endpoint,
             commands::open_external,
+            commands::open_secondary_window,
         ])
         .setup(|app| {
+            boot_log("setup", "closure invoked");
             // Resolve sidecar python: dev = repo .venv, release = bundled
             // PyInstaller binary under the .app's Resources/sidecar/.
             //
@@ -51,6 +79,7 @@ pub fn run() {
                 .resource_dir()
                 .expect("resource_dir")
                 .to_path_buf();
+            boot_log("setup", &format!("resource_dir={}", resource_dir.display()));
             let resolved = match paths::resolve_sidecar(
                 &resource_dir,
                 paths::env_flag("CATCHEM_DESKTOP_DEV"),
@@ -58,9 +87,19 @@ pub fn run() {
                 Ok(resolved) => resolved,
                 Err(e) => {
                     log::error!("sidecar resolution failed: {e}");
+                    boot_log("setup", &format!("resolve_sidecar ERROR: {e}"));
                     return Err(std::io::Error::new(std::io::ErrorKind::NotFound, e).into());
                 }
             };
+            boot_log(
+                "setup",
+                &format!(
+                    "resolved python={} cwd={} release={}",
+                    resolved.executable.display(),
+                    resolved.cwd.display(),
+                    resolved.release_mode
+                ),
+            );
 
             let cfg = SidecarConfig {
                 python: resolved.executable.clone(),
@@ -82,8 +121,13 @@ pub fn run() {
 
             // Start the sidecar BEFORE creating the window so the webview
             // can navigate straight to the FastAPI UI.
-            if let Err(e) = state.sidecar.start(&cfg, false) {
-                log::error!("sidecar start failed: {e}");
+            boot_log("setup", "calling sidecar.start()");
+            match state.sidecar.start(&cfg, false) {
+                Ok(()) => boot_log("setup", "sidecar.start() OK"),
+                Err(e) => {
+                    log::error!("sidecar start failed: {e}");
+                    boot_log("setup", &format!("sidecar.start() ERROR: {e}"));
+                }
             }
 
             // Block briefly for sidecar readiness — production-safe stack
@@ -94,16 +138,29 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 let outcome = crate::sidecar::wait_for_health(
                     &cfg_clone,
-                    std::time::Duration::from_secs(30),
+                    DEFAULT_HEALTH_TIMEOUT,
                 ).await;
                 if outcome.healthy {
                     log::info!("sidecar healthy in {}ms", outcome.elapsed_ms);
+                    boot_log(
+                        "setup",
+                        &format!("wait_for_health: HEALTHY ({}ms)", outcome.elapsed_ms),
+                    );
                 } else {
                     log::warn!(
                         "sidecar not healthy after {}ms (status={:?} err={:?})",
                         outcome.elapsed_ms,
                         outcome.last_status,
                         outcome.last_error
+                    );
+                    boot_log(
+                        "setup",
+                        &format!(
+                            "wait_for_health: NOT HEALTHY after {}ms (status={:?} err={:?})",
+                            outcome.elapsed_ms,
+                            outcome.last_status,
+                            outcome.last_error
+                        ),
                     );
                 }
             });
@@ -163,8 +220,17 @@ pub fn run() {
             // this way avoids the "emit a JS event no one listens to"
             // dead path the original implementation shipped with — frontend/
             // has zero `@tauri-apps/api` imports, so `handle.emit()` had
-            // no receiver. The legacy emit() calls below stay for any
-            // future tauri:// page (boot shim, etc.) that wants to listen.
+            // no receiver.
+            //
+            // Removed (v34): two `handle.emit("catchem:nav", r)` and
+            // `app_handle.emit("catchem:menu", id)` calls that were firing
+            // into a void. They were originally retained "in case a future
+            // tauri:// boot shim wants to listen," but the boot shim is now
+            // its own static page (see `frontend/boot/`) that does a hard
+            // `window.location.replace` once /healthz returns 200, so no
+            // long-lived listener exists. If we ever need IPC again, add it
+            // back explicitly along with the matching `@tauri-apps/api`
+            // listener on the JS side — dead emits are just noise.
             let app_handle = app.handle().clone();
             let sidecar_endpoint = cfg.endpoint();
             let go_to = move |handle: &tauri::AppHandle, route: &str| {
@@ -182,30 +248,20 @@ pub fn run() {
             };
             app.on_menu_event(move |handle, ev| {
                 let id = ev.id().0.as_str();
-                let route = match id {
-                    "nav_overview" => Some("/"),
-                    "nav_feed" => Some("/feed"),
-                    "nav_replay" => Some("/replay"),
-                    "nav_analysis" => Some("/map"),
-                    "nav_model" => Some("/model-controls"),
-                    "help_open" => Some("/help"),
-                    "file_new_paste" => Some("/replay"),
-                    "sidecar_health" => Some("/model-controls"),
-                    "help_logs" => Some("/model-controls"),
-                    _ => None,
-                };
-                if let Some(r) = route {
+                // 1. Navigation entries -> webview.navigate().
+                if let Some(r) = menu::nav_route_for(id) {
                     go_to(handle, r);
-                    // Legacy emit kept for any tauri:// page that may later
-                    // listen (e.g. an updated boot shim). No-op for the
-                    // external-origin React UI.
-                    let _ = handle.emit("catchem:nav", r);
                     return;
                 }
+                // 2. Frontend-delegated entries -> CustomEvent into webview.
+                if menu::is_frontend_menu_id(id) {
+                    menu::dispatch_frontend_menu(handle, id);
+                    return;
+                }
+                // 3. Rust-only entries -> sidecar lifecycle + webview reload
+                //    + secondary-window creation.
                 match id {
-                    "file_open" => {
-                        let _ = app_handle.emit("catchem:file-open", ());
-                    }
+                    "reload" => menu::reload_main_webview(handle),
                     "sidecar_restart" => {
                         let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
                         let cfg = state.sidecar_config.read().unwrap().clone();
@@ -214,6 +270,20 @@ pub fn run() {
                     "sidecar_stop" => {
                         let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
                         let _ = state.sidecar.stop();
+                    }
+                    "new_window" => {
+                        // Pull the live sidecar config so port/host overrides
+                        // (e.g. CATCHEM_DESKTOP_DEV) are honoured.
+                        let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
+                        let cfg = state.sidecar_config.read().unwrap().clone();
+                        if let Err(e) = menu::open_secondary_window(
+                            handle,
+                            &cfg.endpoint(),
+                            &cfg.host,
+                            cfg.port,
+                        ) {
+                            log::warn!("menu new_window open failed: {e}");
+                        }
                     }
                     _ => {}
                 }
@@ -224,13 +294,27 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // Stop the sidecar on quit so we don't leave an orphan FastAPI.
-                let state: tauri::State<std::sync::Arc<AppState>> = window.app_handle().state();
-                let _ = state.sidecar.stop();
+                // Only stop the sidecar when the MAIN window closes —
+                // closing a secondary analyst dashboard (v30) used to
+                // kill the sidecar out from under the still-open main
+                // window. The sidecar is the FastAPI backend; tearing
+                // it down on every CloseRequested broke the main UI as
+                // soon as the user closed any secondary window.
+                if window.label() == "main" {
+                    let state: tauri::State<std::sync::Arc<AppState>> = window.app_handle().state();
+                    let _ = state.sidecar.stop();
+                }
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            // .expect would panic into stderr — which launchd discards for
+            // bundled apps. Surface the error into boot.log so we can see
+            // what went wrong on the next launch.
+            boot_log("run", &format!("tauri runtime ERROR: {e}"));
+            panic!("error while running tauri application: {e}");
+        });
+    boot_log("run", "exited (normal)");
 }
 
 // Dev helper: how long to wait for sidecar /healthz before showing the

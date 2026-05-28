@@ -61,6 +61,12 @@ Env overrides:
   CATCHEM_MODE, CATCHEM_WITH_ML, CATCHEM_NO_API, CATCHEM_MAX_RECORDS,
   CATCHEM_SKIP_RUN, CATCHEM_SKIP_FRONTEND_BUILD, CATCHEM_DEV_UI,
   AWARENESS_REPO_PATH, NEWSIMPACT_REPO_PATH
+
+Note: AWARENESS_REPO_PATH and NEWSIMPACT_REPO_PATH guide the install
+step. The script auto-exports them as the runtime contract names
+(CATCHEM_PATHS__AWARENESS_REPO, CATCHEM_PATHS__NEWSIMPACT_REPO,
+CATCHEM_PATHS__AWARENESS_DATA_DIR) so the launched catchem app reads
+the same paths. See docs/SOURCE_OF_TRUTH.md for the full env contract.
 EOF
       exit 0
       ;;
@@ -125,6 +131,18 @@ fi
 # ── 5. verify paths ──────────────────────────────────────────────────────────
 [ -d "$AWARENESS_REPO_PATH" ] || warn "awareness repo missing: $AWARENESS_REPO_PATH"
 [ -d "$NEWSIMPACT_REPO_PATH" ] || warn "newsimpact repo missing: $NEWSIMPACT_REPO_PATH"
+
+# BUG-II: shell-side AWARENESS_REPO_PATH / NEWSIMPACT_REPO_PATH guide the
+# install step (uv pip install -e $AWARENESS_REPO_PATH) but do NOT reach
+# the catchem runtime — pydantic-settings reads CATCHEM_PATHS__AWARENESS_REPO
+# / CATCHEM_PATHS__NEWSIMPACT_REPO (double-underscore nested form). Map
+# shell vars to the runtime contract so the launched catchem sees the
+# same paths from one consistent setting.
+export CATCHEM_PATHS__AWARENESS_REPO="$AWARENESS_REPO_PATH"
+export CATCHEM_PATHS__NEWSIMPACT_REPO="$NEWSIMPACT_REPO_PATH"
+# Catchem replay reads CATCHEM_PATHS__AWARENESS_DATA_DIR; default to the
+# Awareness convention <repo>/data unless the operator already set it.
+export CATCHEM_PATHS__AWARENESS_DATA_DIR="${CATCHEM_PATHS__AWARENESS_DATA_DIR:-$AWARENESS_REPO_PATH/data}"
 
 # ── 6. NewsImpact governance guard ──────────────────────────────────────────
 log "verifying NewsImpact quarantine state"

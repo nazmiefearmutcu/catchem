@@ -79,6 +79,19 @@ if [ -d "$APP_DST" ]; then
   echo "[install_catchem] backing up existing app to $BACKUP"
   /usr/bin/ditto --rsrc "$APP_DST" "$BACKUP"
   /bin/rm -rf "$APP_DST"
+
+  # Rotate old backups: keep the 2 most recent (this one + one prior safety
+  # net), delete older. Each Catchem.app is ~360MB; without this guard the
+  # /Applications volume hits "No space left on device" after ~25 installs.
+  KEEP=2
+  TOTAL=$(ls -1d /Applications/Catchem.app.backup.* 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$TOTAL" -gt "$KEEP" ]; then
+    PRUNE=$((TOTAL - KEEP))
+    echo "[install_catchem] pruning $PRUNE old backup(s) (keeping $KEEP most recent)"
+    ls -1d /Applications/Catchem.app.backup.* 2>/dev/null | sort | head -n "$PRUNE" | while read -r OLD; do
+      /bin/rm -rf "$OLD"
+    done
+  fi
 fi
 /usr/bin/ditto --rsrc "$APP_SRC" "$APP_DST"
 if [ "$RELEASE" -eq 1 ]; then

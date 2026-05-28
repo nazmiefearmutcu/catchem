@@ -4,9 +4,9 @@ processed exactly once across restarts."""
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Iterable, Iterator
 
 from .awareness_reader import iter_captures, iter_finalized_files
 from .logging import get_logger
@@ -60,7 +60,7 @@ class ReplayRunner:
                     source_path=str(path),
                     line_offset=line_idx,
                     last_capture_id=cap.capture_id,
-                    updated_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(UTC),
                 )
                 # Persist periodically so we don't double-process on crash.
                 if (time.monotonic() - last_persist) >= self.offset_persist_seconds:

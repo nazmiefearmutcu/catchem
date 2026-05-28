@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
 from catchem.schemas import AwarenessCaptureView
-from catchem.settings import CatchemMode, Settings, load_settings, reload_settings
-
+from catchem.settings import Settings, load_settings, reload_settings
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -97,8 +97,8 @@ def synth_capture() -> Callable[..., AwarenessCaptureView]:
             source_type=source_type,
             discovery_channel=f"rss:{domain}",
             language=language,
-            fetch_ts=datetime.now(timezone.utc),
-            observed_ts=datetime.now(timezone.utc),
+            fetch_ts=datetime.now(UTC),
+            observed_ts=datetime.now(UTC),
             published_ts=published_ts,
             content_hash="abc123",
             robots_decision="not_applicable",
@@ -123,8 +123,8 @@ def synth_non_finance_capture() -> AwarenessCaptureView:
         source_type="rss",
         discovery_channel="rss:espn.com",
         language="en",
-        fetch_ts=datetime.now(timezone.utc),
-        observed_ts=datetime.now(timezone.utc),
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
     )
 
 

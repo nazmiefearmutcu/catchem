@@ -8,13 +8,56 @@ anyone breaks the JSONL → Storage round trip, this fails.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from catchem.demo import build_capture, render_demo_report, run_demo, write_jsonl
-from catchem.settings import load_settings, reload_settings
+from catchem.settings import reload_settings
 
+
+def test_run_demo_does_not_mutate_os_environ(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BUG-GG regression: pre-fix `run_demo` set
+    `os.environ['CATCHEM_PATHS__AWARENESS_DATA_DIR'] = demo_root` and then
+    restored the prior value in a finally block. The window between
+    mutation and restore meant any concurrent `load_settings()` saw the
+    demo path. The fix swaps paths via Settings.model_copy(deep=True) so
+    global env is untouched after the call.
+    """
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    reload_settings()
+    before = dict(os.environ)
+    run_demo(
+        title="Apple beats earnings",
+        text="$AAPL rose 4% after earnings beat. Revenue topped consensus.",
+        domain="wsj.com",
+    )
+    after = dict(os.environ)
+    added = set(after) - set(before)
+    removed = set(before) - set(after)
+    changed = {k for k in before if k in after and before[k] != after[k]}
+    assert not (added or removed or changed), (
+        f"run_demo mutated process env. added={added} removed={removed} changed={changed}"
+    )
+
+
+def test_write_jsonl_filename_disambiguates_by_capture_id(tmp_path: Path) -> None:
+    """BUG-HH regression: pre-fix `demo-{ms}.jsonl` could collide when two
+    captures landed in the same millisecond. The filename now includes a
+    short capture_id suffix; different content can never collide,
+    same-content writes overwrite the same path idempotently."""
+    cap_a = build_capture(title="A", text="apple news one", url="https://x.com/a")
+    cap_b = build_capture(title="B", text="bitcoin news two", url="https://x.com/b")
+    assert cap_a.capture_id != cap_b.capture_id
+    p_a = write_jsonl(cap_a, tmp_path)
+    p_b = write_jsonl(cap_b, tmp_path)
+    assert p_a != p_b, (
+        f"Two demos with different content must NOT share a filename. "
+        f"p_a={p_a.name} p_b={p_b.name}"
+    )
 
 FED_ARTICLE = (
     "The Federal Reserve raised its benchmark interest rate by 25 basis points "

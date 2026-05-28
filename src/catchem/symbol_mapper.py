@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 from rapidfuzz import fuzz, process
 
@@ -186,7 +186,10 @@ class SymbolMapper:
             scanned += 1
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
+            except (json.JSONDecodeError, OSError):
+                # Narrow: read may fail (OSError) or content may not be JSON
+                # (JSONDecodeError). Any other exception should surface, not
+                # silently skip a manifest the operator put in place.
                 continue
             if not isinstance(data, dict):
                 continue

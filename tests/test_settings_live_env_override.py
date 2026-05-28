@@ -74,7 +74,7 @@ def test_top_level_env_overrides_yaml_for_use_ml_stubs(monkeypatch: pytest.Monke
     monkeypatch.setenv("CATCHEM_USE_ML_STUBS", "false")
     reload_settings()
     s = load_settings()
-    assert s.models_.use_ml_stubs is False, (
+    assert s.models.use_ml_stubs is False, (
         "CATCHEM_USE_ML_STUBS=false did not flow into ModelConfig.use_ml_stubs"
     )
 
@@ -83,7 +83,12 @@ def test_invalid_env_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Garbage in nested env should fail loudly, not silently revert."""
     monkeypatch.setenv("CATCHEM_LIVE__POLL_SECONDS", "definitely-not-a-number")
     reload_settings()
-    with pytest.raises(Exception):
+    # B017 noqa: pydantic-settings can surface the coercion failure as either
+    # a pydantic ValidationError or, depending on the version's source-order
+    # validator chain, a generic ValueError. Anchoring on the base
+    # Exception keeps the contract about *failure*, not the specific
+    # exception class — the *which-class* detail is pydantic-version churn.
+    with pytest.raises(Exception):  # noqa: B017
         load_settings()
 
 
@@ -211,6 +216,50 @@ def test_catchem_api_single_underscore_is_silently_ignored(
         "this test has been re-introduced."
     )
     assert s.api.port != 58088
+
+
+# ── Aliased nested env vars (regression: CATCHEM_MODELS__* / CATCHEM_LOGGING__*) ──
+#
+# Pre-fix bug: Settings used `models_` (alias="models") and `logging_`
+# (alias="logging") for fields whose name conflicted with Python keywords/stdlib.
+# pydantic-settings derives the nested env path from the FIELD NAME, not the
+# alias — so `CATCHEM_MODELS__USE_ML_STUBS` was silently ignored even though
+# conftest.py, ci.yml, multiple test setUps, and several scripts set it.
+#
+# The fix renames the fields to `models` / `logging` (no alias needed) so the
+# documented env-var contract works. These tests pin that contract.
+
+
+def test_catchem_models_use_ml_stubs_env_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`CATCHEM_MODELS__USE_ML_STUBS=false` MUST land on Settings.models.use_ml_stubs."""
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "false")
+    reload_settings()
+    s = load_settings()
+    assert s.models.use_ml_stubs is False, (
+        "CATCHEM_MODELS__USE_ML_STUBS=false did not flow into Settings.models.use_ml_stubs. "
+        "This is the env-var contract that conftest.py, .github/workflows/ci.yml, "
+        "and several scripts/test setUps rely on."
+    )
+
+
+def test_catchem_models_sentiment_default_env_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`CATCHEM_MODELS__SENTIMENT_DEFAULT=X` MUST land on Settings.models.sentiment_default."""
+    monkeypatch.setenv("CATCHEM_MODELS__SENTIMENT_DEFAULT", "ProsusAI/finbert-tone-test")
+    reload_settings()
+    s = load_settings()
+    assert s.models.sentiment_default == "ProsusAI/finbert-tone-test"
+
+
+def test_catchem_logging_level_env_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`CATCHEM_LOGGING__LEVEL=ERROR` MUST land on Settings.logging.level.
+
+    The autouse `isolated_env` fixture sets this to WARNING. If env wiring is
+    broken, level stays at INFO (default) regardless of what conftest sets.
+    """
+    monkeypatch.setenv("CATCHEM_LOGGING__LEVEL", "ERROR")
+    reload_settings()
+    s = load_settings()
+    assert s.logging.level == "ERROR"
 
 
 def test_catchem_release_mode_both_paths_together(

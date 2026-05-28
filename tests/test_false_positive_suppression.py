@@ -7,7 +7,7 @@ portrait" case that snuck through in the v1 scoring.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -38,8 +38,8 @@ def test_nazi_looted_portrait_is_not_finance(monkeypatch: pytest.MonkeyPatch) ->
         source_type="rss",
         url="https://bbc.com/news/nazi-portrait",
         language="en",
-        fetch_ts=datetime.now(timezone.utc),
-        observed_ts=datetime.now(timezone.utc),
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
     )
     rec = svc.process(cap)
     assert rec.is_finance_relevant is False, (

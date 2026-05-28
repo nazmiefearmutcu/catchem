@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .logging import get_logger
 
@@ -113,19 +113,23 @@ def _extract_features(data: Any) -> dict[str, float | None]:
         for key in ("last_return_1d", "ret_1d", "r1"):
             v = data.get(key)
             if isinstance(v, (int, float)):
-                out["last_return_1d"] = float(v); break
+                out["last_return_1d"] = float(v)
+                break
         for key in ("last_return_5d", "ret_5d", "r5"):
             v = data.get(key)
             if isinstance(v, (int, float)):
-                out["last_return_5d"] = float(v); break
+                out["last_return_5d"] = float(v)
+                break
         for key in ("realized_vol_20d", "rv_20d", "vol20"):
             v = data.get(key)
             if isinstance(v, (int, float)):
-                out["realized_vol_20d"] = float(v); break
+                out["realized_vol_20d"] = float(v)
+                break
         for key in ("last_price", "close", "px"):
             v = data.get(key)
             if isinstance(v, (int, float)):
-                out["last_price"] = float(v); break
+                out["last_price"] = float(v)
+                break
         # Try to derive from a series
         series = data.get("close") if isinstance(data.get("close"), list) else data.get("prices")
         if isinstance(series, list) and len(series) >= 21 and out["last_price"] is None:
@@ -134,8 +138,14 @@ def _extract_features(data: Any) -> dict[str, float | None]:
                 out["last_price"] = closes[-1]
                 if closes[-2]:
                     out["last_return_1d"] = (closes[-1] - closes[-2]) / closes[-2]
-                if closes[0]:
-                    out["last_return_5d"] = (closes[-1] - closes[-6]) / closes[-6] if len(closes) >= 6 else None
+                # Guard on the ACTUAL divisor (closes[-6]). Pre-fix this
+                # checked closes[0], which made a pathological closes[0]==0
+                # (e.g. a delisting marker stub at the head of the window)
+                # skip the computation even when the real divisor was fine
+                # — and conversely allowed a closes[-6]==0 path to fall
+                # through to the surrounding except.
+                if len(closes) >= 6 and closes[-6]:
+                    out["last_return_5d"] = (closes[-1] - closes[-6]) / closes[-6]
                 # naive realized vol of log-returns
                 import math
                 lr = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1]]
@@ -143,6 +153,11 @@ def _extract_features(data: Any) -> dict[str, float | None]:
                     m = sum(lr) / len(lr)
                     var = sum((x - m) ** 2 for x in lr) / max(1, len(lr) - 1)
                     out["realized_vol_20d"] = math.sqrt(var) * math.sqrt(252)
-            except Exception:
-                pass
+            except (ValueError, ZeroDivisionError, TypeError) as exc:
+                # Narrow: only the math/conversion paths above can raise these.
+                # A broader except would swallow programming bugs (KeyError,
+                # AttributeError) and we'd never see them. Log so a malformed
+                # artifact surfaces in the operator log instead of silently
+                # producing missing-feature records.
+                logger.warning("chart_context_feature_compute_failed", err=str(exc), exc_type=type(exc).__name__)
     return out

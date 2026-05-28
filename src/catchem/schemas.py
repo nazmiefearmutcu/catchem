@@ -8,21 +8,28 @@ We mirror Awareness's design choice of `extra="forbid"` so additions are explici
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class ProcessingMode(str, Enum):
+# UP042 deferral: ruff wants us to inherit from `enum.StrEnum`, but
+# that's a runtime-behaviour change — `str(StrEnum.A)` returns the value
+# ("production_safe"), `str((str, Enum).A)` returns the qualified name
+# ("ProcessingMode.PRODUCTION_SAFE"). Several JSON-export and log paths
+# in the codebase format enums via `.value` already, but a downstream
+# tool reading our serialized state might depend on the qualified form.
+# Keep the explicit (str, Enum) idiom until that audit is done.
+class ProcessingMode(str, Enum):  # noqa: UP042
     PRODUCTION_SAFE = "production_safe"
     REPLAY_EXISTING = "replay_existing"
     LIVE_TAIL = "live_tail"
     RESEARCH_DIAGNOSTIC = "research_diagnostic"
 
 
-class SentimentLabel(str, Enum):
+class SentimentLabel(str, Enum):  # noqa: UP042
     POSITIVE = "positive"
     NEUTRAL = "neutral"
     NEGATIVE = "negative"
@@ -60,7 +67,7 @@ class AwarenessCaptureView(BaseModel):
     def _utc(cls, v: Any) -> Any:
         if v is None or isinstance(v, datetime):
             if isinstance(v, datetime) and v.tzinfo is None:
-                return v.replace(tzinfo=timezone.utc)
+                return v.replace(tzinfo=UTC)
             return v
         if isinstance(v, str):
             return v  # let pydantic parse
@@ -111,7 +118,7 @@ class FinancialImpactRecord(BaseModel):
     # Provenance
     processing_mode: ProcessingMode
     model_versions: dict[str, str] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("text_excerpt")
     @classmethod
@@ -128,7 +135,7 @@ class ReplayOffset(BaseModel):
     source_path: str
     line_offset: int = 0
     last_capture_id: str | None = None
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 __all__ = [

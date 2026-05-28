@@ -7,9 +7,9 @@ claiming live market data.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from datetime import UTC, datetime, timedelta
 
 from .contracts import MarketQuote
 
@@ -35,21 +35,21 @@ _FIXTURE_QUOTES: dict[str, FixtureQuote] = {
         currency="USD",
         last=189.98,
         prev_close=188.85,
-        as_of=datetime(2024, 1, 2, 21, 0, tzinfo=timezone.utc),
+        as_of=datetime(2024, 1, 2, 21, 0, tzinfo=UTC),
     ),
     "MSFT": FixtureQuote(
         symbol="MSFT",
         currency="USD",
         last=370.60,
         prev_close=369.14,
-        as_of=datetime(2024, 1, 2, 21, 0, tzinfo=timezone.utc),
+        as_of=datetime(2024, 1, 2, 21, 0, tzinfo=UTC),
     ),
     "BTCUSD": FixtureQuote(
         symbol="BTCUSD",
         currency="USD",
         last=44120.50,
         prev_close=43890.00,
-        as_of=datetime(2024, 1, 2, 21, 0, tzinfo=timezone.utc),
+        as_of=datetime(2024, 1, 2, 21, 0, tzinfo=UTC),
     ),
 }
 
@@ -82,7 +82,7 @@ class LocalFixtureMarketDataProvider:
     stale_window = timedelta(minutes=15)
 
     def quote(self, symbol: str, *, now: datetime | None = None) -> MarketQuote:
-        retrieved_at = now or datetime.now(timezone.utc)
+        retrieved_at = now or datetime.now(UTC)
         sym = normalize_symbol(symbol)
         fixture = _FIXTURE_QUOTES.get(sym)
         if fixture is None:
@@ -122,7 +122,7 @@ class LocalFixtureMarketDataProvider:
         )
 
     def quotes(self, symbols: Iterable[str], *, now: datetime | None = None) -> list[MarketQuote]:
-        retrieved_at = now or datetime.now(timezone.utc)
+        retrieved_at = now or datetime.now(UTC)
         return [self.quote(symbol, now=retrieved_at) for symbol in symbols]
 
 
@@ -131,8 +131,8 @@ __all__ = [
     "FIXTURE_PROVIDER",
     "FRESHNESS_STALE",
     "FRESHNESS_UNAVAILABLE",
-    "LocalFixtureMarketDataProvider",
     "MARKET_STATE_FIXTURE",
+    "LocalFixtureMarketDataProvider",
     "normalize_symbol",
     "parse_symbol_list",
 ]

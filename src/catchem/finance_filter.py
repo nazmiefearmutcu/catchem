@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
 
 from .schemas import AwarenessCaptureView
 from .taxonomy import Taxonomy
-
 
 _FINANCE_KEYWORDS = (
     "earnings", "revenue", "profit", "loss", "guidance", "ipo", "merger",
@@ -83,7 +81,7 @@ class FastPrefilter:
 
         # Cashtag detection ($AAPL, $BTC). Independent signal.
         if re.search(r"\$[A-Z]{1,6}\b", cap.text or ""):
-            matched = matched + ("cashtag",)
+            matched = (*matched, "cashtag")
 
         # Score: bounded combination of priors + keyword density + cashtags.
         if len(text) < self.min_text_chars:

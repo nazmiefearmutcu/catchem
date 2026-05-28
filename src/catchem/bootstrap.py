@@ -14,14 +14,13 @@ from typing import Any
 from .logging import configure_logging, get_logger
 from .settings import Settings, load_settings
 
-
 logger = get_logger("catchem.bootstrap")
 
 
 def bootstrap(skip_warm: bool = True) -> dict[str, Any]:
     """Idempotent initialization. Returns a summary suitable for printing."""
     s = load_settings()
-    configure_logging(level=s.logging_.level, json_mode=False)
+    configure_logging(level=s.logging.level, json_mode=False)
     summary: dict[str, Any] = {"mode": s.mode.value}
 
     # 1. ensure output dirs
@@ -44,7 +43,7 @@ def bootstrap(skip_warm: bool = True) -> dict[str, Any]:
 
     # 4. (optional) warm HF cache
     summary["models_warmed"] = False
-    if not skip_warm and not s.models_.use_ml_stubs:
+    if not skip_warm and not s.models.use_ml_stubs:
         warm = _warm_hf_models(s)
         summary["models_warmed"] = warm
 
@@ -75,7 +74,10 @@ def _run_guard_verifier(newsimpact_root: Path) -> dict[str, Any]:
             text=True,
             timeout=30,
         )
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
+        # OSError covers missing executable / permission denied / read errors;
+        # SubprocessError covers TimeoutExpired and CalledProcessError.
+        # Anything broader would mask programming bugs (TypeError etc).
         return {"status": "skip", "reason": f"verifier_exec_error:{exc}"}
     return {
         "status": "ok" if res.returncode == 0 else "fail",
@@ -91,7 +93,10 @@ def _warm_hf_models(settings: Settings) -> bool:
         return False
     try:
         subprocess.run([sys.executable, str(script)], check=True, timeout=600)
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Narrow to subprocess + os failures (timeout, non-zero exit, missing
+        # binary). Programming bugs (TypeError, AttributeError) must escape
+        # so a refactor that breaks the script-launching path isn't masked.
         logger.warning("warm_hf_failed", err=str(exc))
         return False
     return True

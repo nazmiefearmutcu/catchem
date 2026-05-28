@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
 
 AWARENESS = Path("/Users/nazmi/Desktop/Projeler/proje/awareness")
 NEWSIMPACT = Path("/Users/nazmi/Desktop/Projeler/proje/merged_news")

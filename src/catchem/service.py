@@ -3,17 +3,16 @@ produces one FinancialImpactRecord. The supervisor wraps this for batch/live."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
 
-from .chart_context import ChartContext, ChartContextReader
+from .chart_context import ChartContextReader
 from .embeddings import Embedder, VectorIndex, make_embedder
 from .entity_linker import EntityLinker
 from .evidence import build_reason_text, clean_boilerplate_text, extract_evidence
 from .finance_filter import FastPrefilter
 from .logging import get_logger
-from .newsimpact_guarded_adapter import NewsImpactGuardError, NewsImpactGuardedAdapter
+from .newsimpact_guarded_adapter import NewsImpactGuardedAdapter, NewsImpactGuardError
 from .reranker import Reranker, make_reranker
 from .schemas import (
     AwarenessCaptureView,
@@ -25,7 +24,7 @@ from .scoring import ScoringInputs, estimate_entity_density, score
 from .sentiment import SentimentClassifier, make_sentiment
 from .settings import CatchemMode, Settings
 from .symbol_mapper import SymbolMapper
-from .taxonomy import Taxonomy, load_taxonomy, default_taxonomy_path
+from .taxonomy import Taxonomy, default_taxonomy_path, load_taxonomy
 from .zero_shot_classifier import ZeroShot, make_zero_shot
 
 logger = get_logger("catchem.service")
@@ -51,12 +50,12 @@ class CatchemService:
         self.settings = settings
         self.taxonomy = taxonomy
 
-        use_stubs = bool(settings.models_.use_ml_stubs)
+        use_stubs = bool(settings.models.use_ml_stubs)
         self.prefilter = FastPrefilter(taxonomy=taxonomy)
-        self.zero_shot: ZeroShot = make_zero_shot(taxonomy, settings.models_.zero_shot, use_stubs)
-        self.sentiment: SentimentClassifier = make_sentiment(settings.models_.sentiment_default, use_stubs)
-        self.embedder: Embedder = make_embedder(settings.models_.embedding, use_stubs)
-        self.reranker: Reranker = make_reranker(settings.models_.reranker, use_stubs)
+        self.zero_shot: ZeroShot = make_zero_shot(taxonomy, settings.models.zero_shot, use_stubs)
+        self.sentiment: SentimentClassifier = make_sentiment(settings.models.sentiment_default, use_stubs)
+        self.embedder: Embedder = make_embedder(settings.models.embedding, use_stubs)
+        self.reranker: Reranker = make_reranker(settings.models.reranker, use_stubs)
         self.symbol_mapper = SymbolMapper(newsimpact_root=settings.paths.newsimpact_repo)
         self.entity_linker = EntityLinker(company_aliases=self.symbol_mapper.alias_dict())
         self.chart_reader = ChartContextReader(settings.paths.newsimpact_repo)
@@ -116,6 +115,36 @@ class CatchemService:
         ac_scores = {k: v for k, v in zs.label_scores.items() if k in self.taxonomy.asset_class_ids}
         rc_scores = {k: v for k, v in zs.label_scores.items() if k in self.taxonomy.reason_code_ids}
         neg_scores = {k: v for k, v in zs.label_scores.items() if k in self.taxonomy.negative_class_ids}
+
+        # BUG-BB: cashtag/ticker hits are a high-confidence "this is about a
+        # specific tradeable equity" signal. Pre-fix the zero-shot stub
+        # picked up "equities" only when the taxonomy alias set
+        # (`stocks`/`shares`/`equity`) happened to appear in the text — a
+        # press release saying `$AAPL rose 4% in after-hours trading on the
+        # news` carried the ticker but none of the aliases, so `asset=[]`
+        # came out of an obviously equities-relevant story. Bridge symbol
+        # detection back into the asset-class layer so the channel mapping
+        # and downstream consumers see equities.
+        #
+        # BUG-BB.1: the first cut treated ANY ticker hit as equity, but
+        # EntityLinker also resolves crypto/FX/commodity/index aliases into
+        # the ticker kind (Bitcoin → BTC-USD, EUR/USD → EURUSD=X, gold →
+        # GC=F, S&P 500 → ^GSPC). A BTC-only headline then showed up with
+        # asset_classes=['crypto', 'equities'] — a false equity tag. The
+        # ticker format unambiguously encodes the asset class:
+        #   - equity:   AAPL, MSFT, BRK.B  (plain uppercase, optional .X)
+        #   - crypto:   *-USD              (suffix)
+        #   - fx:       *=X                (suffix)
+        #   - commodity:*=F                (suffix)
+        #   - index:    ^*                 (prefix)
+        # Cashtags ($TICKER) are unambiguous — $ is the equity convention.
+        if "equities" in self.taxonomy.asset_class_ids:
+            has_equity_hit = any(h.kind == "cashtag" for h in ents.hits) or any(
+                h.kind == "ticker" and _looks_like_equity_ticker(h.text)
+                for h in ents.hits
+            )
+            if has_equity_hit:
+                ac_scores["equities"] = max(ac_scores.get("equities", 0.0), 0.6)
 
         # entity_density should only count finance-grounded hit kinds — generic
         # proper-noun runs ("Nazi", "Dutch SS leader") must not inflate it.
@@ -207,16 +236,37 @@ class CatchemService:
             diagnostic_multimodal_result=diag_payload,
             processing_mode=_MODE_MAP[self.settings.mode],
             model_versions=dict(self.model_versions),
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
+
+
+def _looks_like_equity_ticker(text: str) -> bool:
+    """Return True when `text` matches the bare-uppercase equity ticker
+    convention (AAPL, MSFT, BRK.B, GOOGL). Rejects crypto (`-USD`),
+    FX (`=X`), commodity (`=F`), and index (`^TICKER`) formats — see
+    `_INTERNAL_REGISTRY` in symbol_mapper for the canonical examples of
+    each asset class.
+
+    Equity tickers are 1-8 chars, uppercase, optionally with a dot-suffix
+    for share classes. Empty / lowercase / suffixed / prefixed → False.
+    """
+    if not text or len(text) > 8:
+        return False
+    if text.startswith("^") or "=" in text or "-" in text:
+        return False
+    return all(c.isupper() or c == "." for c in text)
 
 
 def _horizons_from_reasons(reasons: tuple[str, ...]) -> list[str]:
     if not reasons:
         return []
     out: set[str] = set()
+    # BUG-AA: `product_launch` was the only reason code in the taxonomy
+    # (28 total) silently dropped by this mapping — product-launch records
+    # surfaced with `impact_horizons=[]`. Launches typically move the stock
+    # intraday/one_day on the announcement.
     short_term = {"central_bank", "earnings", "guidance", "cyber_outage", "natural_disaster",
-                  "fraud_governance", "litigation"}
+                  "fraud_governance", "litigation", "product_launch"}
     one_week = {"m_and_a", "regulation", "sanctions_trade", "supply_chain", "energy", "metals"}
     structural = {"inflation", "growth_recession", "employment", "esg_reputation", "funding_liquidity",
                   "geopolitics"}
@@ -228,6 +278,16 @@ def _horizons_from_reasons(reasons: tuple[str, ...]) -> list[str]:
         if r in structural:
             out.add("structural")
     return sorted(out)
+
+
+def _horizon_buckets() -> tuple[set[str], set[str], set[str]]:
+    """Exposed for test access. Mirrors the buckets in `_horizons_from_reasons`."""
+    short_term = {"central_bank", "earnings", "guidance", "cyber_outage", "natural_disaster",
+                  "fraud_governance", "litigation", "product_launch"}
+    one_week = {"m_and_a", "regulation", "sanctions_trade", "supply_chain", "energy", "metals"}
+    structural = {"inflation", "growth_recession", "employment", "esg_reputation", "funding_liquidity",
+                  "geopolitics"}
+    return short_term, one_week, structural
 
 
 def build_service(settings: Settings, vector_index: VectorIndex | None = None) -> CatchemService:

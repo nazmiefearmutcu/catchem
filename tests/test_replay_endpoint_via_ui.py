@@ -12,8 +12,7 @@ test pins the contract the new tab depends on:
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -41,7 +40,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def _write_capture(awareness_root: Path, text: str, url: str) -> str:
-    cap = build_capture(title="t", text=text, url=url, published_ts=datetime.now(timezone.utc))
+    cap = build_capture(title="t", text=text, url=url, published_ts=datetime.now(UTC))
     write_jsonl(cap, awareness_root)
     return cap.capture_id
 
@@ -166,3 +165,31 @@ def test_replay_endpoint_exposes_truthful_storage_and_dlq_fields(
     assert body2["dlq_delta"] == 1, body2
     assert body2["inserted"] == 0, body2
     assert body2["net_new_records"] == 0, body2
+
+
+def test_replay_rejects_negative_max_records(client: TestClient) -> None:
+    """`max_records=-1` MUST surface a 422 — pre-fix the int was passed
+    straight through and the supervisor silently processed one row before
+    the loop short-circuited, leaking nonsense values into observability.
+    """
+    r = client.post("/replay", json={"max_records": -1})
+    assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"
+
+
+def test_replay_rejects_huge_max_records(client: TestClient) -> None:
+    """Bound the upper end so an operator typo (e.g. 99999999) can't
+    schedule an open-ended replay that blocks the loop for minutes.
+    """
+    r = client.post("/replay", json={"max_records": 10_000_000})
+    assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"
+
+
+def test_replay_rejects_zero_max_records(client: TestClient) -> None:
+    """`max_records=0` MUST 422. The supervisor's short-circuit is
+    `if max_records and processed >= max_records`, so 0 falls through and
+    iterates EVERY awareness file (treated as "no cap"). On a populated
+    awareness dir that blocks the loop for minutes. Reject at the
+    boundary so the dangerous value never reaches the supervisor.
+    """
+    r = client.post("/replay", json={"max_records": 0})
+    assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"

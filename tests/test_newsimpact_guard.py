@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,12 +10,11 @@ from pathlib import Path
 import pytest
 
 from catchem.newsimpact_guarded_adapter import (
-    NewsImpactGuardError,
     NewsImpactGuardedAdapter,
+    NewsImpactGuardError,
     snapshot_guard_state,
 )
-from catchem.settings import CatchemMode, load_settings, reload_settings
-
+from catchem.settings import load_settings, reload_settings
 
 NEWSIMPACT_REAL = Path("/Users/nazmi/Desktop/Projeler/proje/merged_news")
 

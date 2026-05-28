@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +60,7 @@ def build_capture(
 ) -> AwarenessCaptureView:
     """Construct an AwarenessCaptureView the same shape the real pipeline ingests."""
     cap_id = _deterministic_capture_id(text, url)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return AwarenessCaptureView(
         capture_id=cap_id,
         doc_id=f"doc-{cap_id}",
@@ -81,11 +81,20 @@ def build_capture(
 
 
 def write_jsonl(cap: AwarenessCaptureView, root: Path) -> Path:
-    """Write the capture under the Awareness-style JSONL layout."""
-    now = datetime.now(timezone.utc)
+    """Write the capture under the Awareness-style JSONL layout.
+
+    BUG-HH: filename used to be `demo-{ms}.jsonl`. Two demos started in the
+    same millisecond clobbered each other — second write overwrote the
+    first. Including the deterministic capture_id suffix makes collisions
+    only happen when the *content* is identical, which is the idempotent
+    case (overwriting same content is a no-op).
+    """
+    now = datetime.now(UTC)
     day_dir = root / "jsonl" / "captures" / f"{now.year:04d}" / f"{now.month:02d}" / f"{now.day:02d}"
     day_dir.mkdir(parents=True, exist_ok=True)
-    path = day_dir / f"demo-{int(now.timestamp() * 1000)}.jsonl"
+    # capture_id has shape "demo-<32-hex>"; take a short suffix for the filename.
+    short_id = cap.capture_id.rsplit("-", 1)[-1][:8]
+    path = day_dir / f"demo-{int(now.timestamp() * 1000)}-{short_id}.jsonl"
     payload = cap.model_dump(mode="json")
     path.write_text(json.dumps(payload, default=str) + "\n", encoding="utf-8")
     return path
@@ -106,6 +115,15 @@ def run_demo(
     catchem data dir under a `demo-input/` subfolder so it never touches
     the real Awareness JSONL. To overlay onto the real path, pass a Settings
     whose paths.awareness_data_dir points there.
+
+    BUG-GG: the previous implementation mutated `os.environ` to redirect
+    the supervisor at the demo dir, then restored the variable. Any other
+    request that called `load_settings()` during that window (e.g. a
+    concurrent /ui/demo/paste, or the news poller's per-tick supervisor
+    queries) saw the demo path. We now build a deep copy of Settings with
+    the demo path overlaid and hand it directly to a transient Supervisor
+    — global env stays untouched, and the path swap is process-local to
+    this one call.
     """
     if settings is None:
         reload_settings()
@@ -122,24 +140,18 @@ def run_demo(
     )
     jsonl_path = write_jsonl(cap, demo_root)
 
-    # Point a fresh Supervisor at the demo-input dir for this run only.
-    import os
-    prev = os.environ.get("CATCHEM_PATHS__AWARENESS_DATA_DIR")
-    os.environ["CATCHEM_PATHS__AWARENESS_DATA_DIR"] = str(demo_root)
+    # Build a path-overridden settings *copy* so the global env stays
+    # untouched. The supervisor reads `self.settings.paths.awareness_data_dir`
+    # in run_replay — that's the only field we need to swap.
+    demo_settings = settings.model_copy(deep=True)
+    demo_settings.paths.awareness_data_dir = demo_root
+
+    sup = Supervisor(demo_settings)
     try:
-        reload_settings()
-        sup = Supervisor(load_settings())
-        try:
-            counts = sup.run_replay(max_records=50)
-            rec = sup.storage.get_record(cap.capture_id) or {}
-        finally:
-            sup.close()
+        counts = sup.run_replay(max_records=50)
+        rec = sup.storage.get_record(cap.capture_id) or {}
     finally:
-        if prev is None:
-            os.environ.pop("CATCHEM_PATHS__AWARENESS_DATA_DIR", None)
-        else:
-            os.environ["CATCHEM_PATHS__AWARENESS_DATA_DIR"] = prev
-        reload_settings()
+        sup.close()
 
     return DemoResult(
         capture_id=cap.capture_id,
@@ -182,4 +194,4 @@ def render_demo_report(result: DemoResult) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["DemoResult", "build_capture", "write_jsonl", "run_demo", "render_demo_report"]
+__all__ = ["DemoResult", "build_capture", "render_demo_report", "run_demo", "write_jsonl"]

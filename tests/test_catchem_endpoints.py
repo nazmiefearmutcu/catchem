@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from catchem.api import create_app
 from catchem.settings import load_settings, reload_settings
 
-
 FED_ARTICLE = (
     "The Federal Reserve raised its benchmark interest rate by 25 basis points "
     "on Wednesday, citing persistent inflation pressures. Apple (AAPL) fell 2% "
@@ -220,7 +219,7 @@ def test_sidecar_status_reports_actual_bind_not_settings_default() -> None:
     without spinning up uvicorn — bind a TestClient against a freshly
     recorded port and confirm the endpoint echoes it back.
     """
-    from catchem.api import record_bind, create_app
+    from catchem.api import create_app, record_bind
     from catchem.settings import load_settings, reload_settings
     reload_settings()
     record_bind("127.0.0.1", 9090)

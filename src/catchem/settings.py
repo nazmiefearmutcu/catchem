@@ -7,7 +7,6 @@ Priority (lowest → highest):
 
 from __future__ import annotations
 
-import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -18,7 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class CatchemMode(str, Enum):
+# Same UP042 deferral as schemas.py — (str, Enum) preserves the qualified
+# repr behaviour ("CatchemMode.PRODUCTION_SAFE") that any external consumer
+# of stringified mode values might depend on. .value access is uniform
+# across (str, Enum) and StrEnum.
+class CatchemMode(str, Enum):  # noqa: UP042
     PRODUCTION_SAFE = "production_safe"
     REPLAY_EXISTING = "replay_existing"
     LIVE_TAIL = "live_tail"
@@ -157,6 +160,64 @@ class ArchiveConfig(BaseModel):
     interval_seconds: float = 30.0
 
 
+class DeepSeekReviewerConfig(BaseModel):
+    """DeepSeek hosted-LLM second-opinion reviewer.
+
+    Wiring:
+      * `enabled` is the operator toggle — false reverts catchem to
+        fully offline behavior (no external HTTP).
+      * `api_key` is read from `CATCHEM_REVIEWERS__DEEPSEEK__API_KEY`
+        env var (set the .env or your shell). Empty string disables the
+        reviewer at runtime even if `enabled=true`.
+      * `sampling_rate` controls how many ingested captures get a
+        second opinion. 0.10 means 1 in 10 articles. The selection is
+        DETERMINISTIC (SHA-256 over capture_id) so replays don't
+        re-spend budget on different rows.
+      * `usd_cap` is the safety net. Once the cumulative DeepSeek spend
+        reaches this number, new calls fail fast with `budget_exceeded`.
+    """
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+    enabled: bool = False
+    api_key: str = ""
+    model: str = "deepseek-chat"
+    base_url: str = "https://api.deepseek.com"
+    sampling_rate: float = 0.10
+    usd_cap: float = 9.50
+    max_output_tokens: int = 600
+
+
+class ReviewersConfig(BaseModel):
+    """Aggregates second-opinion reviewers. Primary pipeline lives outside this block."""
+
+    model_config = ConfigDict(extra="forbid")
+    deepseek: DeepSeekReviewerConfig = Field(default_factory=DeepSeekReviewerConfig)
+
+
+class WebhookConfig(BaseModel):
+    """Slack/Discord/Teams-compatible incoming webhook output.
+
+    When `enabled=true`, every record finalized through the supervisor
+    ingestion path that clears the configured score floor (and optional
+    asset-class / reason-code filters) is POSTed to `url` as a
+    Slack-shape `{text, blocks}` JSON payload.
+
+    Posts run in a background thread — webhook latency or 4xx/5xx
+    responses must NEVER block ingestion. Failures are logged and
+    swallowed; the supervisor moves on. The URL is held in sidecar
+    memory only (it's a soft secret — Slack URLs encode an auth token
+    in the path) and is intentionally absent from `exportSnapshot()`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    url: str = ""  # Slack/Discord/Teams incoming webhook URL
+    min_score: float = 0.7  # Only POST records with finance_relevance_score >= this
+    asset_class_filter: list[str] | None = None  # None = any
+    reason_code_filter: list[str] | None = None
+    timeout_seconds: float = 5.0
+
+
 class PathConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     awareness_repo: Path = Field(default_factory=lambda: Path("/tmp/awareness-missing"))
@@ -206,30 +267,43 @@ class Settings(BaseSettings):
 
     mode: CatchemMode = CatchemMode.PRODUCTION_SAFE
     paths: PathConfig = Field(default_factory=PathConfig)
-    models_: ModelConfig = Field(default_factory=ModelConfig, alias="models")
+    # Field name is `models` (not `models_`) so pydantic-settings derives the
+    # nested env var path correctly: `CATCHEM_MODELS__USE_ML_STUBS` →
+    # `Settings.models.use_ml_stubs`. With the previous alias-only setup the
+    # env var was silently ignored — nested env lookup uses the field NAME,
+    # not the alias.
+    models: ModelConfig = Field(default_factory=ModelConfig)
     guards: GuardConfig = Field(default_factory=GuardConfig)
     replay: ReplayConfig = Field(default_factory=ReplayConfig)
     live: LiveConfig = Field(default_factory=LiveConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
-    logging_: LoggingConfig = Field(default_factory=LoggingConfig, alias="logging")
+    # Same fix as `models` above. Safe to name the field `logging` here —
+    # settings.py does not import the stdlib `logging` module at top level.
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig)
     kaggle: KaggleConfig = Field(default_factory=KaggleConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
+    # Second-opinion reviewers (DeepSeek etc). Default is fully disabled
+    # so production-safe behavior is preserved unless the operator opts in.
+    reviewers: ReviewersConfig = Field(default_factory=ReviewersConfig)
+    # Slack/Discord/Teams webhook output for high-relevance arrivals.
+    # OFF by default; the operator opts in via Settings → Webhook output.
+    webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
     use_ml_stubs: bool | None = None  # convenience flat env override
 
     @model_validator(mode="after")
-    def _propagate_flat_overrides(self) -> "Settings":
+    def _propagate_flat_overrides(self) -> Settings:
         """Wire the documented flat env vars into the nested sub-configs.
 
-        `CATCHEM_USE_ML_STUBS=false` MUST flip `models_.use_ml_stubs` to False,
+        `CATCHEM_USE_ML_STUBS=false` MUST flip `models.use_ml_stubs` to False,
         even though the field formally lives on the nested `ModelConfig`. This
         keeps `.env.example` and the docs honest.
         """
         if self.use_ml_stubs is not None:
-            self.models_.use_ml_stubs = self.use_ml_stubs
+            self.models.use_ml_stubs = self.use_ml_stubs
         return self
 
     # ── derived paths ────────────────────────────────────────────────────────
@@ -288,6 +362,6 @@ __all__ = [
     "CatchemMode",
     "Settings",
     "load_settings",
-    "reload_settings",
     "project_root",
+    "reload_settings",
 ]

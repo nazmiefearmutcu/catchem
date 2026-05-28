@@ -49,7 +49,7 @@ class FinancialImpactSummary(_CompactBase):
     created_at: str
 
     @classmethod
-    def from_record_dict(cls, r: dict[str, Any]) -> "FinancialImpactSummary":
+    def from_record_dict(cls, r: dict[str, Any]) -> FinancialImpactSummary:
         ev = r.get("evidence_sentences") or []
         return cls(
             capture_id=r["capture_id"],
@@ -210,15 +210,15 @@ class MarketQuoteBatchResponse(_CompactBase):
 
 
 __all__ = [
-    "FinancialImpactSummary",
-    "FinancialImpactDetail",
-    "MetricsSummary",
-    "GuardSummary",
-    "RecordListResponse",
-    "DemoRunResponse",
     "AppInfoResponse",
-    "SidecarStatusResponse",
+    "DemoRunResponse",
+    "FinancialImpactDetail",
+    "FinancialImpactSummary",
+    "GuardSummary",
     "LogTailResponse",
     "MarketQuote",
     "MarketQuoteBatchResponse",
+    "MetricsSummary",
+    "RecordListResponse",
+    "SidecarStatusResponse",
 ]

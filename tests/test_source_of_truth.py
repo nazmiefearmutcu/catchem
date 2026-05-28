@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 SOT_PATH = Path(__file__).resolve().parents[1] / "configs" / "source_of_truth.yaml"
 SOT_DOC = Path(__file__).resolve().parents[1] / "docs" / "SOURCE_OF_TRUTH.md"
 

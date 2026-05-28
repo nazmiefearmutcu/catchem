@@ -8,7 +8,6 @@ to any history/diff tooling.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -16,10 +15,9 @@ import pytest
 from catchem.golden import (
     GOLDEN_SCHEMA_VERSION,
     REQUIRED_GOLDEN_FIELDS,
-    BenchmarkReport,
     SYNTHETIC,
+    BenchmarkReport,
     load_extended,
-    run_benchmark,
     validate_golden_row,
 )
 

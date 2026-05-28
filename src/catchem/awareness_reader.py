@@ -12,12 +12,11 @@ chunks the JSONL writer hasn't atomically renamed yet.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator, Iterable, Iterator
 
 from .logging import get_logger
-from .schemas import AwarenessCaptureView, ReplayOffset
+from .schemas import AwarenessCaptureView
 
 logger = get_logger("catchem.awareness_reader")
 

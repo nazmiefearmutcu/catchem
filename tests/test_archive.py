@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
-import os
-import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -24,7 +22,6 @@ from catchem.archive import (
     detect_drive_dir,
     row_to_csv_dict,
 )
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # row_to_csv_dict — pure projection function
@@ -171,7 +168,7 @@ def archiver_with_records(tmp_path, monkeypatch):
 
     # Ingest 250 records (200 + 50 buffer) so we have plenty to drain past
     # the local_cap (set to 100 in this test).
-    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    base = datetime.now(UTC) - timedelta(hours=1)
     for i in range(250):
         cap = build_capture(
             title=f"Sample {i}: Federal Reserve raises rates by 25 bps",
@@ -199,7 +196,7 @@ def archiver_with_records(tmp_path, monkeypatch):
 
 def test_archive_once_drains_excess_rows_into_csv(archiver_with_records) -> None:
     """After one sweep: local row count should drop to local_cap, CSV should have the rest."""
-    archiver, sup, drive_dir = archiver_with_records
+    archiver, sup, _drive_dir = archiver_with_records
 
     # Sanity: 250 rows pre-archive
     with sup.storage.cursor() as cur:
@@ -226,7 +223,7 @@ def test_archive_once_drains_excess_rows_into_csv(archiver_with_records) -> None
 
 def test_archive_once_is_a_no_op_when_local_below_cap(archiver_with_records) -> None:
     """If local count is already at/below cap, no rows should be archived."""
-    archiver, sup, drive_dir = archiver_with_records
+    archiver, _sup, _drive_dir = archiver_with_records
 
     # Drain everything down to the cap first.
     archiver._archive_once()
@@ -238,7 +235,7 @@ def test_archive_once_is_a_no_op_when_local_below_cap(archiver_with_records) -> 
 
 def test_archive_once_appends_across_runs(archiver_with_records, monkeypatch) -> None:
     """A second sweep should APPEND to the same daily CSV, not overwrite it."""
-    archiver, sup, drive_dir = archiver_with_records
+    archiver, sup, _drive_dir = archiver_with_records
 
     from catchem.demo import build_capture
 
@@ -248,7 +245,7 @@ def test_archive_once_appends_across_runs(archiver_with_records, monkeypatch) ->
     first_csv = first.csv_path
 
     # Push more rows past the cap.
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     for i in range(60):
         cap = build_capture(
             title=f"Round-2 {i}",
@@ -314,7 +311,7 @@ def test_archive_once_auto_falls_back_to_documents_when_primary_unwritable(
     """If the configured drive_dir is unwritable, we should switch to the
     documented fallback (~/Documents/Catchem in production) and still
     archive successfully — instead of silently dropping data on the floor."""
-    archiver, sup, drive_dir = archiver_with_records
+    archiver, _sup, drive_dir = archiver_with_records
 
     # Block primary
     drive_dir.parent.mkdir(parents=True, exist_ok=True)

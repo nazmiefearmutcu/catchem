@@ -15,7 +15,6 @@ import pytest
 from catchem.awareness_reader import parse_capture_line
 from catchem.schemas import AwarenessCaptureView
 
-
 REQUIRED_KEYS = (
     "doc_id", "capture_id", "source_type", "source_name", "discovery_channel",
     "ingest_version", "fetch_ts", "observed_ts", "text", "content_hash",

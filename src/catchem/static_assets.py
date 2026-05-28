@@ -31,7 +31,6 @@ import os
 from contextlib import ExitStack
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Optional
 
 # Track extracted-from-zip temp paths so they stay valid for the process lifetime.
 _KEEPALIVE = ExitStack()
@@ -45,7 +44,7 @@ def _validate_name(name: str) -> str:
     return name
 
 
-def _env_override(name: str) -> Optional[Path]:
+def _env_override(name: str) -> Path | None:
     """If CATCHEM_STATIC_DIR is set, prefer it but only for files that exist there.
 
     The env override is a dev convenience: it lets you rebuild the React bundle
@@ -83,7 +82,7 @@ def static_dir() -> Path:
     return Path(_KEEPALIVE.enter_context(as_file(resource)))
 
 
-def get_static_path(name: str) -> Optional[Path]:
+def get_static_path(name: str) -> Path | None:
     """Return the filesystem path to a packaged static asset, or None if missing.
 
     Args:
@@ -109,7 +108,7 @@ def get_static_path(name: str) -> Optional[Path]:
     return Path(_KEEPALIVE.enter_context(as_file(resource)))
 
 
-def open_static_bytes(name: str) -> Optional[bytes]:
+def open_static_bytes(name: str) -> bytes | None:
     """Read a packaged static asset to bytes. None if missing."""
     p = get_static_path(name)
     if p is None or not p.exists():

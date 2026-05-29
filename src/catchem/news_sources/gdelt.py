@@ -22,6 +22,7 @@ raising, and articles with no URL are skipped.
 
 from __future__ import annotations
 
+import html
 import json
 from datetime import UTC, datetime
 from urllib.parse import quote_plus, urlparse
@@ -122,7 +123,13 @@ def _parse_gdelt(body: bytes, fallback_domain: str) -> list[ParsedItem]:
             continue  # no URL → can't dedup or link; skip
         url = url.strip()
         title_raw = article.get("title")
-        title = title_raw.strip() if isinstance(title_raw, str) else ""
+        # GDELT embeds the raw page <title> verbatim into the JSON string, so
+        # HTML entities (e.g. "&amp;", "&#39;") survive unescaped — JSON does
+        # not decode them. Unescape so display text is clean AND the poller's
+        # cross-source title-dedup matches the RSS copy (whose entities the XML
+        # parser already decoded). Without this, "&amp;"/"&#39;" leak spurious
+        # "amp"/"39" tokens into _normalize_title and the dup never collapses.
+        title = html.unescape(title_raw).strip() if isinstance(title_raw, str) else ""
         if not title:
             # Title-less GDELT rows are rare; synthesize from the host so the
             # Live Feed row is still readable and the item isn't dropped.

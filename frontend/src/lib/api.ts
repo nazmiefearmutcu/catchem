@@ -708,10 +708,18 @@ export const api = {
     if (opts.window_minutes) q.set("window_minutes", String(opts.window_minutes));
     return request<NewsVelocityResponse>(`/api/quant/news-velocity?${q.toString()}`);
   },
-  quantClusterMembers: (clusterId: string, limit = 20) =>
-    request<ClusterMembersResponse>(
-      `/api/quant/cluster/${encodeURIComponent(clusterId)}/members?limit=${limit}`,
-    ),
+  quantClusterMembers: (clusterId: string, limit = 20, window?: number) => {
+    // `window` MUST mirror the dashboard's windowSize: cluster_id is a SHA-1
+    // over the sorted member capture_ids, so the backend can only reproduce
+    // the clicked cluster (and avoid a 404) by re-clustering over the SAME
+    // corpus window the dashboard used. Omitting it falls back to the
+    // backend's default (1000), which 404s every non-default window.
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (window !== undefined) q.set("window", String(window));
+    return request<ClusterMembersResponse>(
+      `/api/quant/cluster/${encodeURIComponent(clusterId)}/members?${q.toString()}`,
+    );
+  },
   quantHeatmapRecords: (asset: string, reason: string, limit = 20) =>
     request<HeatmapRecordsResponse>(
       `/api/quant/heatmap/records?asset=${encodeURIComponent(asset)}&reason=${encodeURIComponent(reason)}&limit=${limit}`,

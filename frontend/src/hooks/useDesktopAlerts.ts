@@ -200,6 +200,26 @@ function _persistHistory(): void {
   }
 }
 
+/**
+ * Coerce a persisted (possibly stale / partial) entry into a shape-complete
+ * ArrivalToast. Only `id`+`title` are validated by the caller's filter; this
+ * fills the remaining required fields with safe defaults so downstream
+ * consumers never read `undefined.length` or index a fixed Record by an
+ * out-of-union category string.
+ */
+function _normalizeHistoryEntry(x: ArrivalToast): ArrivalToast {
+  return {
+    ...x,
+    symbols: Array.isArray(x.symbols) ? x.symbols : [],
+    reasons: Array.isArray(x.reasons) ? x.reasons : [],
+    score: typeof x.score === "number" && Number.isFinite(x.score) ? x.score : 0,
+    domain: typeof x.domain === "string" ? x.domain : "",
+    category: NOTIFICATION_CATEGORIES.includes(x.category as NotificationCategory)
+      ? x.category
+      : "toast",
+  };
+}
+
 function _hydrateHistoryFromStorage(): void {
   const storage = safeStorage();
   if (!storage) return;
@@ -210,6 +230,14 @@ function _hydrateHistoryFromStorage(): void {
       if (Array.isArray(parsed)) {
         _history = (parsed as ArrivalToast[])
           .filter((x) => x && typeof x.id === "string" && typeof x.title === "string")
+          // Normalize every surviving entry to a shape-complete ArrivalToast.
+          // The persisted blob can come from an older build, a partial write,
+          // or a hand edit that satisfies the id+title filter but is missing
+          // required fields (e.g. `symbols`). Without this, NotificationCenter
+          // throws on `entry.symbols.length` and `counts` mints a phantom key
+          // for out-of-union categories. Backfill defensively so the modal
+          // renders instead of white-screening.
+          .map((x) => _normalizeHistoryEntry(x))
           .slice(0, NOTIFICATION_HISTORY_LIMIT);
       }
     }

@@ -93,6 +93,27 @@ def _coerce_float(value: Any) -> float:
     return f
 
 
+def _finite_or_none(value: Any) -> float | None:
+    """Finite-guard a passthrough numeric field, preserving ``None``.
+
+    Unlike ``_coerce_float`` (which maps junk → 0.0 for the intensity math), the
+    drill-down rows must NOT invent a 0.0 where the stored value was genuinely
+    absent — but a non-finite NaN/Inf MUST be scrubbed to ``None`` because it
+    would otherwise be embedded verbatim in the /api/quant/intensity response and
+    crash Starlette's JSONResponse renderer (allow_nan=False) with HTTP 500.
+    Mirrors schemas._finite_sentiment.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f):
+        return None
+    return f
+
+
 def _record_intensity(record: dict) -> float:
     """Compute a single record's intensity score.
 
@@ -124,9 +145,12 @@ def _build_top_records(
             "capture_id": r.get("capture_id"),
             "title": r.get("title"),
             "intensity": intensity,
-            "score": r.get("finance_relevance_score"),
+            # Finite-guard the raw passthroughs (None-preserving): a record loaded
+            # via POST /api/db/import whose real columns hold NaN/Inf would
+            # otherwise leak straight into the JSON response and 500 the panel.
+            "score": _finite_or_none(r.get("finance_relevance_score")),
             "sentiment_label": r.get("sentiment_label"),
-            "sentiment_score": r.get("sentiment_score"),
+            "sentiment_score": _finite_or_none(r.get("sentiment_score")),
         }
         for intensity, r in sorted_pairs
     ]

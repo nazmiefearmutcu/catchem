@@ -59,6 +59,23 @@ def iter_captures(path: Path, start_offset: int = 0) -> Generator[tuple[int, Awa
     """
     if not path.exists():
         return
+    # Detect a file that was truncated/rewritten in place to be SHORTER than the
+    # persisted offset (in-place compaction, daily-partition rewrite, or a writer
+    # reusing the filename after rotation). A pure line-count resume would skip
+    # every new line — silent data loss. If the current file has fewer lines than
+    # the saved offset, the offset belongs to a now-replaced file: reset to 0 and
+    # reprocess from line 1 rather than dropping the captures.
+    if start_offset > 0:
+        with path.open(encoding="utf-8") as fh:
+            total_lines = sum(1 for _ in fh)
+        if total_lines < start_offset:
+            logger.warning(
+                "jsonl_offset_reset",
+                path=str(path),
+                saved_offset=start_offset,
+                current_lines=total_lines,
+            )
+            start_offset = 0
     with path.open(encoding="utf-8") as fh:
         for i, line in enumerate(fh, start=1):
             if i <= start_offset:

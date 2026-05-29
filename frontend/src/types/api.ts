@@ -177,7 +177,12 @@ export interface UIBacktest {
     calibration_gap: number;
   }[];
   predictions_sample: {
-    capture_id: string;
+    // Nullable on the wire: the backend builds this as
+    // ``stub_row.get("capture_id") or ds_row.get("capture_id")`` which is
+    // None when neither paired row carries one. The page already renders a
+    // "—" fallback; the type now matches reality so future consumers can't
+    // assume a non-null string and crash on e.g. `capture_id.slice(...)`.
+    capture_id: string | null;
     predicted_score: number;
     ground_truth_score: number;
     delta: number;

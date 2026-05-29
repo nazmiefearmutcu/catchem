@@ -311,9 +311,14 @@ def load_extended(path: Path, *, strict: bool = True) -> list[GoldenItem]:
             domain=str(data.get("domain", "unknown")),
             source_type=str(data.get("source_type", "rss")),
             expected_finance_relevant=bool(data["expected_finance_relevant"]),
-            expected_asset_classes=tuple(data.get("expected_asset_classes", [])),
-            expected_reason_codes=tuple(data.get("expected_reason_codes", [])),
-            expected_symbols=tuple(data.get("expected_symbols", [])),
+            # `or []` collapses BOTH a missing key AND an explicit JSON null into
+            # () — validate_golden_row permits `None` for these fields, so a bare
+            # `tuple(data.get(k, []))` would crash with TypeError on `tuple(None)`
+            # for a key-present/value-null row, defeating the "loud failures only"
+            # contract by producing an opaque, location-less downstream crash.
+            expected_asset_classes=tuple(data.get("expected_asset_classes") or []),
+            expected_reason_codes=tuple(data.get("expected_reason_codes") or []),
+            expected_symbols=tuple(data.get("expected_symbols") or []),
             expected_sentiment=data.get("expected_sentiment"),
         ))
     return out

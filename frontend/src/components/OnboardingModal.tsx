@@ -99,10 +99,17 @@ export function OnboardingModal() {
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
   const openRef = useRef(open);
+  // `close()` (declared below) persists the "seen" flag AND hides the modal.
+  // We thread it through a ref so the coordinator-driven Escape path also
+  // marks onboarding seen — otherwise a first-run user who dismisses the tour
+  // with Esc would see it again on the next cold launch, contradicting the
+  // "once dismissed, never shown again on its own" contract. The X button and
+  // "Get started" already mark seen; Esc went through the bare setOpen(false).
+  const closeRef = useRef<() => void>(() => setOpen(false));
   useOverlaySurface({
     id: "onboarding-modal",
     open,
-    onClose: () => setOpen(false),
+    onClose: () => closeRef.current(),
     lockBody: true,
   });
 
@@ -120,6 +127,9 @@ export function OnboardingModal() {
     markOnboardingSeen();
     setOpen(false);
   }, []);
+  // Keep the coordinator's onClose pointed at the seen-persisting `close`
+  // so the global Escape handler (overlayCoordinator) marks onboarding seen.
+  closeRef.current = close;
 
   const goPrev = useCallback(() => {
     setStep((s) => (s > 0 ? s - 1 : s));

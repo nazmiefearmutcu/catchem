@@ -50,12 +50,21 @@ export function SymbolDetailPage() {
   };
   const dominantTone = dominantSent ? sentToneMap[dominantSent[0]] : undefined;
 
-  // Latest mention: most recent published_ts across items.
+  // Latest mention: most recent published_ts across items. Compare by parsed
+  // UTC instant, NOT lexicographically — published_ts preserves the source's
+  // original offset (storage/schema only stamp naive strings to UTC), so a
+  // string sort would rank "…+05:00" after "…+00:00" even when its true
+  // instant is earlier, surfacing the wrong record as the newest. This keeps
+  // the hero stat consistent with the UTC-normalized sentiment-trend endpoint.
   const latestTs = data.items
     .map((it) => it.published_ts)
     .filter((t): t is string => typeof t === "string" && t.length > 0)
-    .sort()
-    .at(-1) ?? null;
+    .reduce<string | null>((latest, t) => {
+      const ts = Date.parse(t);
+      if (Number.isNaN(ts)) return latest;
+      if (latest === null || ts > Date.parse(latest)) return t;
+      return latest;
+    }, null);
 
   // Sentiment summary line: "positive 4 · neutral 6 · negative 2".
   const sentSummary = sentimentEntries

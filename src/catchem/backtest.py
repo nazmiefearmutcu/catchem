@@ -35,6 +35,7 @@ render its "no paired reviews yet" empty state instead of an error card.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -144,6 +145,14 @@ def run_backtest(
             stub_score_f = float(stub_score)
             ds_score_f = float(ds_score)
         except (TypeError, ValueError):
+            continue
+        # Drop non-finite scores like every sibling quant module: a NaN/Inf
+        # predicted or ground-truth score would poison delta → mean_abs_error /
+        # mean_signed_error / max_abs_error all become NaN, and FastAPI's default
+        # json.dumps(allow_nan=True) would emit a bare `NaN` token that strict
+        # JSON.parse on the frontend rejects, breaking the backtest dashboard.
+        # _bin_for already drops these from calibration_bins; mirror that here.
+        if not (math.isfinite(stub_score_f) and math.isfinite(ds_score_f)):
             continue
         delta = ds_score_f - stub_score_f
         predictions.append(

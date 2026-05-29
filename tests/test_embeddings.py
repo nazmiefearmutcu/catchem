@@ -105,3 +105,60 @@ def test_nearest_returns_ranked_candidates(tmp_path) -> None:
     ranked = idx.nearest(q, k=3)
     # c1 / c3 should be on top
     assert ranked[0][0] in ("c1", "c3")
+
+
+def test_vector_index_concurrent_save_and_nearest_is_thread_safe(tmp_path) -> None:
+    # Regression (v80 audit HIGH): `save()` runs in the news-poller's 4 ingest
+    # worker threads while `nearest()` may sweep the cache from another thread.
+    # With a plain dict this raced — "RuntimeError: dictionary changed size
+    # during iteration" — or silently dropped writes. The lock + snapshot must
+    # make concurrent save()/nearest() crash-free.
+    import threading
+
+    idx = VectorIndex(tmp_path / "v")
+    e = EmbedderStub()
+    for i in range(10):  # seed so nearest() has something to iterate immediately
+        idx.save(f"seed-{i}", e.encode(f"seed text {i}"))
+
+    errors: list[BaseException] = []
+
+    def _writer(base: str) -> None:
+        try:
+            for i in range(120):
+                idx.save(f"{base}-{i}", e.encode(f"{base} story {i}"))
+        except BaseException as exc:  # capture ANY error raised on the thread
+            errors.append(exc)
+
+    def _reader() -> None:
+        try:
+            q = e.encode("query text")
+            for _ in range(80):
+                idx.nearest(q, k=5)
+        except BaseException as exc:  # capture ANY error raised on the thread
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_writer, args=(f"w{n}",)) for n in range(3)]
+    threads += [threading.Thread(target=_reader) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"concurrent save()/nearest() raised: {errors[:3]}"
+    assert idx.load("w0-0") is not None, "writes must still land under contention"
+
+
+def test_vector_index_cache_is_lru_capped(tmp_path, monkeypatch) -> None:
+    # The in-memory hot layer must not grow without bound — past the cap the
+    # oldest entry is evicted; the durable .npy remains so load() re-reads it.
+    import catchem.embeddings as emb
+
+    monkeypatch.setattr(emb.VectorIndex, "_CACHE_CAP", 5)
+    idx = emb.VectorIndex(tmp_path / "v")
+    e = EmbedderStub()
+    for i in range(12):
+        idx.save(f"c{i}", e.encode(f"text {i}"))
+
+    assert len(idx._cache) <= 5, "cache must stay within the LRU cap"
+    assert idx.load("c11") is not None, "most-recent write resident"
+    assert idx.load("c0") is not None, "evicted entry re-loads from durable .npy"

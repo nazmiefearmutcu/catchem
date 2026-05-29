@@ -20,6 +20,7 @@ prefix style.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -81,9 +82,15 @@ def _coerce_float(value: Any) -> float:
     if value is None or isinstance(value, bool):
         return 0.0
     try:
-        return float(value)
+        f = float(value)
     except (TypeError, ValueError):
         return 0.0
+    # Drop NaN/Inf like every sibling quant module — a non-finite score would
+    # propagate through `relevance * abs(sentiment)` into the aggregate and
+    # 500 the /api/quant/intensity panel via the allow_nan=False renderer.
+    if not math.isfinite(f):
+        return 0.0
+    return f
 
 
 def _record_intensity(record: dict) -> float:

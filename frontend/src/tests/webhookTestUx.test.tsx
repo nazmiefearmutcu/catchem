@@ -4,9 +4,11 @@
  * Pins the four UX rules the SettingsPage's <WebhookOutputCard/> must
  * uphold around the "Test webhook" affordance:
  *
- *   1) Disabled when URL field is empty AND no URL is configured.
- *   2) Enabled the moment the user types a URL (even before saving) OR
- *      a URL is already configured server-side.
+ *   1) Disabled when no URL is configured server-side (a typed-but-unsaved
+ *      URL does NOT enable it — the backend tests the SAVED cfg.url, not
+ *      the request body, so enabling on a typed-only URL would falsely
+ *      "confirm" an untested endpoint; bug-hunt R2).
+ *   2) Enabled when a URL is already configured server-side.
  *   3) Shows a spinner while the request is in-flight.
  *   4) On success renders "✓ Test webhook sent (HTTP 200)" in green; on
  *      failure renders "✗ Test failed: <error>" in red. Both auto-clear
@@ -145,7 +147,10 @@ describe("Webhook Test button UX", () => {
     expect(input.value).toBe("");
   });
 
-  it("enables Test button as soon as the user types a URL (unsaved)", async () => {
+  it("keeps Test button disabled when the user types a URL but has NOT saved it", async () => {
+    // bug-hunt R2: the backend tests the SAVED cfg.url, not the typed value,
+    // so a typed-but-unsaved URL must NOT enable the button (doing so would
+    // test the old/empty saved URL and falsely confirm the new endpoint).
     apiMock.webhookConfig.mockResolvedValue(makeWebhookStatus({ url_configured: false }));
     renderSettings();
     const btn = await screen.findByTestId("webhook-test-btn");
@@ -156,8 +161,15 @@ describe("Webhook Test button UX", () => {
         target: { value: "https://hooks.slack.com/services/T/B/secret" },
       });
     });
-    // Re-grab the button — same element, but disabled flag should flip.
-    expect(screen.getByTestId("webhook-test-btn")).not.toBeDisabled();
+    // Still disabled — typing alone is not enough; the URL must be saved.
+    expect(screen.getByTestId("webhook-test-btn")).toBeDisabled();
+  });
+
+  it("enables Test button when a URL is already configured server-side", async () => {
+    apiMock.webhookConfig.mockResolvedValue(makeWebhookStatus({ url_configured: true }));
+    renderSettings();
+    const btn = await screen.findByTestId("webhook-test-btn");
+    expect(btn).not.toBeDisabled();
   });
 
   it("shows spinner + sent (HTTP 200) chip on success, auto-clears after 5s", async () => {

@@ -320,6 +320,23 @@ class DriveArchiver:
         with contextlib.suppress(asyncio.CancelledError):
             await self._task
         self._task = None
+        # Cancelling the asyncio task raises CancelledError at the
+        # `await asyncio.to_thread(self._archive_once)` point and returns
+        # immediately, but the underlying OS worker thread keeps running
+        # `_archive_once` to completion while STILL holding `storage._lock`
+        # across the CSV fsync + chunked DELETE (~1 s). If we returned now,
+        # the subsequent `supervisor.close()` -> `storage.flush()` would block
+        # behind that orphaned sweep, and the archive DELETE would proceed
+        # AFTER teardown reported complete. Drain the in-flight sweep here by
+        # acquiring the same RLock the sweep holds (off the event loop so we
+        # don't stall it): once we get it, no sweep is running. We release it
+        # right away -- it only ever guards `_archive_once`, which can no longer
+        # start because `_stop` is set and the task is gone.
+        def _drain() -> None:
+            self._run_lock.acquire()
+            self._run_lock.release()
+
+        await asyncio.to_thread(_drain)
         logger.info("drive_archiver_stopped")
 
     async def archive_now(self) -> ArchiveResult:
@@ -477,8 +494,9 @@ class DriveArchiver:
                     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
                     # CSV-vs-DELETE is NOT one transaction: the CSV bytes are
                     # fsync'd to the OS filesystem below, but the DELETE runs
-                    # inside the `with conn:` SQLite transaction that rolls back
-                    # on ANY exception (db locked on a busy WAL, SQLITE_FULL,
+                    # inside an explicit BEGIN…`with conn:` SQLite transaction
+                    # (opened just before the DELETE loop) that rolls back on
+                    # ANY exception (db locked on a busy WAL, SQLITE_FULL,
                     # etc.). If a DELETE chunk raises AFTER the fsync, the rows
                     # survive in SQLite but the CSV row is already durable —
                     # the next tick re-SELECTs the same rows and would append
@@ -525,6 +543,21 @@ class DriveArchiver:
                 # concurrent INSERT OR REPLACE cannot slip in.
                 archived_ids = [r["capture_id"] for r in rows]
                 chunk_size = 900
+                # Open an EXPLICIT transaction so the multi-chunk DELETE is
+                # atomic. The connection runs with ``isolation_level=None``
+                # (autocommit), under which each ``conn.execute(...)`` commits
+                # on its own and the surrounding ``with conn:`` wrapper's
+                # commit/rollback are no-ops (no transaction is open). Without
+                # this BEGIN, a failure mid-loop (SQLITE_BUSY on a contended
+                # WAL, "too many SQL variables", etc.) AFTER a
+                # ``DELETE FROM record_labels`` chunk committed but BEFORE its
+                # matching ``DELETE FROM records`` would orphan the surviving
+                # ``records`` row from the inverted index — it still counts in
+                # count_records() but vanishes from records_by_label() (the
+                # JOIN powering /records/by-* and the Tags page). BEGIN makes
+                # ``with conn:`` roll the entire DELETE back as a unit on any
+                # error, mirroring insert_record's fix.
+                conn.execute("BEGIN")
                 for i in range(0, len(archived_ids), chunk_size):
                     chunk = archived_ids[i:i + chunk_size]
                     placeholders = ",".join("?" * len(chunk))
@@ -543,8 +576,9 @@ class DriveArchiver:
                         chunk,
                     )
 
-            # The `with conn:` transaction has now committed the DELETEs, so
-            # these capture_ids are gone from SQLite for good. Drop their
+            # The explicit BEGIN…`with conn:` transaction has now committed the
+            # DELETEs as a unit, so these capture_ids are gone from SQLite for
+            # good (or, on any error mid-loop, rolled back atomically). Drop their
             # durable .npy vectors too — service.py saves one per ingested
             # record but nothing else ever deletes them, so without this the
             # vector_index dir grows without bound and cold nearest() queries

@@ -16,7 +16,7 @@ Design rules:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -69,7 +69,7 @@ class FinancialImpactSummary(_CompactBase):
             evidence_count=len(ev),
             diagnostic_multimodal_enabled=bool(r.get("diagnostic_multimodal_enabled", False)),
             published_ts=r.get("published_ts"),
-            created_at=str(r.get("created_at") or datetime.utcnow().isoformat()),
+            created_at=str(r.get("created_at") or datetime.now(UTC).isoformat()),
         )
 
 

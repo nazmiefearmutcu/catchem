@@ -77,6 +77,11 @@ export function useLiveStream(): LiveStreamState {
   const sidecarDownRef = useRef<boolean>(false);
   const lastBeatRef = useRef<number | null>(null);
   const hasOpenedRef = useRef<boolean>(false);
+  // True only between "connection was lost" (onerror / sidecar-down) and the
+  // first beat that proves it came back. Distinct from `hasOpenedRef`, which
+  // is sticky for the lifetime of the hook — conflating the two made every
+  // beat on a healthy, never-interrupted socket re-fire SSE_EVENT_RECONNECTED.
+  const wasLostRef = useRef<boolean>(false);
 
   // Drive `stalenessSeconds` on a 1s tick once the first beat arrives so
   // consumers can render "live Xs ago" copy without each one wiring its
@@ -176,11 +181,14 @@ export function useLiveStream(): LiveStreamState {
         // restarts cleanly.
         stopFallback();
         backoffRef.current = SSE_BACKOFF_MIN_MS;
-        // If we'd previously opened-and-lost the connection, this beat is
+        // If we'd previously opened-and-LOST the connection, this beat is
         // a *reconnect*. Notify the rest of the app exactly once per
         // recovery so caches that snapshotted during the outage can
-        // invalidate without each having to listen for status flips.
-        if (hasOpenedRef.current) {
+        // invalidate without each having to listen for status flips. Gate
+        // on `wasLostRef` (cleared right after) — NOT on `hasOpenedRef`,
+        // which stays true forever and would re-fire on every healthy beat.
+        if (wasLostRef.current) {
+          wasLostRef.current = false;
           try {
             window.dispatchEvent(new Event(SSE_EVENT_RECONNECTED));
           } catch {
@@ -226,6 +234,9 @@ export function useLiveStream(): LiveStreamState {
       es.onerror = () => {
         es.close();
         esRef.current = null;
+        // Mark the connection lost so the next live beat is recognised as a
+        // recovery and fires SSE_EVENT_RECONNECTED exactly once.
+        wasLostRef.current = true;
         // Keep data flowing while SSE is down…
         startFallback();
         setStatus("polling");
@@ -236,6 +247,9 @@ export function useLiveStream(): LiveStreamState {
 
     const onSidecarDown = () => {
       sidecarDownRef.current = true;
+      // The socket is being torn down — the next beat after recovery is a
+      // reconnect, so arm the once-per-recovery dispatch.
+      wasLostRef.current = true;
       // Tear down any active connection + pending reconnect; pause the
       // fallback poller too — /healthz is failing, so /ui/recent is
       // almost certainly failing as well. The fallback will be re-armed

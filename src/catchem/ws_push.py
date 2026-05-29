@@ -773,6 +773,14 @@ class WebSocketNewsChannel:
             await asyncio.to_thread(self._ingest_one, item)
             st.ingested += 1
         except Exception as exc:
+            # Roll back the speculative `_seen.add(canon)` above so a transient
+            # ingest failure (SQLite-lock burst on a high-volume firehose, a
+            # scoring exception) doesn't permanently drop this URL: without the
+            # discard, the same frame URL arriving again hits
+            # `if canon in self._seen: return` and is silently skipped until LRU
+            # eviction. This keeps the firehose self-healing across transient
+            # failures while preserving exact-URL dedup for ingested frames.
+            self._seen.discard(canon)
             logger.info(
                 "ws_push_ingest_failed", source=spec.name, url=item.url, error=str(exc)
             )

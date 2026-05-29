@@ -714,6 +714,7 @@ _NEWS_POLLER: NewsPoller | None = None
 _WS_CHANNEL: WebSocketNewsChannel | None = None
 _ARCHIVER: DriveArchiver | None = None
 _QUANT_ENGINE = None  # lazy: needs the supervisor's storage; built on first request
+_QUANT_ENGINE_LOCK = threading.Lock()  # guards the lazy singleton build
 
 
 def _get_supervisor() -> Supervisor:
@@ -721,6 +722,33 @@ def _get_supervisor() -> Supervisor:
     if _SUPERVISOR is None:
         raise HTTPException(status_code=503, detail="supervisor_not_initialized")
     return _SUPERVISOR
+
+
+def _checkpoint_wal_best_effort() -> bool:
+    """Fold committed WAL frames into the main DB file under the storage lock.
+
+    The truth-store runs in WAL mode, so committed transactions can sit in the
+    `-wal` sidecar until a checkpoint. Any operation that reads the raw main
+    `.sqlite3` bytes (export download, pre-import safety backup) must checkpoint
+    first or it captures a stale snapshot missing the newest rows. Acquiring
+    ``storage._lock`` also serializes against the background ingest writers so
+    no checkpoint races a half-applied multi-statement insert.
+
+    Best-effort: returns False (and never raises) when no live supervisor /
+    storage is available, since the DB file is still streamable as-is.
+    """
+    sup = _SUPERVISOR
+    if sup is None:
+        return False
+    storage = getattr(sup, "storage", None)
+    if storage is None:
+        return False
+    try:
+        with storage._lock, storage._connection() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return True
+    except Exception:  # pragma: no cover — defensive; export still proceeds
+        return False
 
 
 def _get_quant_engine():
@@ -732,11 +760,17 @@ def _get_quant_engine():
     restart.
     """
     global _QUANT_ENGINE
+    # Double-checked locking: the sync quant handlers run in a threadpool, so
+    # two concurrent first-hits could both see None and both construct, with
+    # the second assignment silently discarding the first engine's warmed
+    # cache. Guard the build so exactly one instance is ever created.
     if _QUANT_ENGINE is None:
         from .quant import QuantEngine
 
         sup = _get_supervisor()
-        _QUANT_ENGINE = QuantEngine(storage=sup.storage, market_provider=_MARKET_DATA)
+        with _QUANT_ENGINE_LOCK:
+            if _QUANT_ENGINE is None:
+                _QUANT_ENGINE = QuantEngine(storage=sup.storage, market_provider=_MARKET_DATA)
     return _QUANT_ENGINE
 
 
@@ -1589,7 +1623,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         url = body.get("url") or None
         if not title or not text:
             raise HTTPException(status_code=422, detail="title and text are required")
-        if len(text) > MAX_UPLOAD_BYTES:
+        # MAX_UPLOAD_BYTES is a BYTE budget; len(str) counts characters. Compare
+        # the UTF-8 encoded length so a multibyte paste enforces the same cap as
+        # the file-upload path (text_extract checks len(raw_bytes)).
+        if len(text.encode("utf-8")) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="text exceeds size cap")
         result = _run_demo(title=title, text=text, domain=domain, url=url)
         return _demo_to_response(result)
@@ -1770,16 +1807,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "enabled" in patch:
             cfg.enabled = bool(patch["enabled"])
         if "sampling_rate" in patch:
-            rate = float(patch["sampling_rate"])
+            try:
+                rate = float(patch["sampling_rate"])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="sampling_rate must be a number") from exc
             cfg.sampling_rate = max(0.0, min(1.0, rate))
         if "usd_cap" in patch:
-            cfg.usd_cap = max(0.0, float(patch["usd_cap"]))
+            try:
+                cap = float(patch["usd_cap"])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="usd_cap must be a number") from exc
+            cfg.usd_cap = max(0.0, cap)
         if "api_key" in patch:
             cfg.api_key = str(patch["api_key"] or "")
         if "model" in patch:
-            cfg.model = str(patch["model"]).strip() or cfg.model
+            # `or ""` so an explicit null/empty coerces to "" (NOT the literal
+            # "None" that `str(None)` would yield); the `or cfg.model` fallback
+            # then keeps the prior value instead of bricking the client.
+            cfg.model = str(patch["model"] or "").strip() or cfg.model
         if "base_url" in patch:
-            cfg.base_url = str(patch["base_url"]).strip() or cfg.base_url
+            cfg.base_url = str(patch["base_url"] or "").strip() or cfg.base_url
         # Reset the cached client so the next call picks up the new key/model.
         sup.reviewers._deepseek = None
         sup.reviewers.invalidate_budget_cache()
@@ -2138,10 +2185,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def quant_live_read(limit: int = Query(1000, ge=100, le=5000)) -> dict[str, Any]:
         """DeepSeek-narrated "what's happening RIGHT NOW" summary.
 
-        Powers the hero on /scan. Cached at the engine level (30s) so
-        the analyst can leave the page open without burning tokens; on
-        cache hit returns instantly. Falls back to a deterministic local
-        narrative if DeepSeek is disabled.
+        Powers the hero on /scan. Each call issues a fresh (token-billed)
+        DeepSeek completion and meters it against the budget cap — there is
+        no server-side response cache here, so the SPA must avoid calling
+        this on every mount (it uses the streaming endpoint as the primary
+        path and only falls back to this on stream error). Falls back to a
+        deterministic local narrative if DeepSeek is disabled.
         """
         sup = _get_supervisor()
         compact = _live_read_context(limit)
@@ -2310,12 +2359,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield {"event": "chunk", "data": json.dumps({"text": token})}
                     await asyncio.sleep(0)
             else:
+                # A successful, token-billed DeepSeek completion MUST always be
+                # metered against the budget guard. The usage envelope is
+                # optional (DeepSeek only yields it when the upstream chunk
+                # carries a `usage` object), so when it is absent we still
+                # account the call — mirroring the non-streaming path, which
+                # always calls add_spend after a 200. Default missing usage to
+                # estimate_usd(0, 0) so the spend is recorded (even if zero) and
+                # the streaming path can never silently overrun the budget.
                 if usage_payload:
                     usd_cost = client.estimate_usd(
                         input_tokens=int(usage_payload.get("prompt_tokens") or 0),
                         output_tokens=int(usage_payload.get("completion_tokens") or 0),
                     )
-                    sup.reviewers.add_spend(usd_cost)
+                else:
+                    usd_cost = client.estimate_usd(input_tokens=0, output_tokens=0)
+                sup.reviewers.add_spend(usd_cost)
 
             done_payload: dict[str, Any] = {
                 "ok": True,
@@ -2712,6 +2771,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rec = sup.storage.get_record(capture_id)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"unknown capture_id: {capture_id}")
+        # Defense-in-depth: every other record-returning route scrubs the
+        # diagnostic blob in production_safe mode. get_record() reconstructs
+        # diagnostic_multimodal_result from storage, so this drill-down must
+        # redact too — otherwise it leaks the full multimodal diagnostic even
+        # when the sidecar is running production_safe.
+        rec = redact_record_for_mode(rec, production_safe=_is_production_safe()) or {}
         reviews = sup.storage.get_reviews_for_capture(capture_id)
         # Build a minimal AwarenessCaptureView for reaction lookup.
         try:
@@ -2749,11 +2814,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/quant/cluster/{cluster_id}/members")
-    def quant_cluster_members(cluster_id: str, limit: int = Query(20, ge=1, le=200)) -> dict[str, Any]:
-        """Records belonging to a cluster — used by the drill-down drawer."""
+    def quant_cluster_members(
+        cluster_id: str,
+        limit: int = Query(20, ge=1, le=200),
+        window: int = Query(1000, ge=10, le=5000),
+    ) -> dict[str, Any]:
+        """Records belonging to a cluster — used by the drill-down drawer.
+
+        ``cluster_id`` is a SHA-1 over the cluster's sorted member capture_ids,
+        so it is a deterministic function of WHICH records were clustered. The
+        cluster the UI clicked came from ``/api/quant/dashboard`` →
+        ``dashboard_snapshot(limit=windowSize)`` → ``clusters(limit=windowSize)``.
+        To recover that exact cluster_id we MUST re-cluster over the SAME corpus
+        window; a hardcoded limit produces a different membership set (hence a
+        different id) for every other window and 404s the drill-down. The UI
+        threads its current ``windowSize`` as ``window`` so the corpora match.
+        """
         engine = _get_quant_engine()
-        # Pull a recent corpus large enough to recover the cluster's window.
-        clusters = engine.clusters(limit=2000)
+        # Re-run clustering over the SAME window the dashboard used so the
+        # cluster_id reproduces; default mirrors the dashboard's 1000 default.
+        clusters = engine.clusters(limit=window)
         target = next((c for c in clusters if c.cluster_id == cluster_id), None)
         if target is None:
             raise HTTPException(status_code=404, detail=f"unknown cluster_id: {cluster_id}")
@@ -3407,6 +3487,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db_path = s.sqlite_path()
         if not db_path.exists():
             raise HTTPException(status_code=404, detail="database not found")
+        # The truth-store runs in WAL mode, so committed transactions can live
+        # in the `-wal` sidecar until a checkpoint folds them into the main
+        # file. Streaming only the main `.sqlite3` would silently omit the
+        # newest committed rows. Force a full checkpoint under the storage lock
+        # first so all committed frames land in the file we're about to stream.
+        _checkpoint_wal_best_effort()
         stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         return FileResponse(
             db_path,
@@ -3425,66 +3511,118 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         After the file lands, the operator must reload the SPA — the
         live supervisor still holds the previous DB connection.
         """
-        # Cap the read at a reasonable size. The default working set is
-        # ~300 KB (see archive cap=150 rows); even a huge backup is
-        # comfortably under 200 MB. This is the same ceiling
-        # `text_extract.MAX_UPLOAD_BYTES` enforces on text uploads.
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=422, detail="upload is empty")
-        if len(content) > 200 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="upload exceeds 200 MB cap")
-        if not content.startswith(_SQLITE_MAGIC):
-            raise HTTPException(status_code=400, detail="not a valid SQLite file")
-
+        # Cap at a reasonable size. The default working set is ~300 KB (see
+        # archive cap=150 rows); even a huge backup is comfortably under
+        # 200 MB. This is the same ceiling `text_extract.MAX_UPLOAD_BYTES`
+        # enforces on text uploads.
+        max_bytes = 200 * 1024 * 1024
         s = _SETTINGS or load_settings()
         db_path = s.sqlite_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Stream the upload to a sibling temp file in bounded chunks, aborting
+        # the moment the running total crosses the cap — rather than
+        # `await file.read()` of the whole body, which materializes a
+        # multi-gigabyte upload entirely in RAM (risking OOM) BEFORE the size
+        # guard can reject it. The SQLite magic header is validated on the
+        # first chunk so a non-DB upload is rejected after ~16 bytes.
+        tmp_path = db_path.with_name(f".{db_path.name}.import.tmp")
+        chunk_size = 1024 * 1024  # 1 MB
+        total_bytes = 0
+        try:
+            with tmp_path.open("wb") as out:
+                first = True
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    if first:
+                        if not chunk.startswith(_SQLITE_MAGIC):
+                            raise HTTPException(status_code=400, detail="not a valid SQLite file")
+                        first = False
+                    total_bytes += len(chunk)
+                    if total_bytes > max_bytes:
+                        raise HTTPException(status_code=413, detail="upload exceeds 200 MB cap")
+                    out.write(chunk)
+                # The fsync is critical: buffered writes alone leave the data in
+                # the kernel page cache. A crash between the write and the
+                # rename below — or between the rename and the next background
+                # flush — can leave a zero-length / truncated DB under db_path.
+                # We flush + fsync the FD explicitly before the rename so the
+                # bytes are durably on disk *first*.
+                out.flush()
+                os.fsync(out.fileno())
+        except HTTPException:
+            with contextlib.suppress(FileNotFoundError):
+                tmp_path.unlink()
+            raise
+        if total_bytes == 0:
+            with contextlib.suppress(FileNotFoundError):
+                tmp_path.unlink()
+            raise HTTPException(status_code=422, detail="upload is empty")
+
+        content_len = total_bytes
         backup_path: Path | None = None
         if db_path.exists():
             import shutil
+            # Checkpoint first so the pre-import safety backup captures the
+            # newest committed rows (the main file lags the live DB in WAL
+            # mode). Without this the backup is incomplete — and combined with
+            # the WAL/SHM unlink below, a bad import would be unrecoverable.
+            _checkpoint_wal_best_effort()
             stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             backup_path = db_path.with_name(f"catchem_backup_{stamp}.sqlite3")
             shutil.copy2(db_path, backup_path)
 
-        # Write atomically: stage to a sibling temp file, fsync, then
-        # rename over the live path. Belt-and-braces — even on a power
-        # cut mid-write the old file (or backup) is still recoverable.
-        #
-        # The fsync is critical: `write_bytes` alone leaves the data in
-        # the kernel page cache. A crash between write_bytes() and
-        # tmp_path.replace() — or between the rename and the next
-        # background flush — can leave a zero-length / truncated DB
-        # under db_path. We open + fsync the FD explicitly before the
-        # rename so the bytes are durably on disk *first*.
-        tmp_path = db_path.with_name(f".{db_path.name}.import.tmp")
-        tmp_path.write_bytes(content)
-        fd = os.open(tmp_path, os.O_RDWR)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        tmp_path.replace(db_path)
+        # Rename the staged temp file over the live path atomically — even on
+        # a power cut mid-import the old file (or backup) is still recoverable.
+        # The destructive replace + sidecar deletion below must be serialized
+        # against the background ingest writers. Those workers call
+        # ``storage.insert_record`` under ``storage._lock`` while holding an
+        # open WAL-mode connection across a multi-statement transaction. If we
+        # rename a new file over db_path (and unlink its `-wal`/`-shm`) while a
+        # writer is mid-transaction, SQLite's path-based WAL coordination
+        # breaks: the writer's open connection now points at an unlinked inode
+        # / a deleted shared-memory file, and its commit can corrupt the
+        # freshly imported file or be silently lost. Holding the storage RLock
+        # guarantees no writer is mid-insert across the swap.
+        def _swap_in_place() -> None:
+            # The truth-store runs in WAL mode (storage.py PRAGMA
+            # journal_mode=WAL). SQLite ties the `-wal` / `-shm` sidecars to
+            # the DB by FILENAME, not content. The OLD database's sidecars are
+            # still next to db_path and may hold un-checkpointed frames; if we
+            # leave them, the next connection to open the freshly imported file
+            # would replay those stale old-DB frames over the imported snapshot
+            # — silently corrupting the restore. Remove them so the import
+            # lands clean. (The forced backup above preserves the pre-import
+            # state; it does not protect the post-import file from a stale-WAL
+            # replay.)
+            tmp_path.replace(db_path)
+            for suffix in ("-wal", "-shm"):
+                sidecar = db_path.with_name(db_path.name + suffix)
+                with contextlib.suppress(FileNotFoundError):
+                    sidecar.unlink()
 
-        # The truth-store runs in WAL mode (storage.py PRAGMA journal_mode=WAL).
-        # SQLite ties the `-wal` / `-shm` sidecars to the DB by FILENAME, not
-        # content. The OLD database's sidecars are still next to db_path and
-        # may hold un-checkpointed frames; if we leave them, the next
-        # connection to open the freshly imported file would replay those
-        # stale old-DB frames over the imported snapshot — silently
-        # corrupting the restore. Remove them so the import lands clean.
-        # (The forced backup above preserves the pre-import state; it does
-        # not protect the post-import file from a stale-WAL replay.)
-        for suffix in ("-wal", "-shm"):
-            sidecar = db_path.with_name(db_path.name + suffix)
-            with contextlib.suppress(FileNotFoundError):
-                sidecar.unlink()
+        sup = _SUPERVISOR
+        storage = getattr(sup, "storage", None) if sup is not None else None
+        if storage is not None:
+            # Run the blocking FS swap in a worker thread WHILE holding the
+            # storage lock, so we don't pin the event loop and no writer can
+            # be mid-transaction during the rename/unlink.
+            def _locked_swap() -> None:
+                with storage._lock:
+                    _swap_in_place()
+
+            await asyncio.to_thread(_locked_swap)
+        else:
+            # No live supervisor (e.g. non-lifespan test client): no concurrent
+            # writers to race, so the swap is safe without the lock.
+            _swap_in_place()
 
         return {
             "ok": True,
             "backup_path": _display_path(backup_path) if backup_path else None,
-            "imported_size_bytes": len(content),
+            "imported_size_bytes": content_len,
             "db_path": _display_path(db_path),
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -3802,11 +3940,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         now_utc = datetime.now(UTC)
         today = now_utc.date()
         window_days = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
-        cutoff_iso = datetime.combine(window_days[0], datetime.min.time(), tzinfo=UTC).isoformat()
+        # Bucket and filter on a UTC-NORMALIZED day, not on the raw stored
+        # string. published_ts is stored as `isoformat()`, which keeps the
+        # source offset for aware datetimes (e.g. 2026-05-22T01:00:00+05:00,
+        # whose UTC instant is the 21st). substr(...,1,10) would key that row
+        # under '2026-05-22' and a lexicographic `>= cutoff` compare would
+        # mis-sort it. SQLite's strftime/datetime parse the numeric offset and
+        # fold to UTC, so both the day key and the cutoff filter reference the
+        # same timezone. (Stored UTC datetimes are '+00:00'; naive ones are
+        # forced to UTC by the schema validator — both parse correctly.)
+        cutoff_sql = datetime.combine(
+            window_days[0], datetime.min.time(), tzinfo=UTC
+        ).strftime("%Y-%m-%d %H:%M:%S")
         with storage._lock, storage._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT substr(records.published_ts, 1, 10) AS day,
+                SELECT strftime('%Y-%m-%d', records.published_ts) AS day,
                        records.sentiment_label AS label,
                        COUNT(*) AS cnt
                   FROM records
@@ -3815,12 +3964,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                  WHERE record_labels.kind = 'symbol'
                    AND record_labels.value = ?
                    AND records.published_ts IS NOT NULL
-                   AND records.published_ts >= ?
+                   AND datetime(records.published_ts) >= ?
                    AND records.sentiment_label IS NOT NULL
                  GROUP BY day, label
                  ORDER BY day ASC
                 """,
-                (symbol, cutoff_iso),
+                (symbol, cutoff_sql),
             ).fetchall()
         # Zero-filled, ordered per-day buckets — the UI assumes one row per
         # day so the stacked area renders a contiguous time axis even when
@@ -3904,6 +4053,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if _NEWS_POLLER is None:
             raise HTTPException(status_code=503, detail="news_poller_disabled")
         ingested = await _NEWS_POLLER.poll_now()
+        # Wire the documented post-ingest hook: a non-empty ingest must drop
+        # the quant cache so the dashboard/signals refresh immediately instead
+        # of serving the prior snapshot until the 30s TTL lapses. Guarded so it
+        # no-ops when the quant engine was never built (never hit /api/quant/*).
+        if ingested and _QUANT_ENGINE is not None:
+            with contextlib.suppress(Exception):
+                _QUANT_ENGINE.invalidate()
         return {"ingested": ingested, "total_ingested": _NEWS_POLLER.total_ingested}
 
     @app.post(

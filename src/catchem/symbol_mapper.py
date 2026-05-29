@@ -42,6 +42,12 @@ _PAREN_TICKER_RE = re.compile(
 _TICKER_DENYLIST = {
     "CEO", "CFO", "COO", "CTO", "IPO", "ETF", "ETFS", "GDP", "CPI", "PPI",
     "SEC", "FTC", "FDA", "FOMC", "ECB", "BOJ", "BOE", "PBOC", "RBA",
+    # Country / org / sports acronyms that routinely appear parenthesized in
+    # headlines ("(USA)", "(NBA)") and would otherwise be mis-read as equity
+    # tickers and trip the equities asset-class bridge. None of these are real
+    # tradeable tickers in our registry.
+    "USA", "UK", "EU", "UN", "NATO", "WHO", "FBI", "CIA", "DOJ", "IRS", "EPA",
+    "NBA", "NFL", "NHL", "MLB", "NCAA", "ESG", "FAQ",
     # Common false matches inside the exchange-prefixed form when the
     # regex doesn't bind to a real exchange but to a bare paren with the
     # acronym alone, e.g. "Filed with the SEC (SEC)" → drop.

@@ -467,6 +467,56 @@ class TestRegistryIntegration:
         rows = supervisor.storage.get_reviews_for_capture(capture.capture_id)
         assert any(r["error_code"] == "auth" for r in rows)
 
+    def test_run_and_persist_does_not_double_count_spend(self, supervisor, capture, monkeypatch):
+        """Regression: a formal DeepSeek review persists its spend ONCE (the
+        reviews row). It must not also write a narrative-ledger row, or
+        budget_state() double-counts after invalidate_budget_cache() and the
+        usd_cap is silently halved (the round-1 durable-ledger regression)."""
+        supervisor.settings.reviewers.deepseek.enabled = True
+        supervisor.settings.reviewers.deepseek.api_key = "test-key"
+
+        from catchem.reviewers import deepseek as deepseek_module
+
+        body = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "is_finance_relevant": True,
+                                "finance_relevance_score": 0.9,
+                                "asset_classes": ["rates"],
+                                "impact_reason_codes": ["central_bank"],
+                                "candidate_symbols": [],
+                                "sentiment_label": "neutral",
+                                "sentiment_score": 0.5,
+                                "evidence_sentences": ["Fed cut rates."],
+                                "reason_text": "Fed decision.",
+                            }
+                        )
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 100_000, "completion_tokens": 100_000},
+        }
+        monkeypatch.setattr(
+            deepseek_module.httpx,
+            "Client",
+            lambda *a, **kw: _MockClient([_MockResponse(200, body)]),
+        )
+        supervisor.reviewers._deepseek = None  # type: ignore[attr-defined]
+
+        payload = supervisor.reviewers.run_and_persist_deepseek(capture)
+        assert payload is not None and payload.error_code is None
+        cost = payload.usd_cost
+        assert cost > 0
+        # Cache is correct immediately (in-memory bump).
+        assert supervisor.reviewers.budget_state().spent_usd == pytest.approx(cost)
+        # After invalidation the cache rebuilds from SQLite — must still be the
+        # single cost, NOT 2x. (Pre-fix: reviews row + ledger row → 2*cost.)
+        supervisor.reviewers.invalidate_budget_cache()
+        assert supervisor.reviewers.budget_state().spent_usd == pytest.approx(cost)
+
     def test_storage_reviews_table_roundtrip(self, supervisor):
         payload = ReviewPayload(
             capture_id="cap-rt",

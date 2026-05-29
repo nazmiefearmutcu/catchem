@@ -447,6 +447,17 @@ class _SeenCache:
         while len(self._store) > self.capacity:
             self._store.popitem(last=False)
 
+    def discard(self, key: str) -> None:
+        """Remove `key` if present; no-op otherwise (mirrors set.discard).
+
+        Used to roll back a speculative `add()` when the ingest that the add
+        was guarding fails — without it, a single transient ingest failure
+        permanently drops that URL from the pipeline (the next sighting hits
+        `if canon in self._seen: continue` and is silently skipped) until LRU
+        eviction pushes it out ~4096 distinct URLs later.
+        """
+        self._store.pop(key, None)
+
 
 @dataclass(frozen=True)
 class ParsedItem:
@@ -952,8 +963,13 @@ class NewsPoller:
                     await asyncio.to_thread(self._ingest_one, item)
                 except Exception as exc:
                     logger.info("news_ingest_failed", feed=spec.name, url=item.url, error=str(exc))
-                    # Ingest failed → undo the title-dedup record so a later
-                    # sighting isn't suppressed behind a story that never landed.
+                    # Ingest failed → undo BOTH dedup records so a later sighting
+                    # isn't suppressed behind a story that never landed. The
+                    # `_seen` (canonical-URL) rollback is load-bearing: the
+                    # next sighting of the SAME URL short-circuits on
+                    # `if canon in self._seen` before the title check, so the
+                    # title rollback alone wouldn't help same-URL re-sightings.
+                    self._seen.discard(_canonical_url(item.url))
                     self._rollback_title(item.title)
                 else:
                     ingested_ok += 1
@@ -1187,15 +1203,22 @@ class NewsPoller:
             _ingest_one_async(spec, item) for spec, item in new_items
         ))
         ingested = sum(1 for ok in gathered if ok)
-        # Roll back the title-dedup record for any item whose ingest FAILED, so
-        # a later sighting (another outlet this cycle, or the next tick) gets a
+        # Roll back BOTH dedup records for any item whose ingest FAILED, so a
+        # later sighting (another outlet this cycle, or the next tick) gets a
         # fresh chance instead of being suppressed for the whole window behind a
-        # story that never actually landed. `new_items` and `gathered` are
-        # positionally aligned — asyncio.gather preserves the awaitable order —
-        # so zip pairs each item with its own outcome. Still on the event loop
-        # under `self._lock`, same as the original record, so no race.
+        # story that never actually landed. The canonical-URL `_seen` rollback
+        # is the load-bearing one: without it, the next tick re-serving the SAME
+        # URL hits `if canon in self._seen: continue` and is dropped BEFORE the
+        # title check, so the title rollback alone is pointless for same-URL
+        # re-sightings — a single transient failure (SQLite lock, disk hiccup,
+        # a scoring exception) permanently loses the article until LRU eviction.
+        # `new_items` and `gathered` are positionally aligned — asyncio.gather
+        # preserves the awaitable order — so zip pairs each item with its own
+        # outcome. Still on the event loop under `self._lock`, same as the
+        # original add, so no race.
         for (_spec, item), ok in zip(new_items, gathered, strict=True):
             if not ok:
+                self._seen.discard(_canonical_url(item.url))
                 self._rollback_title(item.title)
 
         # Compute publisher-lag stats but exclude obviously-old items.

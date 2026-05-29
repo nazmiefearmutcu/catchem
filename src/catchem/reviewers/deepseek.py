@@ -11,6 +11,7 @@ the "no cloud services are contacted" guarantee.
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -268,6 +269,11 @@ def _as_clamped_float(value: Any) -> float:
     try:
         f = float(value)
     except (TypeError, ValueError):
+        return 0.0
+    # NaN/Inf slip past the `< 0` / `> 1` clamp (every NaN comparison is False)
+    # and a bare `NaN` token is happily parsed by json.loads, so a non-finite
+    # score would otherwise reach serialization and 500 the response.
+    if not math.isfinite(f):
         return 0.0
     if f < 0:
         return 0.0

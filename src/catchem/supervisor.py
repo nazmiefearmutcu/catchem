@@ -220,7 +220,14 @@ class Supervisor:
         """
         if file is not None:
             root = file.parent
-            pattern = file.name
+            # Escape glob metacharacters in the literal filename — a real file
+            # named e.g. `2026-05-30[backup].jsonl` or one containing `*`/`?`
+            # would otherwise be interpreted as a glob pattern and match the
+            # wrong files (or nothing), silently replaying something other than
+            # the single file the operator pointed at.
+            import glob as _glob
+
+            pattern = _glob.escape(file.name)
         else:
             root = discover_awareness_jsonl_root(self.settings.paths.awareness_data_dir)
             # Honor the configured replay glob (relative to the discovered

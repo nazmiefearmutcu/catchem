@@ -37,6 +37,7 @@ import csv
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -400,6 +401,7 @@ class DriveArchiver:
         if not self._run_lock.acquire(blocking=False):
             return ArchiveResult(archived=0, csv_path=None, error="already running")
         self.is_archiving = True
+        sweep_started = time.time()
         try:
             # ── Step 1: SELECT inside the storage lock ───────────────────
             #
@@ -589,25 +591,36 @@ class DriveArchiver:
             # glob over an ever-larger orphaned pool. Best-effort: a missing
             # file or an absent vector index must never fail the sweep (the
             # rows are already archived + deleted).
-            # Race guard: a capture_id we just archived can be RE-INSERTED
-            # concurrently (RSS re-circulation / late WS frame / replay) —
-            # service.py saves the new vector BEFORE insert_record takes
-            # storage._lock, so a naive unconditional delete here would unlink
-            # a now-LIVE record's freshly-saved vector. Re-check each id is
-            # genuinely absent under storage._lock (which serializes against
-            # insert_record on the shared supervisor Storage) and only then
-            # drop its vector. Holding the lock for the whole pass also stops a
-            # reprocess from slipping a save() between our check and unlink.
+            # Race guard (two layers): a capture_id we just archived can be
+            # RE-INSERTED concurrently (RSS re-circulation / late WS frame /
+            # replay). service.py saves the new vector BEFORE insert_record
+            # takes storage._lock, so a naive unconditional delete here would
+            # unlink a now-LIVE record's freshly-saved vector.
+            #   (1) Re-check each id is genuinely absent under storage._lock
+            #       (serializes against insert_record on the shared Storage).
+            #   (2) Even if the row isn't re-inserted YET, a reprocess may have
+            #       already re-written the .npy (save() runs lock-free, ahead of
+            #       insert_record). So skip any vector whose file mtime is at or
+            #       after this sweep started — that file is a fresh re-save, not
+            #       the aged vector we set out to drain. Together these close the
+            #       save-before-insert window left open by layer (1) alone.
             vector_index = getattr(self._sup, "vector_index", None)
+            vec_root = getattr(vector_index, "root", None)
             if vector_index is not None:
                 with self._sup.storage._lock, self._sup.storage._connection() as conn:
                     for cid in archived_ids:
                         still_present = conn.execute(
                             "SELECT 1 FROM records WHERE capture_id = ?", (cid,)
                         ).fetchone()
-                        if still_present is None:
-                            with contextlib.suppress(Exception):
-                                vector_index.delete(cid)
+                        if still_present is not None:
+                            continue
+                        if vec_root is not None:
+                            npy = vec_root / f"{cid}.npy"
+                            with contextlib.suppress(OSError):
+                                if npy.stat().st_mtime >= sweep_started:
+                                    continue  # freshly re-saved → keep
+                        with contextlib.suppress(Exception):
+                            vector_index.delete(cid)
 
             self.last_run_at = datetime.now(UTC)
             return ArchiveResult(archived=len(rows), csv_path=csv_path, error=None)

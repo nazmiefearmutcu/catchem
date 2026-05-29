@@ -166,12 +166,23 @@ def serve(
     bind_port = int(port or s.api.port)
     record_bind(bind_host, bind_port)
 
+    # uvicorn accepts only a fixed set of level names — it rejects stdlib
+    # aliases like WARN / NOTSET that are perfectly valid in LoggingConfig and
+    # would otherwise crash serve() before it ever binds the port. Normalize to
+    # uvicorn's vocabulary, falling back to "info" for anything unrecognized.
+    _UVICORN_LEVELS = {"critical", "error", "warning", "info", "debug", "trace"}
+    lvl = s.logging.level.strip().lower()
+    if lvl in ("warn",):
+        lvl = "warning"
+    if lvl not in _UVICORN_LEVELS:
+        lvl = "info"
+
     app_ = create_app(s)
     uvicorn.run(
         app_,
         host=bind_host,
         port=bind_port,
-        log_level=s.logging.level.lower(),
+        log_level=lvl,
     )
 
 
@@ -558,6 +569,13 @@ def cli_export(
         import csv
         from io import StringIO
 
+        # Same CSV formula-injection defense the HTTP twin (/api/export/records)
+        # and the drive archiver apply: feed-sourced text (title/domain/url +
+        # the joined label lists) must be neutralized so a hostile RSS headline
+        # like `=HYPERLINK(...)` / `+cmd|'/C calc'!A0` can't execute when the
+        # analyst opens the export in a spreadsheet (CWE-1236).
+        from .archive import _csv_safe
+
         fields = (
             "capture_id", "title", "domain", "url", "published_ts", "created_at",
             "is_finance_relevant", "finance_relevance_score",
@@ -565,6 +583,7 @@ def cli_export(
             "asset_classes", "impact_reason_codes", "candidate_symbols",
             "processing_mode",
         )
+        _text_fields = ("title", "domain", "url", "asset_classes", "impact_reason_codes", "candidate_symbols")
         buf = StringIO()
         writer = csv.DictWriter(buf, fieldnames=list(fields), extrasaction="ignore")
         writer.writeheader()
@@ -574,6 +593,10 @@ def cli_export(
                 v = row.get(list_field)
                 if isinstance(v, list):
                     row[list_field] = ";".join(str(x) for x in v)
+            for tf in _text_fields:
+                v = row.get(tf)
+                if isinstance(v, str):
+                    row[tf] = _csv_safe(v)
             writer.writerow(row)
         target.write_text(buf.getvalue(), encoding="utf-8")
 

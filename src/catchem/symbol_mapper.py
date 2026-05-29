@@ -169,14 +169,19 @@ class SymbolMapper:
                 sym = self._aliases[alias]
                 if sym in seen:
                     continue
-                # Word-boundary re-validation: fuzz.partial_ratio scores a
-                # perfect 100 when the alias is a contiguous SUBSTRING of the
-                # text, so a >=5-char alias buried inside an unrelated word
-                # (Brentwood→"Brent", Disneyland→"Disney", Appleton→"Apple")
-                # would otherwise fabricate a false ticker. The alias_exact
-                # path already guards this via _alias_exact_patterns; apply the
-                # same token-boundary check here before accepting a fuzzy hit.
-                if not _alias_pattern(alias.lower()).search(lc):
+                # Reject ONLY the substring-in-a-longer-word false positive,
+                # without killing genuine spelling-drift hits. fuzz.partial_ratio
+                # returns exactly 100 when the alias is a contiguous substring of
+                # the text — that's either (a) a real word-bounded mention (then
+                # the alias_exact pass already matched it and `sym in seen`
+                # skipped us above) or (b) the alias buried inside a longer word
+                # (Brentwood→"Brent", Disneyland→"Disney"), which we must drop.
+                # So apply the word-boundary check ONLY at score==100; a sub-100
+                # fuzzy score is real drift (Microsft→MSFT, Goldmann→GS) and the
+                # verbatim alias won't appear token-bounded, so requiring it
+                # there would (and previously did) make the whole fuzzy path
+                # dead. See round-5 regression finding.
+                if score >= 100.0 and not _alias_pattern(alias.lower()).search(lc):
                     continue
                 seen.add(sym)
                 out.append(SymbolMatch(text=alias, symbol=sym, score=score / 100.0, source="alias_fuzzy"))

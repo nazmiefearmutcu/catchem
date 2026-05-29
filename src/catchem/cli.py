@@ -57,15 +57,13 @@ def replay(
 ) -> None:
     """Replay a single JSONL file or the default Awareness root."""
     s = load_settings()
-    if path:
-        # Point the data dir at the file's parent for one-shot use
-        import os
-        os.environ["CATCHEM_PATHS__AWARENESS_DATA_DIR"] = str(path.parent)
-        reload_settings()
-        s = load_settings()
     sup = Supervisor(s)
     try:
-        counts = sup.run_replay(max_records=max_records)
+        # `--path FILE` honors the single-file contract: only that exact file
+        # is replayed. We pass it straight through to run_replay rather than
+        # redirecting the data dir at its parent (which swept in every sibling
+        # *.jsonl under the directory — the opposite of "single file").
+        counts = sup.run_replay(max_records=max_records, file=path if path else None)
         typer.echo(json.dumps(counts))
     finally:
         sup.close()
@@ -369,7 +367,7 @@ def cli_bench(
     try:
         svc = build_service(settings)
         rep = run_benchmark(svc, items)
-    except Exception as exc:  # noqa: BLE001 — surface any bench error as exit-1
+    except Exception as exc:
         typer.echo(f"error: benchmark failed: {exc}", err=True)
         raise typer.Exit(1) from exc
 
@@ -454,7 +452,7 @@ def cli_search(
         engine = QuantEngine(storage=sup2.storage)
         try:
             cs = engine.clusters(limit=2000)
-        except Exception:  # noqa: BLE001 — quant cluster compute is optional
+        except Exception:
             cs = []
         for c in cs[:200]:
             cid = (c.cluster_id or "").lower()
@@ -959,6 +957,7 @@ def cli_watch(
     up under abuse. 0.5s floor matches the rate-limit bucket cadence.
     """
     import time
+
     from .migrations import current_version
 
     storage = _open_storage()
@@ -967,7 +966,7 @@ def cli_watch(
         while True:
             tick_n += 1
             # Fetch fresh data each tick
-            with storage._lock, storage._connection() as conn:  # noqa: SLF001
+            with storage._lock, storage._connection() as conn:
                 rec_count = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
                 try:
                     tag_count = conn.execute("SELECT COUNT(*) FROM record_tags").fetchone()[0]
@@ -1016,7 +1015,7 @@ def cli_db_stats(
     """
     storage = _open_storage()
     try:
-        with storage._lock, storage._connection() as conn:  # noqa: SLF001
+        with storage._lock, storage._connection() as conn:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             ).fetchall()
@@ -1479,7 +1478,7 @@ def cli_status(
 
     storage = _open_storage()
     try:
-        with storage._lock, storage._connection() as conn:  # noqa: SLF001 (read-only)
+        with storage._lock, storage._connection() as conn:
             records = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
             try:
                 tags = conn.execute("SELECT COUNT(*) FROM record_tags").fetchone()[0]

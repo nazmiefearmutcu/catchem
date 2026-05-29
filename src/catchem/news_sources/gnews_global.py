@@ -54,7 +54,7 @@ _LOCALE_QUERIES: tuple[tuple[str, str, str, str, str], ...] = (
     ("zh", "zh-Hans", "CN", "CN:zh-Hans", "股市 OR 经济"),
     ("es", "es", "ES", "ES:es", "bolsa OR economía"),
     ("es-mx", "es-419", "MX", "MX:es-419", "bolsa OR economía"),
-    ("pt", "pt-BR", "BR", "BR:pt-419", "bolsa OR economia"),
+    ("pt", "pt-BR", "BR", "BR:pt-BR", "bolsa OR economia"),
     ("it", "it", "IT", "IT:it", "borsa OR economia OR azioni"),
     ("ko", "ko", "KR", "KR:ko", "증시 OR 경제 OR 코스피"),
     ("ar", "ar", "SA", "SA:ar", "البورصة OR الاقتصاد"),

@@ -153,8 +153,8 @@ export function ToastTray() {
           key={toast.id}
           toast={toast}
           phase={phase}
-          onOpen={() => handleOpen(toast)}
-          onDismiss={() => beginDismiss(toast)}
+          onOpen={handleOpen}
+          onDismiss={beginDismiss}
         />
       ))}
     </div>
@@ -207,8 +207,8 @@ function ToastItem({
 }: {
   toast: ArrivalToast;
   phase: "enter" | "exit";
-  onOpen: () => void;
-  onDismiss: () => void;
+  onOpen: (t: ArrivalToast) => void;
+  onDismiss: (t: ArrivalToast) => void;
 }) {
   const sev = severityFor(toast);
   const ttl = TOAST_TTL_BY_SEVERITY[sev];
@@ -221,6 +221,17 @@ function ToastItem({
   const [paused, setPaused] = useState(false);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The auto-dismiss timer must NOT reset on every parent re-render. We read
+  // `toast`/`onDismiss` through a ref inside the timer callback so the effect
+  // can depend on the stable `toast.id` instead of the per-render `toast`
+  // object identity. Earlier this effect depended on an inline `onDismiss`
+  // closure that the parent recreated each render; during a burst (other
+  // toasts entering/leaving exit) that cleared the pending timeout and
+  // re-scheduled a full-TTL timer, so a still-visible toast lingered far past
+  // its tone-based TTL.
+  const fireRef = useRef<() => void>(() => {});
+  fireRef.current = () => onDismiss(toast);
+
   useEffect(() => {
     // If we're in the exit phase, the parent owns cleanup; don't fight it.
     if (phase === "exit") return;
@@ -229,13 +240,15 @@ function ToastItem({
     // Reduced-motion users still get auto-dismiss — they asked for less
     // motion, not less behavior. They just don't get the long lingering
     // critical-arrival glow.
-    const handle = setTimeout(() => onDismiss(), ttl);
+    const handle = setTimeout(() => fireRef.current(), ttl);
     dismissTimer.current = handle;
     return () => {
       clearTimeout(handle);
       dismissTimer.current = null;
     };
-  }, [paused, phase, sticky, ttl, onDismiss]);
+    // toast.id (not the toast object) keeps the timer stable across the
+    // parent's re-renders; fireRef always sees the freshest onDismiss/toast.
+  }, [paused, phase, sticky, ttl, toast.id]);
 
   // Build the animation class. In reduced-motion mode the keyframes
   // collapse to instant via globals.css media-query override
@@ -256,7 +269,7 @@ function ToastItem({
     >
       <button
         type="button"
-        onClick={onOpen}
+        onClick={() => onOpen(toast)}
         className="block w-full text-left px-3 py-2 pr-8"
         title="Open record"
       >
@@ -277,7 +290,7 @@ function ToastItem({
       </button>
       <button
         type="button"
-        onClick={onDismiss}
+        onClick={() => onDismiss(toast)}
         aria-label="Dismiss"
         className="absolute top-1 right-1 inline-flex items-center justify-center text-[color:var(--fg-muted)] hover:text-[color:var(--fg)] p-1 leading-none"
       >

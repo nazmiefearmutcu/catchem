@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .schemas import AwarenessCaptureView
-from .settings import Settings, load_settings, reload_settings
+from .settings import Settings, load_settings
 from .supervisor import Supervisor
 
 
@@ -126,7 +126,13 @@ def run_demo(
     this one call.
     """
     if settings is None:
-        reload_settings()
+        # Reuse the cached Settings rather than evicting the process-global
+        # lru_cache. The previous `reload_settings()` here cleared the cache
+        # that every concurrent request / the news poller / the ws_push reader
+        # relies on, forcing them to re-parse YAML+env+.env on their next
+        # load_settings() — a global side effect that contradicted this path's
+        # stated isolation goal (the demo path swap is already process-local
+        # via the model_copy below, so no fresh read is needed).
         settings = load_settings()
 
     # Default to a demo-input subdir under the catchem output so we never

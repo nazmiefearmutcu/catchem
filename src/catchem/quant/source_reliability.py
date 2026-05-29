@@ -22,14 +22,15 @@ composite_score is the equal-weight mean, clamped to [0, 1].
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import log
-from typing import Any, Iterable
+from typing import Any
 
 __all__ = [
-    "SourceScore",
     "SourceLeaderboard",
+    "SourceScore",
     "compute_source_scores",
 ]
 
@@ -88,8 +89,8 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _record_ts(rec: dict[str, Any]) -> datetime | None:
@@ -161,7 +162,7 @@ def compute_source_scores(
         )
 
     # ── window filter ──
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(days=window_days)
 
     in_window: list[dict] = []

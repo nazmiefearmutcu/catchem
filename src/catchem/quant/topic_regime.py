@@ -27,9 +27,10 @@ records and produces deterministic output for a given input.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 __all__ = [
     "RegimeBucket",
@@ -105,9 +106,9 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     else:
-        parsed = parsed.astimezone(timezone.utc)
+        parsed = parsed.astimezone(UTC)
     return parsed
 
 
@@ -126,7 +127,7 @@ def _floor_bucket(ts: datetime, bucket_minutes: int) -> datetime:
     two reports built from overlapping data will share boundaries.
     """
 
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
     delta = ts - epoch
     bucket_seconds = bucket_minutes * 60
     floor_seconds = (int(delta.total_seconds()) // bucket_seconds) * bucket_seconds

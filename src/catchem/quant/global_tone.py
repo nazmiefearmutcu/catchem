@@ -183,6 +183,7 @@ def _empty_summary(now: datetime) -> dict[str, Any]:
         "tone_slope": 0.0,
         "tone_state": "stable",
         "n_points": 0,
+        "n_dated_points": 0,
         "generated_at": now.isoformat(),
     }
 
@@ -217,7 +218,11 @@ def summarize_tone(
                           whole series (amplitude-free trend direction).
         ``tone_state``  — ``"improving" | "deteriorating" | "stable"`` keyed
                           on ``tone_trend`` vs ``±_STATE_THRESHOLD``.
-        ``n_points``    — count of valid points.
+        ``n_points``    — count of valid points (dated + undated).
+        ``n_dated_points``— count of points backing the ordered trend/latest
+                          sequence (dated points only, or all points when
+                          none are dated). ``tone_trend`` is only meaningful
+                          when this is ``>= 2``.
         ``generated_at``— ISO timestamp from ``now``.
 
     Never raises on bad input — an empty or all-malformed timeline yields a
@@ -279,6 +284,13 @@ def summarize_tone(
         "tone_slope": round(tone_slope, 6),
         "tone_state": tone_state,
         "n_points": n,
+        # Count of points that produced the ordered (trend/latest) sequence —
+        # dated points only (or all points when none are dated, matching the
+        # fallback above). tone_trend is only meaningful when this is >= 2;
+        # compute_global_tone filters on it so a series with many undated
+        # points but < 2 dated points doesn't fold a spurious 0.0 trend into
+        # the overall rollup.
+        "n_dated_points": m,
         "generated_at": resolved_now.isoformat(),
     }
 
@@ -435,7 +447,11 @@ async def compute_global_tone(
     trends = [
         s["tone_trend"]
         for s in by_theme.values()
-        if s.get("n_points", 0) >= 2
+        # Gate on the count of points that actually produced the trend
+        # (dated points only). A theme with many undated points but < 2
+        # dated points has a meaningless 0.0 tone_trend that must not be
+        # averaged into the overall rollup.
+        if s.get("n_dated_points", 0) >= 2
     ]
 
     overall_tone = round(statistics.fmean(latests), 4) if latests else None

@@ -220,11 +220,23 @@ def compute_novelty(record: dict, corpus: list[dict]) -> NoveltyResult:
     """
 
     target = _features(record)
-    others = [
-        _features(r)
-        for r in corpus
-        if str(r.get("capture_id") or "") != target.capture_id
-    ]
+    # Exclude exactly ONE self-match, not every row whose capture_id equals
+    # the target's. Excluding by value collapses for empty/missing ids: an
+    # empty target id would str()-equal every other id-less row and wrongly
+    # drop genuine near-duplicates, reporting them as fully novel. Mirror
+    # score_corpus's index-based single exclusion instead: skip the first row
+    # that IS the target (by object identity, falling back to a non-empty
+    # capture_id match) and keep the rest.
+    others: list[_Features] = []
+    self_dropped = False
+    for r in corpus:
+        if not self_dropped and (
+            r is record
+            or (target.capture_id and str(r.get("capture_id") or "") == target.capture_id)
+        ):
+            self_dropped = True
+            continue
+        others.append(_features(r))
     return _result_from(target, others)
 
 

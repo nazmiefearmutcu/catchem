@@ -37,6 +37,7 @@ Output shape (stable contract)::
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -187,6 +188,15 @@ def find_coverage_gaps(
     # Per-term running state: in-window mention count + freshest age (seconds).
     mention_count: dict[str, int] = {lc: 0 for lc in term_lc}
     best_age: dict[str, float | None] = {lc: None for lc in term_lc}
+    # Free-text matching is on WORD BOUNDARIES, not bare substring: a short
+    # ticker like ``T``/``ON``/``GE`` must not be flagged covered just because
+    # the letters appear inside an unrelated word ("Boston", "change"). This
+    # restores the module's documented exact-symbol contract for the free-text
+    # branch while still catching multi-word keyword terms. The exact
+    # set-membership test against the symbol fields is kept unchanged.
+    text_pat: dict[str, re.Pattern[str]] = {
+        lc: re.compile(rf"\b{re.escape(lc)}\b") for lc in term_lc
+    }
 
     for record in records or []:
         if not isinstance(record, dict):
@@ -203,7 +213,7 @@ def find_coverage_gaps(
         if not text_blob and not symbols:
             continue
         for lc in term_lc:
-            matched = (lc in text_blob) or (lc in symbols)
+            matched = (lc in symbols) or bool(text_pat[lc].search(text_blob))
             if not matched:
                 continue
             mention_count[lc] += 1

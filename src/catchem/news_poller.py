@@ -593,7 +593,17 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
     # Atom: <feed><entry>...</entry></feed>
     for entry in root.iter(f"{{{_NS['atom']}}}entry"):
         title_el = entry.find("atom:title", _NS)
-        link_el = entry.find("atom:link", _NS)
+        # Atom entries routinely carry several <link> children (rel='self',
+        # 'edit', 'enclosure', 'alternate'). The canonical article URL is the
+        # rel='alternate' one (or the rel-less default); .find() returns only
+        # the FIRST child, which is frequently a self/edit/enclosure link.
+        # Prefer alternate so the item url — and the dedup key + capture_id
+        # built from it — points at the real story.
+        links = entry.findall("atom:link", _NS)
+        link_el = next(
+            (lk for lk in links if lk.attrib.get("rel") in (None, "", "alternate")),
+            links[0] if links else None,
+        )
         link = ""
         if link_el is not None:
             link = (link_el.attrib.get("href") or link_el.text or "").strip()
@@ -642,7 +652,12 @@ async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFe
         resp = await client.get(
             spec.url,
             headers={"User-Agent": _USER_AGENT, "Accept": accept},
-            timeout=12.0,
+            # Pass the pinned client timeout explicitly: httpx applies any
+            # request-level timeout in preference to the client default, so a
+            # bare float here (was 12.0) would silently expand every phase to
+            # 12s and let one stalled feed outlast the 10s poll interval. Reuse
+            # _HTTPX_TIMEOUT to keep connect=3/read=5 in force per fetch.
+            timeout=_HTTPX_TIMEOUT,
             follow_redirects=True,
         )
         elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -836,8 +851,13 @@ class NewsPoller:
             # Poller hasn't entered its main loop yet; create an ephemeral
             # client so the manual trigger still works during startup grace.
             # Explicit timeout: a slow feed must not stall the manual button.
-            async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
-                return await self._run_one_tick(client)
+            # The lock is held here too — two grace-window presses (or a press
+            # racing the first background tick the instant grace ends) would
+            # otherwise run unlocked ticks that corrupt the shared _seen /
+            # _seen_titles OrderedDicts, feed_health, and total_ingested.
+            async with self._lock:
+                async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
+                    return await self._run_one_tick(client)
         async with self._lock:
             return await self._run_one_tick(self._client)
 

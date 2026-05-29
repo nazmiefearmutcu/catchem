@@ -174,6 +174,13 @@ class Storage:
 
         self._lock = threading.RLock()
         self._pending_rows: list[dict[str, Any]] = []
+        # Monotonic flush sequence: the parquet filename used to key only on
+        # whole-second epoch + row count, so two flushes in the same second
+        # with the same pending count (e.g. close() right after a rotate, or
+        # small rotate thresholds in tests) collided and the second silently
+        # overwrote the first batch. The ever-increasing sequence guarantees
+        # a unique filename per flush regardless of clock resolution.
+        self._parquet_seq = 0
         self._init_db()
 
     # ── DB --------------------------------------------------------------------
@@ -286,13 +293,33 @@ class Storage:
         False when an existing record was replaced.
         """
         with self._lock, self._connection() as conn:
+            # Explicit transaction. The connection runs with
+            # ``isolation_level=None`` (autocommit), under which the
+            # surrounding ``with conn:`` context manager's commit/rollback
+            # are no-ops because no transaction is open — so a failure
+            # midway through this multi-statement write (records + the
+            # record_labels rebuild + model_versions) would otherwise leave
+            # the inverted index inconsistent with the row. Issuing BEGIN
+            # opens a real transaction so ``with conn:`` rolls the whole
+            # write back atomically on any error and commits it as a unit.
+            conn.execute("BEGIN")
             existed = conn.execute(
                 "SELECT 1 FROM records WHERE capture_id = ?",
                 (rec.capture_id,),
             ).fetchone() is not None
+            # UPSERT (not INSERT OR REPLACE). REPLACE resolves a PK conflict
+            # by DELETE-then-INSERT, and because ``PRAGMA foreign_keys=ON``
+            # is set on every connection, that implicit DELETE cascades
+            # through ``record_tags`` (ON DELETE CASCADE, migration v2) and
+            # silently wipes every user-applied tag on the capture. Since
+            # re-processing a capture_id is a routine, documented operation
+            # (replay, live-tail re-poll, demo), the analyst's tags vanished
+            # on every reprocess. ON CONFLICT ... DO UPDATE updates the row
+            # in place — no DELETE, so the cascade never fires and tags
+            # survive.
             conn.execute(
                 """
-                INSERT OR REPLACE INTO records (
+                INSERT INTO records (
                     capture_id, doc_id, title, text_excerpt, domain, language,
                     is_finance_relevant, finance_relevance_score,
                     asset_classes_json, impact_reason_codes_json,
@@ -304,6 +331,31 @@ class Storage:
                     processing_mode, model_versions_json,
                     published_ts, created_at, url
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(capture_id) DO UPDATE SET
+                    doc_id=excluded.doc_id,
+                    title=excluded.title,
+                    text_excerpt=excluded.text_excerpt,
+                    domain=excluded.domain,
+                    language=excluded.language,
+                    is_finance_relevant=excluded.is_finance_relevant,
+                    finance_relevance_score=excluded.finance_relevance_score,
+                    asset_classes_json=excluded.asset_classes_json,
+                    impact_reason_codes_json=excluded.impact_reason_codes_json,
+                    candidate_symbols_json=excluded.candidate_symbols_json,
+                    candidate_entities_json=excluded.candidate_entities_json,
+                    impact_horizons_json=excluded.impact_horizons_json,
+                    sentiment_label=excluded.sentiment_label,
+                    sentiment_score=excluded.sentiment_score,
+                    evidence_json=excluded.evidence_json,
+                    reason_text=excluded.reason_text,
+                    component_scores_json=excluded.component_scores_json,
+                    diagnostic_enabled=excluded.diagnostic_enabled,
+                    diagnostic_json=excluded.diagnostic_json,
+                    processing_mode=excluded.processing_mode,
+                    model_versions_json=excluded.model_versions_json,
+                    published_ts=excluded.published_ts,
+                    created_at=excluded.created_at,
+                    url=excluded.url
                 """,
                 (
                     rec.capture_id,
@@ -373,7 +425,11 @@ class Storage:
             return
         table = pa.Table.from_pylist(self._pending_rows)
         now = datetime.now(UTC)
-        path = self.parquet_dir / f"records-{int(now.timestamp())}-{len(self._pending_rows):05d}.parquet"
+        self._parquet_seq += 1
+        path = (
+            self.parquet_dir
+            / f"records-{int(now.timestamp())}-{self._parquet_seq:06d}-{len(self._pending_rows):05d}.parquet"
+        )
         pq.write_table(table, path)
         logger.info("parquet_flushed", path=str(path), rows=len(self._pending_rows))
         self._pending_rows.clear()
@@ -881,12 +937,30 @@ def _row_to_review(r: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resolve_storage_dir(out_dir: Path, value: str) -> Path:
+    """Resolve a configured storage subdir the way :meth:`Settings.sqlite_path` does.
+
+    A ``data/...``-prefixed value is rebased under the output dir; an absolute
+    path is used verbatim; anything else is treated as relative to the output
+    dir's parent. This mirrors the ``sqlite_path`` guard so an operator override
+    that doesn't start with ``data/`` yields a usable path instead of a bare
+    ``ValueError`` from ``Path.relative_to`` (the two code paths previously
+    disagreed: sqlite_path tolerated it, this builder crashed).
+    """
+    p = Path(value)
+    if str(p).startswith("data/"):
+        return out_dir / p.relative_to("data")
+    if p.is_absolute():
+        return p
+    return out_dir.parent / p
+
+
 def load_storage_from_settings(settings: Any) -> Storage:
     """Helper: build a Storage from a Settings object."""
     out_dir = settings.paths.catchem_output_dir
     return Storage(
         db_path=settings.sqlite_path(),
-        parquet_dir=out_dir / Path(settings.storage.parquet_results_dir).relative_to("data"),
-        dlq_dir=out_dir / Path(settings.storage.dlq_dir).relative_to("data"),
+        parquet_dir=_resolve_storage_dir(out_dir, settings.storage.parquet_results_dir),
+        dlq_dir=_resolve_storage_dir(out_dir, settings.storage.dlq_dir),
         rotate_parquet_records=settings.storage.rotate_parquet_records,
     )

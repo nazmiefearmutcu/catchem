@@ -87,6 +87,13 @@ class EmbedderStub:
         return self._vec(text or "")
 
     def encode_many(self, texts: Iterable[str]) -> np.ndarray:
+        # `texts` is typed Iterable[str]; a generator/iterator is ALWAYS truthy
+        # regardless of whether it yields anything, so the old `if texts` guard
+        # let an empty generator fall through to np.stack([]) ("need at least
+        # one array to stack"). Materialize first, then test length so the
+        # empty-check is correct for any iterable and the generator isn't
+        # double-consumed.
+        texts = list(texts)
         return np.stack([self.encode(t) for t in texts]) if texts else np.zeros((0, EMBED_DIM_STUB), dtype=np.float32)
 
 
@@ -107,7 +114,14 @@ class EmbedderModel:
         return self._model.encode(text or "", normalize_embeddings=True)
 
     def encode_many(self, texts: Iterable[str]) -> np.ndarray:
-        return self._model.encode(list(texts), normalize_embeddings=True, convert_to_numpy=True)
+        # Materialize and guard the empty case explicitly. SentenceTransformer
+        # returns a 1-D `(0,)` array (not the documented `(0, DIM)`) for an
+        # empty list, which breaks callers that stack/iterate the result.
+        items = list(texts)
+        if not items:
+            dim = int(getattr(self._model, "get_sentence_embedding_dimension", lambda: 384)() or 384)
+            return np.zeros((0, dim), dtype=np.float32)
+        return self._model.encode(items, normalize_embeddings=True, convert_to_numpy=True)
 
 
 def make_embedder(model_name: str, use_stub: bool) -> Embedder:
@@ -120,6 +134,16 @@ def make_embedder(model_name: str, use_stub: bool) -> Embedder:
 
 
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
+    # The on-disk vector pool is a flat, un-namespaced set of <capture_id>.npy
+    # files. If the index accumulated vectors under one embedder (stub = 64-dim)
+    # and the process later runs the other (MiniLM = 384-dim) — via a config
+    # flip, ML extras (un)installed, or make_embedder's silent stub<->model
+    # fallback — a stale-dim file would make np.dot raise
+    # "shapes (384,) and (64,) not aligned" and take down the whole nearest()
+    # query. Treat a dimensionality mismatch as zero similarity so a stale file
+    # ranks last instead of crashing the sweep.
+    if a.shape != b.shape:
+        return 0.0
     na = float(np.linalg.norm(a)) or 1.0
     nb = float(np.linalg.norm(b)) or 1.0
     return float(np.dot(a, b) / (na * nb))
@@ -186,6 +210,23 @@ class VectorIndex:
         # Cache the write so the next nearest() doesn't have to re-read it
         # from disk just to score it.
         self._cache_put(capture_id, as_f32)
+
+    def delete(self, capture_id: str) -> None:
+        """Drop a vector's durable .npy file and its cache entry.
+
+        Best-effort: a missing file is fine (already gone / never written).
+        Called by DriveArchiver when a record is drained out of SQLite —
+        without this the durable disk store grows without bound forever while
+        the working SQLite set stays tiny, and nearest()'s first-query
+        glob('*.npy') eventually walks hundreds of thousands of orphaned
+        vectors (the exact "N disk seeks per call" BUG-DD claims to have
+        fixed).
+        """
+        path = self.root / f"{capture_id}.npy"
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        with self._cache_lock:
+            self._cache.pop(capture_id, None)
 
     def load(self, capture_id: str) -> np.ndarray | None:
         with self._cache_lock:

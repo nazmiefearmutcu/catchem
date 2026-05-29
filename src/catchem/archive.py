@@ -132,6 +132,28 @@ def csv_path_for_today(root: Path) -> Path:
     return root / f"news_archive_{today}.csv"
 
 
+def _archived_capture_ids(csv_path: Path) -> set[str]:
+    """Return the set of capture_ids already present in an archive CSV.
+
+    Used to make the append idempotent: if a DELETE failed after the CSV
+    fsync on a previous tick, those rows are still in SQLite and would be
+    re-appended; skipping the capture_ids already on disk prevents the
+    duplicate. Best-effort — a missing/corrupt file yields an empty set so
+    the worst case degrades to the old (non-idempotent) behaviour rather
+    than crashing the sweep."""
+    seen: set[str] = set()
+    try:
+        with csv_path.open("r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                cid = (row.get("capture_id") or "").strip()
+                if cid:
+                    seen.add(cid)
+    except (OSError, csv.Error):
+        return set()
+    return seen
+
+
 def _list_from_json(raw: str | None) -> str:
     if not raw:
         return ""
@@ -451,9 +473,20 @@ class DriveArchiver:
                 # CSV path. Must come AFTER the fallback may have swapped drive_dir,
                 # otherwise we'd try to open the original (blocked) path.
                 csv_path = csv_path_for_today(self._drive_dir)
-                self.current_csv_path = csv_path
                 try:
                     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
+                    # CSV-vs-DELETE is NOT one transaction: the CSV bytes are
+                    # fsync'd to the OS filesystem below, but the DELETE runs
+                    # inside the `with conn:` SQLite transaction that rolls back
+                    # on ANY exception (db locked on a busy WAL, SQLITE_FULL,
+                    # etc.). If a DELETE chunk raises AFTER the fsync, the rows
+                    # survive in SQLite but the CSV row is already durable —
+                    # the next tick re-SELECTs the same rows and would append
+                    # them to the SAME daily file AGAIN. Defuse that by making
+                    # the append idempotent: read back the capture_ids already
+                    # present in today's CSV and skip them. Read-back (not an
+                    # in-memory set) so it also dedups across a process restart.
+                    already_written = _archived_capture_ids(csv_path) if file_exists else set()
                     # Open in binary+text-mode-equivalent with newline="" — required
                     # so csv.writer handles line endings correctly across platforms.
                     with csv_path.open("a", newline="", encoding="utf-8") as f:
@@ -461,12 +494,19 @@ class DriveArchiver:
                         if not file_exists:
                             writer.writeheader()
                         for row in rows:
+                            if (row.get("capture_id") or "") in already_written:
+                                continue
                             writer.writerow(row_to_csv_dict(row))
                         f.flush()
                         # fsync at the file-descriptor level guarantees the data is
                         # actually on disk before we delete locally. Without this,
                         # a crash between write() and the OS flush would lose rows.
                         os.fsync(f.fileno())
+                    # Only NOW is the CSV durable, so it's safe to surface its path
+                    # as the live target. Setting current_csv_path BEFORE the write
+                    # meant the /ui/archive-status surface reported a path that was
+                    # never actually written on the OSError failure path below.
+                    self.current_csv_path = csv_path
                 except OSError as exc:
                     # Don't delete locally on any I/O failure. Try again next tick.
                     return ArchiveResult(
@@ -502,6 +542,20 @@ class DriveArchiver:
                         f"DELETE FROM records WHERE capture_id IN ({placeholders})",
                         chunk,
                     )
+
+            # The `with conn:` transaction has now committed the DELETEs, so
+            # these capture_ids are gone from SQLite for good. Drop their
+            # durable .npy vectors too — service.py saves one per ingested
+            # record but nothing else ever deletes them, so without this the
+            # vector_index dir grows without bound and cold nearest() queries
+            # glob over an ever-larger orphaned pool. Best-effort: a missing
+            # file or an absent vector index must never fail the sweep (the
+            # rows are already archived + deleted).
+            vector_index = getattr(self._sup, "vector_index", None)
+            if vector_index is not None:
+                for cid in archived_ids:
+                    with contextlib.suppress(Exception):
+                        vector_index.delete(cid)
 
             self.last_run_at = datetime.now(UTC)
             return ArchiveResult(archived=len(rows), csv_path=csv_path, error=None)

@@ -14,8 +14,9 @@ import threading
 import time
 import traceback
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
-from typing import Any, Callable
+from typing import Any
 
 from ..logging import get_logger
 from ..market_data import LocalFixtureMarketDataProvider, MarketQuote
@@ -61,7 +62,7 @@ class _QuoteAdapter:
 # truncated traceback head, wall-clock seconds spent before failure,
 # and an ISO-ish timestamp. `_diagnostics_snapshot()` reads it for the
 # /api/quant/diagnostics endpoint.
-_SIGNAL_FAILURES: "deque[dict[str, Any]]" = deque(maxlen=50)
+_SIGNAL_FAILURES: deque[dict[str, Any]] = deque(maxlen=50)
 _SIGNAL_FAILURES_LOCK = threading.Lock()
 
 

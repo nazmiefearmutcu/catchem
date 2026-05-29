@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from ..logging import get_logger
@@ -23,11 +25,20 @@ from ..service import CatchemService
 from ..settings import Settings
 from ..storage import Storage
 from ..taxonomy import Taxonomy
-from .base import REVIEWER_DEEPSEEK, ReviewPayload, Reviewer, ReviewerError
+from .base import REVIEWER_DEEPSEEK, Reviewer, ReviewerError, ReviewPayload
 from .deepseek import DeepSeekReviewer
 from .stub import StubReviewer
 
 logger = get_logger("catchem.reviewers.registry")
+
+# Synthetic reviewer_id for the durable spend ledger written by the narrative
+# / live-read / stream paths. These paths spend real DeepSeek money via
+# `add_spend()` but never persist a `reviews` row, so without a durable record
+# their spend would be lost the moment `invalidate_budget_cache()` fires (every
+# PATCH /api/reviews/settings) — letting actual spend silently exceed usd_cap.
+# Using a *distinct* id keeps these rows out of the stub↔deepseek compare joins
+# while still being summable via `Storage.sum_review_cost`.
+REVIEWER_DEEPSEEK_NARRATIVE = "deepseek_narrative"
 
 
 @dataclass
@@ -130,23 +141,53 @@ class ReviewerRegistry:
         return not self.budget_state().exhausted
 
     # ── budget accounting ────────────────────────────────────────────────
+    def _durable_spent_usd(self) -> float:
+        """Total durable DeepSeek spend across both persisted reviews and the
+        narrative spend ledger — must aggregate every USD spend or the cap is
+        bypassable after a cache invalidation."""
+        return float(
+            self._storage.sum_review_cost(REVIEWER_DEEPSEEK)
+        ) + float(self._storage.sum_review_cost(REVIEWER_DEEPSEEK_NARRATIVE))
+
     def budget_state(self) -> BudgetState:
         cap = float(self._settings.reviewers.deepseek.usd_cap)
         with self._lock:
             if self._cached_spent_usd is None:
-                self._cached_spent_usd = float(
-                    self._storage.sum_review_cost(REVIEWER_DEEPSEEK)
-                )
+                self._cached_spent_usd = self._durable_spent_usd()
             return BudgetState(spent_usd=self._cached_spent_usd, cap_usd=cap)
 
     def add_spend(self, usd: float) -> None:
-        """Increment the cached spend after a successful DeepSeek call."""
+        """Account for spend after a successful DeepSeek call.
+
+        Persists a durable ledger row (distinct ``deepseek_narrative``
+        reviewer_id, unique synthetic capture_id so rows accumulate rather
+        than overwrite) *before* bumping the in-memory cache. This keeps the
+        spend on disk so `invalidate_budget_cache()` → `budget_state()` can
+        rebuild the true cumulative spend from SQLite and the usd_cap stays
+        enforced even for the narrative / live-read / stream paths that never
+        write a normal review row.
+        """
+        amount = max(0.0, float(usd))
         with self._lock:
-            if self._cached_spent_usd is None:
-                self._cached_spent_usd = float(
-                    self._storage.sum_review_cost(REVIEWER_DEEPSEEK)
+            if amount > 0:
+                self._storage.upsert_review(
+                    {
+                        "capture_id": f"spend-{uuid.uuid4().hex}",
+                        "reviewer_id": REVIEWER_DEEPSEEK_NARRATIVE,
+                        "reviewer_version": "deepseek-narrative-ledger",
+                        "payload_json": {"kind": "spend_ledger"},
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "usd_cost": amount,
+                        "latency_ms": 0,
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "error_code": None,
+                    }
                 )
-            self._cached_spent_usd += max(0.0, float(usd))
+            if self._cached_spent_usd is None:
+                self._cached_spent_usd = self._durable_spent_usd()
+            else:
+                self._cached_spent_usd += amount
 
     def invalidate_budget_cache(self) -> None:
         """Drop the cached spend so the next `budget_state` reads SQLite."""
@@ -241,6 +282,7 @@ def build_default_registry(
 
 
 __all__ = [
+    "REVIEWER_DEEPSEEK_NARRATIVE",
     "BudgetState",
     "ReviewerRegistry",
     "build_default_registry",

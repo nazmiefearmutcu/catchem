@@ -18,11 +18,11 @@ Design priorities:
 """
 
 from .base import (
-    REVIEWER_STUB,
     REVIEWER_DEEPSEEK,
+    REVIEWER_STUB,
+    Reviewer,
     ReviewerError,
     ReviewPayload,
-    Reviewer,
     record_to_review_payload,
 )
 from .deepseek import DeepSeekReviewer
@@ -30,13 +30,13 @@ from .registry import ReviewerRegistry, build_default_registry
 from .stub import StubReviewer
 
 __all__ = [
-    "REVIEWER_STUB",
     "REVIEWER_DEEPSEEK",
+    "REVIEWER_STUB",
     "DeepSeekReviewer",
+    "ReviewPayload",
     "Reviewer",
     "ReviewerError",
     "ReviewerRegistry",
-    "ReviewPayload",
     "StubReviewer",
     "build_default_registry",
     "record_to_review_payload",

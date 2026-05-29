@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 __all__ = [
     "SymbolPair",
@@ -37,6 +37,12 @@ class SymbolPair:
     b_total: int
 
 
+# Upper bound on the dense bucket grid so a stale outlier timestamp can't
+# allocate one slot per empty bucket across an unbounded span. ~20k buckets
+# = ~830 days at the 60-minute default — far beyond any realistic window.
+_MAX_GRID_BUCKETS = 20_000
+
+
 def _pearson(xs: list[float], ys: list[float]) -> float:
     """Sample Pearson r over two equal-length vectors.
 
@@ -49,7 +55,7 @@ def _pearson(xs: list[float], ys: list[float]) -> float:
         return 0.0
     mx = sum(xs) / n
     my = sum(ys) / n
-    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
     vx = sum((x - mx) ** 2 for x in xs)
     vy = sum((y - my) ** 2 for y in ys)
     denom = math.sqrt(vx * vy)
@@ -79,9 +85,9 @@ def _parse_ts(value: object) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     else:
-        parsed = parsed.astimezone(timezone.utc)
+        parsed = parsed.astimezone(UTC)
     return parsed
 
 
@@ -151,13 +157,26 @@ def compute_pairs(
     if len(eligible) < 2:
         return []
 
-    # Build per-symbol vectors across all buckets (dense, zero-filled
-    # for buckets where a symbol wasn't mentioned). Without zero-fill a
-    # quiet bucket would silently shorten the series and Pearson r
-    # would lose its temporal anchor.
-    sorted_bucket_keys = sorted(buckets.keys())
+    # Build per-symbol vectors across a DENSE bucket grid spanning the full
+    # observed window — every bucket between min and max, zero-filled where a
+    # symbol wasn't mentioned. Earlier this iterated only sorted(buckets.keys())
+    # i.e. the NON-EMPTY buckets, which collapsed the time axis: two symbols
+    # surging in completely separate, distant periods landed in adjacent vector
+    # positions and produced a spurious (often ±1.0) Pearson r that sorted to
+    # the top of the panel. A dense grid preserves the temporal anchor — the
+    # same approach spillover._build_bucket_grid uses. (The comment here always
+    # CLAIMED density; only now is the grid actually dense across time.)
+    min_bk, max_bk = min(buckets), max(buckets)
+    # Defensive cap: a single stale record among recent ones could span an
+    # enormous window and allocate one slot per empty bucket. Anchor to the
+    # most recent _MAX_GRID_BUCKETS so memory stays bounded; symbols whose
+    # mentions all predate the window become zero vectors (Pearson r = 0.0),
+    # which is the correct "no contemporaneous signal" answer.
+    if max_bk - min_bk + 1 > _MAX_GRID_BUCKETS:
+        min_bk = max_bk - _MAX_GRID_BUCKETS + 1
+    sorted_bucket_keys = list(range(min_bk, max_bk + 1))
     vectors: dict[str, list[float]] = {
-        sym: [float(buckets[bk].get(sym, 0)) for bk in sorted_bucket_keys]
+        sym: [float((buckets.get(bk) or {}).get(sym, 0)) for bk in sorted_bucket_keys]
         for sym in eligible
     }
 

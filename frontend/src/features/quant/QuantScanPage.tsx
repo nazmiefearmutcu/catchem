@@ -944,15 +944,21 @@ function ActiveTabPanel({
  * spillover/correlation as a "structural relationships" signal, not the
  * faster "what's hot RIGHT NOW" signals in Events/Sentiment tabs.
  */
-function PersistencePanel({ windowSize }: { windowSize: number }) {
+function PersistencePanel({ windowSize: _windowSize }: { windowSize: number }) {
   useLang();
-  // v67 audit Med #7 fix: include windowSize in queryKey + thread the
-  // record-window limit through. Before, this panel always called the
-  // endpoint with the default 2000-record limit regardless of the parent's
-  // record-window selection — Persistence quietly diverged from the rest
-  // of the dashboard whenever the operator zoomed in/out.
+  // The `/api/quant/persistence` endpoint has no record-window/limit
+  // parameter (only window_days / min_records / top_n), so this panel
+  // CANNOT thread the parent's `windowSize` selection through — it always
+  // reads the backend's own record window. We therefore keep `windowSize`
+  // OUT of the queryKey: previously it was IN the key while the queryFn
+  // ignored it, so zooming in/out forced a pointless refetch (identical
+  // request bytes) yet advertised a record-window behavior the API can't
+  // deliver. The prop is still accepted (parent threads it) but renamed to
+  // `_windowSize` to mark it deliberately unused until the API gains a
+  // `limit` param and `quantPersistence` forwards it — at which point it
+  // goes back into the queryKey AND the call below.
   const q = useQuery({
-    queryKey: ["quant-persistence", 7, windowSize],
+    queryKey: ["quant-persistence", 7],
     queryFn: () => api.quantPersistence(7, 3, 10),
     refetchInterval: 60_000,
     staleTime: 30_000,

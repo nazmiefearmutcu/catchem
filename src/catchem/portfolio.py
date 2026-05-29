@@ -39,12 +39,14 @@ and extended with::
                      "last_seen_age_seconds": <float|None>,
                      "mention_count": <int>},
         "quote": {"last", "prev_close", "change_pct"} | None,
+        "sentiment_label": "positive"|"negative"|"neutral"|"unknown"|None,
     }
 """
 
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -63,13 +65,17 @@ __all__ = ["enrich_holdings"]
 def _symbol_matches(symbol_lc: str, text_blob: str, symbols: set[str]) -> bool:
     """True when the (lower-cased) symbol appears in the record's surface.
 
-    Substring match against the free-text blob OR exact token match against
+    Word-boundary match against the free-text blob OR exact token match against
     the symbol set — the same rule :func:`find_coverage_gaps` applies, so a
-    holding's news count and its coverage flag never disagree.
+    holding's news count and its coverage flag never disagree. The boundary
+    test (not bare substring) keeps a short ticker like ``T``/``ON``/``GE``
+    from counting an unrelated word ("Boston", "change") as a mention.
     """
     if not symbol_lc:
         return False
-    return (symbol_lc in text_blob) or (symbol_lc in symbols)
+    if symbol_lc in symbols:
+        return True
+    return bool(re.search(rf"\b{re.escape(symbol_lc)}\b", text_blob))
 
 
 def _quote_payload(raw: Any) -> dict[str, Any] | None:
@@ -119,6 +125,28 @@ def _record_score(record: dict[str, Any]) -> float:
     val = record.get("finance_relevance_score")
     score = _coerce_float(val)
     return score if score is not None else 0.0
+
+
+# The four labels the sentiment model emits (mirrors schemas.SentimentLabel),
+# which is also exactly what the frontend's `sentiment_label` union accepts.
+_SENTIMENT_LABELS: frozenset[str] = frozenset(
+    {"positive", "negative", "neutral", "unknown"}
+)
+
+
+def _record_sentiment(record: dict[str, Any]) -> str | None:
+    """Pull a normalized sentiment label off a record.
+
+    Returns one of ``positive`` / ``negative`` / ``neutral`` / ``unknown`` (the
+    values the UI's SentimentChip understands), or ``None`` when the field is
+    absent or carries something outside that set.
+    """
+    val = record.get("sentiment_label")
+    if isinstance(val, str):
+        lc = val.strip().lower()
+        if lc in _SENTIMENT_LABELS:
+            return lc
+    return None
 
 
 def enrich_holdings(
@@ -230,6 +258,13 @@ def enrich_holdings(
             for rec in matches[:3]
         ]
 
+        # Sentiment of the freshest-relevance coverage. The frontend's
+        # PortfolioEnrichedHolding declares `sentiment_label` and renders a
+        # SentimentChip from it; deriving it from the top matching record means
+        # the column reflects how recent coverage skews rather than rendering a
+        # permanent "—". None when there is no matching record at all.
+        sentiment_label = _record_sentiment(matches[0]) if matches else None
+
         # ── coverage (covered / blind-spot freshness) ────────────────────
         cov = coverage_by_term.get(sym_lc)
         if cov is not None:
@@ -259,6 +294,7 @@ def enrich_holdings(
         out["recent_top"] = recent_top
         out["coverage"] = coverage
         out["quote"] = quote
+        out["sentiment_label"] = sentiment_label
         enriched.append(out)
 
     return enriched

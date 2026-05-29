@@ -37,14 +37,15 @@ Design constraints honoured:
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 __all__ = [
+    "LeadLagReport",
     "PerEventLeadLag",
     "SourceLeadLagScore",
-    "LeadLagReport",
     "attribute_lead_lag",
 ]
 
@@ -116,8 +117,8 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _record_timestamp(record: dict[str, Any]) -> tuple[datetime | None, str | None]:
@@ -246,9 +247,14 @@ def attribute_lead_lag(
         # signal.
         domain_min_lag: dict[str, int] = {}
         member_domains: set[str] = set()
-        for cap_id, dt, _iso, domain in members_sorted:
+        for _cap_id, dt, _iso, domain in members_sorted:
             member_domains.add(domain)
-            if cap_id == leader_cap:
+            # Skip every capture from the LEADER domain (not just the single
+            # leader capture). A later re-publish from the leading outlet is
+            # not "following" itself — counting it would violate the
+            # "one entry per non-leader domain" contract and pollute the
+            # leader's mean_lag_seconds_when_following with a self-follow lag.
+            if domain == leader_domain:
                 continue
             lag = int((dt - leader_dt).total_seconds())
             prev = domain_min_lag.get(domain)

@@ -44,14 +44,15 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 __all__ = [
     "SentimentBucket",
-    "TickerMomentum",
     "SentimentMomentumReport",
+    "TickerMomentum",
     "compute_sentiment_momentum",
 ]
 
@@ -155,9 +156,9 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     else:
-        parsed = parsed.astimezone(timezone.utc)
+        parsed = parsed.astimezone(UTC)
     return parsed
 
 
@@ -253,13 +254,13 @@ class _BucketAgg:
 
     __slots__ = (
         "count",
-        "positive",
-        "neutral",
         "negative",
-        "score_sum",
-        "score_n",
-        "relevance_sum",
+        "neutral",
+        "positive",
         "relevance_n",
+        "relevance_sum",
+        "score_n",
+        "score_sum",
     )
 
     def __init__(self) -> None:

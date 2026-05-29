@@ -37,15 +37,16 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 __all__ = [
-    "VolumeAnomaly",
+    "AnomalyReport",
     "SentimentShock",
     "SymbolBurst",
-    "AnomalyReport",
+    "VolumeAnomaly",
     "detect_anomalies",
 ]
 
@@ -129,9 +130,9 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     else:
-        parsed = parsed.astimezone(timezone.utc)
+        parsed = parsed.astimezone(UTC)
     return parsed
 
 

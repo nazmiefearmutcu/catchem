@@ -420,7 +420,9 @@ export interface ArchiveNowResponse {
 // `shares`, `weight`, and `cost_basis` are all optional: a holding can be a
 // bare symbol the analyst is merely watching, or a fully-specified line item.
 export interface PortfolioHolding {
-  id: string;
+  // Backend serializes this as a JSON number (storage._row_to_holding does
+  // `int(r["id"])`, and the DELETE route binds `holding_id: int`).
+  id: number;
   symbol: string;
   label?: string | null;
   shares?: number | null;

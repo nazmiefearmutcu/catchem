@@ -48,6 +48,13 @@ def _parse_day(ts_str: str | None) -> str | None:
         ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
+    # Treat a naive timestamp as UTC (matching the sibling quant modules
+    # news_velocity/topic_regime/source_reliability). Otherwise
+    # ``astimezone`` would interpret it as the deployment host's LOCAL tz,
+    # misattributing records to the wrong UTC day bucket and making output
+    # depend on where the process runs.
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
     return ts.astimezone(UTC).strftime("%Y-%m-%d")
 
 

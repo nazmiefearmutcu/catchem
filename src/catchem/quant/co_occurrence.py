@@ -19,15 +19,16 @@ records and produces deterministic output for a given input.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Any, Iterable
+from typing import Any
 
 __all__ = [
-    "AssetReasonCell",
-    "SymbolEdge",
     "AssetConcentration",
+    "AssetReasonCell",
     "CoOccurrenceReport",
+    "SymbolEdge",
     "compute_co_occurrence",
 ]
 

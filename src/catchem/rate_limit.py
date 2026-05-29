@@ -72,7 +72,13 @@ class TokenBucket:
         now = time.monotonic()
         with self.lock:
             b = self.buckets[key]
-            elapsed = now - b.last_refill
+            # Clamp to >= 0: the `defaultdict` factory samples `time.monotonic()`
+            # AFTER `now` for a previously-unseen key, so `now - b.last_refill`
+            # would be negative on a bucket's very first use and (wrongly) drop it
+            # below capacity — denying the first request from a fresh client.
+            # The clamp restores the "no penalty for the first request" contract
+            # and hardens against any monotonic anomaly.
+            elapsed = max(0.0, now - b.last_refill)
             # Cap at `capacity` so a long idle period doesn't translate
             # into an unlimited burst credit later.
             b.tokens = min(float(self.capacity), b.tokens + elapsed * self.rate)

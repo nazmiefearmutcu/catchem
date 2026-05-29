@@ -20,6 +20,7 @@ out-of-scope (local-first). The API binds to 127.0.0.1 by default.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import os as _os_for_pid
@@ -214,7 +215,8 @@ def _render_spa_with_nonce() -> tuple[str | None, str]:
     return html_with_nonce, nonce
 
 
-from .archive import DriveArchiver
+from .archive import DriveArchiver, _csv_safe
+from .awareness_gaps import find_coverage_gaps
 from .contracts import (
     AppInfoResponse,
     DemoRunResponse,
@@ -231,7 +233,7 @@ from .demo import DemoResult as _DemoResult
 from .demo import run_demo as _run_demo
 from .logging import get_logger
 from .market_data import LocalFixtureMarketDataProvider, parse_symbol_list
-from .news_poller import DEFAULT_FEEDS, FeedSpec, NewsPoller, assemble_feeds
+from .news_poller import FeedSpec, NewsPoller, assemble_feeds
 from .newsimpact_guarded_adapter import NewsImpactGuardError, snapshot_guard_state
 from .rate_limit import (
     DB_IMPORT_BUCKET,
@@ -239,7 +241,6 @@ from .rate_limit import (
     SEARCH_BUCKET,
     check_rate,
 )
-from .awareness_gaps import find_coverage_gaps
 from .redaction import redact_record_for_mode, redact_records_for_mode, safe_guard_view
 from .runtime_metrics import current_metrics as _current_process_metrics
 from .schemas import AwarenessCaptureView
@@ -802,33 +803,75 @@ def _build_archiver(supervisor: Supervisor, settings: Settings) -> DriveArchiver
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
-    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER, _WS_CHANNEL, _ARCHIVER
+    global _SUPERVISOR, _SETTINGS, _NEWS_POLLER, _WS_CHANNEL, _ARCHIVER, _QUANT_ENGINE
     _SETTINGS = load_settings()
     _SUPERVISOR = Supervisor(_SETTINGS)
-    _NEWS_POLLER = _build_news_poller(_SUPERVISOR, _SETTINGS)
-    if _NEWS_POLLER is not None:
-        _NEWS_POLLER.start()
-    _WS_CHANNEL = _build_ws_channel(_SUPERVISOR, _SETTINGS)
-    if _WS_CHANNEL is not None:
-        _WS_CHANNEL.start()
-    _ARCHIVER = _build_archiver(_SUPERVISOR, _SETTINGS)
-    if _ARCHIVER is not None:
-        _ARCHIVER.start()
+    # Startup must be all-or-nothing: if a later `start()` raises (e.g. the
+    # WS channel or archiver) we must tear down whatever already started —
+    # otherwise the poller task and the supervisor's thread pools leak for
+    # the life of the aborting process. The teardown here mirrors the
+    # `finally` block's per-step isolation so one failed stop can't mask the
+    # original startup error or skip the supervisor flush.
+    try:
+        _NEWS_POLLER = _build_news_poller(_SUPERVISOR, _SETTINGS)
+        if _NEWS_POLLER is not None:
+            _NEWS_POLLER.start()
+        _WS_CHANNEL = _build_ws_channel(_SUPERVISOR, _SETTINGS)
+        if _WS_CHANNEL is not None:
+            _WS_CHANNEL.start()
+        _ARCHIVER = _build_archiver(_SUPERVISOR, _SETTINGS)
+        if _ARCHIVER is not None:
+            _ARCHIVER.start()
+    except Exception:
+        if _ARCHIVER is not None:
+            with contextlib.suppress(Exception):
+                await _ARCHIVER.stop()
+        _ARCHIVER = None
+        if _WS_CHANNEL is not None:
+            with contextlib.suppress(Exception):
+                await _WS_CHANNEL.stop()
+        _WS_CHANNEL = None
+        if _NEWS_POLLER is not None:
+            with contextlib.suppress(Exception):
+                await _NEWS_POLLER.stop()
+        _NEWS_POLLER = None
+        if _SUPERVISOR is not None:
+            with contextlib.suppress(Exception):
+                _SUPERVISOR.close()
+        _SUPERVISOR = None
+        _QUANT_ENGINE = None
+        raise
     try:
         yield
     finally:
+        # Each teardown step is isolated: a stop() that raises (any non-
+        # CancelledError from a background task body) must NOT skip the
+        # remaining steps. In particular the supervisor flush — which writes
+        # buffered parquet rows and shuts down the DeepSeek/webhook thread
+        # pools — must always run, even if an earlier stop() failed.
         if _ARCHIVER is not None:
-            await _ARCHIVER.stop()
+            with contextlib.suppress(Exception):
+                await _ARCHIVER.stop()
         _ARCHIVER = None
         if _WS_CHANNEL is not None:
-            await _WS_CHANNEL.stop()
+            with contextlib.suppress(Exception):
+                await _WS_CHANNEL.stop()
         _WS_CHANNEL = None
         if _NEWS_POLLER is not None:
-            await _NEWS_POLLER.stop()
+            with contextlib.suppress(Exception):
+                await _NEWS_POLLER.stop()
         _NEWS_POLLER = None
         if _SUPERVISOR is not None:
-            _SUPERVISOR.close()
+            with contextlib.suppress(Exception):
+                _SUPERVISOR.close()
         _SUPERVISOR = None
+        # The quant engine is a module-level singleton bound to the previous
+        # supervisor's storage (and caches dashboard snapshots in-memory).
+        # Reset it so the NEXT lifespan rebuilds it against the new
+        # supervisor — otherwise an in-process restart (a second
+        # TestClient(app) context, a settings reload that swaps sqlite_path)
+        # would keep querying the dead/closed storage and serve stale cache.
+        _QUANT_ENGINE = None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -859,10 +902,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ── Per-request path counter ──────────────────────────────────────────
     # Updates `_REQUEST_COUNTS` once per HTTP request. The key is the
     # matched route template (e.g. "/api/quant/dashboard") when FastAPI
-    # could resolve one, otherwise the raw URL path. The latter is the
-    # common case for 404s and the SPA history fallback — bucketing them
-    # under the literal path keeps the wire honest about what the UI was
-    # asking for.
+    # could resolve one — including the SPA history catch-all, whose
+    # template is "/{full_path:path}". When NO route matched (e.g. a
+    # POST/PUT/DELETE to an arbitrary unmatched path), we bucket under a
+    # single `<unmatched>` sentinel instead of the raw URL path: the raw
+    # path is attacker-varied and `_REQUEST_COUNTS` is never trimmed, so
+    # keying by it would let a client mint unbounded distinct keys and
+    # bloat both the dict and the /api/stats payload it is copied into.
     #
     # The hot-path cost is one dict lookup + one assignment per request.
     # No lock — Python dict mutation of single keys is atomic enough for
@@ -870,15 +916,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # (this is a UX gauge, not billing).
     @app.middleware("http")
     async def _request_counter(request: Request, call_next):
+        # NOTE: `scope["route"]` is only populated by Starlette DURING routing,
+        # i.e. inside call_next — so the route template must be read AFTER the
+        # downstream app runs, not before (reading it first always sees None
+        # and buckets every request, even matched ones, under "<unmatched>").
+        response = await call_next(request)
         path: str
         try:
             route = request.scope.get("route") if request.scope else None
             tpl = getattr(route, "path", None) if route is not None else None
-            path = tpl if isinstance(tpl, str) and tpl else request.url.path
+            path = tpl if isinstance(tpl, str) and tpl else "<unmatched>"
         except Exception:
-            path = request.url.path
+            path = "<unmatched>"
         _REQUEST_COUNTS[path] = _REQUEST_COUNTS.get(path, 0) + 1
-        return await call_next(request)
+        return response
 
     # ── Conservative security headers ─────────────────────────────────────
     # Applied to every response. The SPA HTML routes (/, /replay, history
@@ -1028,7 +1079,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 2. SQLite connectivity ─────────────────────────────────────────
         if sup is not None:
             try:
-                with sup.storage._lock, sup.storage._connection() as conn:  # noqa: SLF001
+                with sup.storage._lock, sup.storage._connection() as conn:
                     cursor = conn.execute("SELECT 1")
                     row = cursor.fetchone()
                     if row is None or int(row[0]) != 1:
@@ -1077,7 +1128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 from .migrations import current_version, max_known_version
 
-                with sup.storage._lock, sup.storage._connection() as conn:  # noqa: SLF001
+                with sup.storage._lock, sup.storage._connection() as conn:
                     current = current_version(conn)
                 max_known = max_known_version()
                 checks["schema_version"] = current
@@ -1217,7 +1268,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # writer doesn't race the read. `reviews` and `dlq` are guaranteed
         # by the schema bootstrap; no `IF EXISTS` check needed.
         storage = sup.storage
-        with storage._lock, storage._connection() as conn:  # noqa: SLF001 — intentional shared lock
+        with storage._lock, storage._connection() as conn:
             records_count = int(
                 conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
             )
@@ -1591,7 +1642,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sup = _get_supervisor()
         storage = sup.storage
         cutoff = (_dt.now(UTC) - timedelta(days=days)).isoformat()
-        with storage._lock, storage._connection() as conn:  # noqa: SLF001 — intentional shared lock
+        with storage._lock, storage._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -1730,7 +1781,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "base_url" in patch:
             cfg.base_url = str(patch["base_url"]).strip() or cfg.base_url
         # Reset the cached client so the next call picks up the new key/model.
-        sup.reviewers._deepseek = None  # noqa: SLF001 — registry-internal cache
+        sup.reviewers._deepseek = None
         sup.reviewers.invalidate_budget_cache()
         return sup.reviewers.status()
 
@@ -2109,10 +2160,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "temperature": 0.35,
                 "max_tokens": 320,
             }
-            response = client._client.post(  # noqa: SLF001
+            response = client._client.post(
                 f"{client._base_url}/chat/completions",
                 json=req,
-                headers={"Authorization": f"Bearer {client._api_key}", "Content-Type": "application/json"},  # noqa: SLF001
+                headers={"Authorization": f"Bearer {client._api_key}", "Content-Type": "application/json"},
             )
             if response.status_code != 200:
                 return {"narrative": local, "source": "local", "fallback_reason": f"http_{response.status_code}", "context": compact, "generated_at": _dt.now(UTC).isoformat()}
@@ -2214,8 +2265,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             error_msg: str | None = None
             try:
                 async for envelope in stream_chat_completion(
-                    api_key=client._api_key,  # noqa: SLF001
-                    base_url=client._base_url,  # noqa: SLF001
+                    api_key=client._api_key,
+                    base_url=client._base_url,
                     model=client.model,
                     messages=messages,
                     temperature=0.35,
@@ -2798,7 +2849,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Use the DeepSeek client directly; we don't persist this in `reviews`
         # because it's a narrative, not a review row.
         try:
-            import httpx as _httpx
             req = {
                 "model": client.model,
                 "messages": [
@@ -2815,10 +2865,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "temperature": 0.3,
                 "max_tokens": 220,
             }
-            response = client._client.post(  # noqa: SLF001 — reuse the configured httpx.Client
-                f"{client._base_url}/chat/completions",  # noqa: SLF001
+            response = client._client.post(
+                f"{client._base_url}/chat/completions",
                 json=req,
-                headers={"Authorization": f"Bearer {client._api_key}", "Content-Type": "application/json"},  # noqa: SLF001
+                headers={"Authorization": f"Bearer {client._api_key}", "Content-Type": "application/json"},
             )
             if response.status_code != 200:
                 return {"kind": kind, "narrative": local, "source": "local", "fallback_reason": f"http_{response.status_code}"}
@@ -2902,7 +2952,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             engine = _get_quant_engine()
             cs = engine.clusters(limit=2000)
-        except Exception:  # noqa: BLE001 — quant engine optional
+        except Exception:
             cs = []
         for c in cs[:200]:
             cid = (c.cluster_id or "").lower()
@@ -2963,11 +3013,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             out = [r for r in out if (r.get("finance_relevance_score") or 0.0) >= min_score]
         return out
 
+    # Externally-sourced text columns that must be run through `_csv_safe`
+    # before they hit a spreadsheet cell. Mirrors archive.row_to_csv_dict's
+    # threat model: title/domain/url come straight from RSS feeds and the
+    # joined list fields carry feed-derived symbols/labels — any of them can
+    # begin with a formula trigger ("=HYPERLINK(...)", "+cmd|'/C calc'!A0").
+    # System-generated id/date/flag/numeric columns are left untouched.
+    _EXPORT_RECORD_TEXT_FIELDS = (
+        "title", "domain", "url",
+        "asset_classes", "impact_reason_codes", "candidate_symbols",
+    )
+
     def _records_csv(records: list[dict[str, Any]]) -> str:
         """Serialize records to CSV with list-fields joined by ';'.
 
         csv.DictWriter handles the embedded-comma / newline / quote
-        escaping; we just need to flatten the list-typed columns.
+        escaping; we just need to flatten the list-typed columns and defuse
+        CSV formula injection on the externally-sourced text columns
+        (`_csv_safe`, the same defense archive.row_to_csv_dict applies).
         """
         import csv
         from io import StringIO
@@ -2980,6 +3043,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 v = row.get(list_field)
                 if isinstance(v, list):
                     row[list_field] = ";".join(str(x) for x in v)
+            for text_field in _EXPORT_RECORD_TEXT_FIELDS:
+                v = row.get(text_field)
+                if isinstance(v, str):
+                    row[text_field] = _csv_safe(v)
             writer.writerow(row)
         return buf.getvalue()
 
@@ -3046,29 +3113,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def _flatten_review_pair(item: dict[str, Any]) -> dict[str, Any]:
-        """Project a /api/reviews/compare row down to one flat CSV row."""
+        """Project a /api/reviews/compare row down to one flat CSV row.
+
+        Externally-sourced text columns (title/domain/url, sentiment labels,
+        and the joined asset/reason/symbol lists) are run through `_csv_safe`
+        to defuse CSV formula injection — the same defense the background
+        archive CSV (archive.row_to_csv_dict) already applies to feed text.
+        System-generated numeric/flag/id/date columns are left untouched.
+        """
         stub = (item.get("stub") or {}).get("payload") or {}
         ds_row = item.get("deepseek") or {}
         ds = ds_row.get("payload") or {}
         ag = item.get("agreement") or {}
 
         def _join(v: Any) -> str:
-            return ";".join(str(x) for x in v) if isinstance(v, list) else ""
+            return _csv_safe(";".join(str(x) for x in v)) if isinstance(v, list) else ""
+
+        def _text(v: Any) -> Any:
+            return _csv_safe(v) if isinstance(v, str) else v
 
         return {
             "capture_id": item.get("capture_id"),
-            "title": item.get("title"),
-            "domain": item.get("domain"),
-            "url": item.get("url"),
+            "title": _text(item.get("title")),
+            "domain": _text(item.get("domain")),
+            "url": _text(item.get("url")),
             "stub_relevance": stub.get("is_finance_relevant"),
             "stub_score": stub.get("finance_relevance_score"),
-            "stub_sentiment": stub.get("sentiment_label"),
+            "stub_sentiment": _text(stub.get("sentiment_label")),
             "stub_assets": _join(stub.get("asset_classes")),
             "stub_reasons": _join(stub.get("impact_reason_codes")),
             "stub_symbols": _join(stub.get("candidate_symbols")),
             "ds_relevance": ds.get("is_finance_relevant"),
             "ds_score": ds.get("finance_relevance_score"),
-            "ds_sentiment": ds.get("sentiment_label"),
+            "ds_sentiment": _text(ds.get("sentiment_label")),
             "ds_assets": _join(ds.get("asset_classes")),
             "ds_reasons": _join(ds.get("impact_reason_codes")),
             "ds_symbols": _join(ds.get("candidate_symbols")),
@@ -3247,7 +3324,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sup = _get_supervisor()
         storage = sup.storage
         tables: list[dict[str, Any]] = []
-        with storage._lock, storage._connection() as conn:  # noqa: SLF001
+        with storage._lock, storage._connection() as conn:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             ).fetchall()
@@ -3389,6 +3466,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             os.close(fd)
         tmp_path.replace(db_path)
+
+        # The truth-store runs in WAL mode (storage.py PRAGMA journal_mode=WAL).
+        # SQLite ties the `-wal` / `-shm` sidecars to the DB by FILENAME, not
+        # content. The OLD database's sidecars are still next to db_path and
+        # may hold un-checkpointed frames; if we leave them, the next
+        # connection to open the freshly imported file would replay those
+        # stale old-DB frames over the imported snapshot — silently
+        # corrupting the restore. Remove them so the import lands clean.
+        # (The forced backup above preserves the pre-import state; it does
+        # not protect the post-import file from a stale-WAL replay.)
+        for suffix in ("-wal", "-shm"):
+            sidecar = db_path.with_name(db_path.name + suffix)
+            with contextlib.suppress(FileNotFoundError):
+                sidecar.unlink()
 
         return {
             "ok": True,

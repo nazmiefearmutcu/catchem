@@ -44,7 +44,7 @@ export function PortfolioPage() {
     onSuccess: invalidate,
   });
   const removeMutation = useMutation({
-    mutationFn: (id: string) => api.portfolioDelete(id),
+    mutationFn: (id: number) => api.portfolioDelete(id),
     onSuccess: invalidate,
   });
 
@@ -295,7 +295,7 @@ function QuoteCell({ holding }: { holding: PortfolioEnrichedHolding }) {
         {q.last.toLocaleString(undefined, { maximumFractionDigits: 2 })}
       </div>
       <div className={`text-[10px] tabular-nums ${pctCls}`} data-testid="quote-change">
-        {pct == null || !Number.isFinite(pct) ? "—" : `${pct > 0 ? "+" : ""}${fmtPct(pct / 100, 2)}`}
+        {pct == null || !Number.isFinite(pct) ? "—" : `${pct > 0 ? "+" : ""}${fmtPct(pct, 2)}`}
       </div>
     </div>
   );

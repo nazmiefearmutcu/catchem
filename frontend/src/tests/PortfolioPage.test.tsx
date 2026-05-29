@@ -48,7 +48,7 @@ function renderPortfolio() {
 
 function holding(overrides: Partial<PortfolioEnrichedHolding> = {}): PortfolioEnrichedHolding {
   return {
-    id: "h-1",
+    id: 1,
     symbol: "AAPL",
     label: "Core tech",
     shares: 100,
@@ -56,7 +56,7 @@ function holding(overrides: Partial<PortfolioEnrichedHolding> = {}): PortfolioEn
     cost_basis: 150,
     notes: null,
     added_at: "2026-05-28T00:00:00Z",
-    quote: { last: 302.5, prev_close: 300, change_pct: 0.83 },
+    quote: { last: 302.5, prev_close: 300, change_pct: 0.0083 },
     coverage: { covered: true, last_seen_age_seconds: 120, mention_count: 4 },
     recent_news_count: 4,
     recent_top: [
@@ -79,7 +79,7 @@ beforeEach(() => {
   Object.values(apiMock).forEach((fn) => fn.mockReset());
   apiMock.portfolioEnriched.mockResolvedValue(enriched([holding()]));
   apiMock.portfolioAdd.mockResolvedValue({
-    id: "h-2",
+    id: 2,
     symbol: "MSFT",
     added_at: "2026-05-28T00:00:00Z",
   });
@@ -191,6 +191,6 @@ describe("PortfolioPage", () => {
     const row = screen.getByText("AAPL").closest("tr") as HTMLElement;
     fireEvent.click(within(row).getByRole("button", { name: /remove aapl/i }));
 
-    await waitFor(() => expect(apiMock.portfolioDelete).toHaveBeenCalledWith("h-1"));
+    await waitFor(() => expect(apiMock.portfolioDelete).toHaveBeenCalledWith(1));
   });
 });

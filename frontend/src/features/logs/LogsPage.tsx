@@ -105,9 +105,15 @@ export function LogsPage() {
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
   // Rate state — when paused, the rate freezes (no new samples logged).
+  // `ts` MUST start at 0 (not Date.now()) so the first-sample guard in the
+  // rate effect fires once and records the baseline WITHOUT surfacing a
+  // rate. Seeding it with a real timestamp made that guard dead code: the
+  // very first logTail(1000) response was then diffed against count 0, so
+  // the entire initial buffer was counted as "new lines since mount" and
+  // the rate KPI flashed a wildly inflated value on slow first fetches.
   const rateRef = useRef<{ count: number; ts: number; rate: number }>({
     count: 0,
-    ts: Date.now(),
+    ts: 0,
     rate: 0,
   });
 
@@ -123,7 +129,13 @@ export function LogsPage() {
   // inspection doesn't dilute the rate to zero artificially). ──────
   useEffect(() => {
     if (paused) return;
-    const lines = logs.data?.lines ?? [];
+    // Wait for a real fetch before sampling. The effect also runs on mount
+    // while logs.data is still undefined; sampling then would burn the
+    // first-sample exemption against an empty buffer, so the FIRST real
+    // tail would be diffed against count 0 and the whole initial buffer
+    // counted as new throughput.
+    if (!logs.data) return;
+    const lines = logs.data.lines ?? [];
     const now = Date.now();
     const next = deriveLinesPerMinute(
       rateRef.current.count,

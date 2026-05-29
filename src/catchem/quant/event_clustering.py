@@ -27,9 +27,10 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 __all__ = ["EventCluster", "cluster_records", "pairwise_similarity"]
 
@@ -140,7 +141,7 @@ def _parse_ts(value: Any) -> datetime | None:
         return None
     if isinstance(value, datetime):
         # Treat naive datetimes as UTC for ordering consistency.
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if not isinstance(value, str):
         return None
     s = value.strip()
@@ -154,7 +155,7 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -389,7 +390,7 @@ def cluster_records(
     def _sort_key(rec: dict) -> tuple[int, datetime]:
         ts = _record_ts(rec)
         if ts is None:
-            return (1, datetime.max.replace(tzinfo=timezone.utc))
+            return (1, datetime.max.replace(tzinfo=UTC))
         return (0, ts)
 
     ordered = sorted(records, key=_sort_key)

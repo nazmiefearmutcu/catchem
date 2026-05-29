@@ -44,6 +44,7 @@ and extended with::
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -102,9 +103,15 @@ def _coerce_float(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
+        f = float(value)
     except (TypeError, ValueError):
         return None
+    # Reject NaN / ±inf — a non-finite price would poison the derived
+    # change_pct ((last - prev_close) / prev_close) and silently propagate a
+    # NaN into the enrichment output. Mirrors quant.global_tone._coerce_value.
+    if not math.isfinite(f):
+        return None
+    return f
 
 
 def _record_score(record: dict[str, Any]) -> float:

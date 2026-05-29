@@ -174,3 +174,41 @@ def test_deterministic_with_injected_now() -> None:
     a = enrich_holdings([{"symbol": "AAPL"}], **args)
     b = enrich_holdings([{"symbol": "AAPL"}], **args)
     assert a == b
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Non-finite price rejection (v80 audit fix) — a NaN/inf price from the provider
+# must not poison the derived change_pct or leak a NaN into the output.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_quote_non_finite_prices_are_rejected_not_nan_poisoned() -> None:
+    import math
+
+    out = enrich_holdings(
+        [{"symbol": "AAPL"}],
+        records=[],
+        quote_fn=lambda s: {"last": float("nan"), "prev_close": 100.0},
+        now=NOW,
+    )
+    q = out[0]["quote"]
+    assert q is not None
+    assert q["last"] is None, "a NaN price must coerce to None, not pass through"
+    assert q["change_pct"] is None, "no change_pct may be derived from a rejected price"
+    # Nothing in the quote may be a non-finite float.
+    for v in q.values():
+        if isinstance(v, float):
+            assert math.isfinite(v)
+
+
+def test_coerce_float_rejects_non_finite() -> None:
+    from catchem.portfolio import _coerce_float
+
+    assert _coerce_float(float("nan")) is None
+    assert _coerce_float(float("inf")) is None
+    assert _coerce_float(float("-inf")) is None
+    # Finite values and tolerant string coercion still work.
+    assert _coerce_float("3.14") == 3.14
+    assert _coerce_float(2) == 2.0
+    assert _coerce_float(None) is None
+    assert _coerce_float("not a number") is None

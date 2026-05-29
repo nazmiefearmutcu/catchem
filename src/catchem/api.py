@@ -28,6 +28,7 @@ import secrets
 import subprocess as _subproc
 import threading
 import time
+import weakref
 from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -92,13 +93,32 @@ _STATS_TTL_SECONDS = 2.0
 # still refreshing tone within ~2 minutes — well inside GDELT's own ~15-minute
 # re-index cadence, so the cache never hides genuinely fresh data.
 #
-# Same locking rationale as _STATS_CACHE: the handler is async (GDELT fetch
-# is awaited), but the cache read/write is guarded so two concurrent requests
-# can't both observe a miss and both fan out. The lock is only ever held for
-# the dict read/write itself — never across the awaited fetch — so it cannot
-# serialize the slow path or deadlock the event loop.
+# SINGLE-FLIGHT: the miss path is guarded by an asyncio.Lock held ACROSS the
+# awaited fetch (double-checked inside), so N concurrent misses coalesce into
+# ONE outbound fan-out — the first request fetches + populates, the rest wake,
+# re-check, and return the fresh payload. (The previous design held a
+# threading.Lock only around the dict read/write, NOT across the await, so
+# concurrent misses each fanned out — exactly the stampede this cache is meant
+# to prevent.) An asyncio.Lock yields the loop while waiting, so it never
+# blocks other endpoints. The lock is keyed per running loop (weak, so test
+# loops don't leak) because a module-level asyncio.Lock binds to the first loop
+# that awaits it and then errors under the per-request loops some test clients
+# spin up. The cache dict itself is only touched from within a running loop's
+# single thread, so it needs no separate guard.
 _GLOBAL_TONE_CACHE: dict[str, Any] = {"payload": None, "expires_at": 0.0}
-_GLOBAL_TONE_CACHE_LOCK = threading.Lock()
+_GLOBAL_TONE_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _global_tone_lock() -> asyncio.Lock:
+    """Return the single-flight lock for the running event loop (lazy, per-loop)."""
+    loop = asyncio.get_running_loop()
+    lock = _GLOBAL_TONE_LOCKS.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _GLOBAL_TONE_LOCKS[loop] = lock
+    return lock
 _GLOBAL_TONE_TTL_SECONDS = 120.0
 
 # Actual bind host/port observed at uvicorn startup, OR None if create_app
@@ -3924,41 +3944,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ``degraded: true``); the endpoint never 500s on an upstream outage.
         """
         now_ts = time.monotonic()
-        with _GLOBAL_TONE_CACHE_LOCK:
+        # Fast path: a fresh cached payload needs no lock — a sync dict read is
+        # atomic on the single-threaded event loop, so a concurrent writer
+        # can't tear it.
+        cached = _GLOBAL_TONE_CACHE.get("payload")
+        expires_at = float(_GLOBAL_TONE_CACHE.get("expires_at") or 0.0)
+        if cached is not None and now_ts < expires_at:
+            return cached
+
+        from .quant.global_tone import DEFAULT_THEMES, compute_global_tone
+
+        # Slow path: single-flight. Concurrent misses serialize on the per-loop
+        # lock; the FIRST fans out to GDELT and populates the cache, the rest
+        # wake, re-check, and return the now-fresh payload instead of each
+        # hammering GDELT. Held across the await on purpose — that's what
+        # collapses the stampede — and asyncio.Lock yields the loop while
+        # waiting so other endpoints stay responsive.
+        async with _global_tone_lock():
+            now_ts = time.monotonic()
             cached = _GLOBAL_TONE_CACHE.get("payload")
             expires_at = float(_GLOBAL_TONE_CACHE.get("expires_at") or 0.0)
             if cached is not None and now_ts < expires_at:
                 return cached
 
-        from .quant.global_tone import DEFAULT_THEMES, compute_global_tone
+            try:
+                result = await compute_global_tone(DEFAULT_THEMES)
+            except Exception as exc:  # pragma: no cover — compute is fail-soft
+                logger.warning("global_tone_compute_failed", extra={"error": str(exc)[:200]})
+                result = {
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "by_theme": {},
+                    "overall_tone": None,
+                    "overall_state": "stable",
+                }
 
-        try:
-            result = await compute_global_tone(DEFAULT_THEMES)
-        except Exception as exc:  # pragma: no cover — compute is fail-soft
-            logger.warning("global_tone_compute_failed", extra={"error": str(exc)[:200]})
-            result = {
-                "generated_at": datetime.now(UTC).isoformat(),
-                "by_theme": {},
-                "overall_tone": None,
-                "overall_state": "stable",
+            # Degraded when no theme produced a single usable point — either the
+            # whole fan-out failed or GDELT returned empty series for everything.
+            by_theme = result.get("by_theme") or {}
+            degraded = not by_theme or all(
+                (s.get("n_points") or 0) == 0 for s in by_theme.values()
+            )
+
+            payload: dict[str, Any] = {
+                "schema_version": 1,
+                "degraded": degraded,
+                **result,
             }
-
-        # Degraded when no theme produced a single usable point — either the
-        # whole fan-out failed or GDELT returned empty series for everything.
-        by_theme = result.get("by_theme") or {}
-        degraded = not by_theme or all(
-            (s.get("n_points") or 0) == 0 for s in by_theme.values()
-        )
-
-        payload: dict[str, Any] = {
-            "schema_version": 1,
-            "degraded": degraded,
-            **result,
-        }
-        with _GLOBAL_TONE_CACHE_LOCK:
             _GLOBAL_TONE_CACHE["payload"] = payload
             _GLOBAL_TONE_CACHE["expires_at"] = now_ts + _GLOBAL_TONE_TTL_SECONDS
-        return payload
+            return payload
 
     @app.get("/api/news/top-recent")
     def api_news_top_recent(

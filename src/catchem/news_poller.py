@@ -121,27 +121,49 @@ def register_feed_provider(fn: Callable[[], Iterable[FeedSpec]]) -> Callable[[],
 
 
 def assemble_feeds() -> tuple[FeedSpec, ...]:
-    """DEFAULT_FEEDS + every registered provider's feeds, de-duped by name.
+    """DEFAULT_FEEDS + every registered provider's feeds, de-duped by name AND URL.
 
     Importing `catchem.news_sources` triggers auto-discovery of all source
-    packs (each self-registers). Name collisions keep the first occurrence so
-    DEFAULT_FEEDS always wins over a pack that reuses a name by accident.
+    packs (each self-registers). De-dup keeps the FIRST occurrence so
+    DEFAULT_FEEDS always wins over a pack that reuses a name/URL by accident.
+
+    Two distinct collisions are both dropped (and logged so the drop isn't
+    silent):
+      * **name collision** — a later spec reusing a name would otherwise share
+        `feed_health`/cooldown state with the first under the name key.
+      * **URL collision** — two specs with different names but the same URL
+        would fetch the SAME endpoint twice every poll (pure wasted bandwidth +
+        double rate-limit pressure); item-level canonical-URL dedup hides the
+        duplicate content but not the redundant request.
     """
     with contextlib.suppress(Exception):
         import catchem.news_sources  # noqa: F401  (import side-effect: registration)
 
-    seen: set[str] = set()
+    seen_names: set[str] = set()
+    seen_urls: set[str] = set()
     out: list[FeedSpec] = []
+
+    def _admit(spec: FeedSpec, *, origin: str) -> None:
+        if spec.name in seen_names:
+            logger.warning(
+                "feed_dropped_duplicate_name", name=spec.name, url=spec.url, origin=origin
+            )
+            return
+        if spec.url in seen_urls:
+            logger.warning(
+                "feed_dropped_duplicate_url", name=spec.name, url=spec.url, origin=origin
+            )
+            return
+        seen_names.add(spec.name)
+        seen_urls.add(spec.url)
+        out.append(spec)
+
     for spec in DEFAULT_FEEDS:
-        if spec.name not in seen:
-            seen.add(spec.name)
-            out.append(spec)
+        _admit(spec, origin="default")
     for provider in _FEED_PROVIDERS:
         try:
             for spec in provider():
-                if spec.name not in seen:
-                    seen.add(spec.name)
-                    out.append(spec)
+                _admit(spec, origin=getattr(provider, "__name__", "?"))
         except Exception as exc:  # one bad pack never breaks the rest
             logger.warning("feed_provider_failed", provider=getattr(provider, "__name__", "?"), error=str(exc))
     return tuple(out)

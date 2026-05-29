@@ -1779,7 +1779,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         s = _SETTINGS or load_settings()
         cfg = s.webhook
         sup = _SUPERVISOR  # may be None during early lifespan
-        stats = sup.webhook_stats if sup is not None else {
+        stats = sup.webhook_stats_snapshot() if sup is not None else {
             "attempted": 0, "sent": 0, "filtered": 0, "failed": 0,
         }
         return {

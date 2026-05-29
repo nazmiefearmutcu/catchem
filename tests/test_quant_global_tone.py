@@ -586,3 +586,31 @@ async def test_global_tone_lock_is_per_running_loop() -> None:
     lock_b = api_mod._global_tone_lock()
     assert lock_a is lock_b, "same running loop must reuse one lock"
     assert isinstance(lock_a, asyncio.Lock)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _parse_point_date — tolerant of GDELT's several date encodings
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_parse_point_date_accepts_multiple_encodings() -> None:
+    # Canonical GDELT stamp YYYYMMDDTHHMMSSZ.
+    assert gt._parse_point_date("20260115T123000Z") == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+    # Epoch seconds as int and float.
+    assert gt._parse_point_date(0) == datetime(1970, 1, 1, tzinfo=UTC)
+    assert gt._parse_point_date(0.0) == datetime(1970, 1, 1, tzinfo=UTC)
+    # All-digit string → epoch seconds.
+    assert gt._parse_point_date("0") == datetime(1970, 1, 1, tzinfo=UTC)
+    # ISO-8601 with a trailing Z.
+    assert gt._parse_point_date("2026-01-15T12:30:00Z") == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+    # Naive ISO → assumed UTC.
+    assert gt._parse_point_date("2026-01-15T12:30:00") == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+
+
+def test_parse_point_date_returns_none_on_junk() -> None:
+    assert gt._parse_point_date(None) is None
+    assert gt._parse_point_date(True) is None       # bool is NOT a usable epoch
+    assert gt._parse_point_date("") is None
+    assert gt._parse_point_date("   ") is None
+    assert gt._parse_point_date("not a date") is None
+    assert gt._parse_point_date([1, 2]) is None      # wrong type entirely

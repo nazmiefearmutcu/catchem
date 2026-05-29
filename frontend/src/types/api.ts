@@ -286,6 +286,12 @@ export interface SidecarStatus {
 export interface LogTail {
   lines: string[];
   truncated: boolean;
+  /**
+   * Monotonic full-file line count. `lines` is capped at the 1000-line tail,
+   * so once the file exceeds the cap `lines.length` pins at 1000; this field
+   * keeps growing past the cap so the lines/min rate KPI stays accurate.
+   */
+  total_lines: number;
 }
 
 export interface NewsStatus {

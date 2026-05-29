@@ -26,7 +26,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
-import type { FinancialRecord } from "@/types/api";
+import type { FinancialRecordSummary } from "@/types/api";
 
 // Default alert threshold. Calibration note:
 //   The finance-relevance scorer's empirical distribution on the live RSS
@@ -410,7 +410,7 @@ export function useDesktopAlerts(): void {
         const { items } = await api.recent(40, true);
         if (!alive) return;
         if (!seededRef.current) {
-          items.forEach((r: FinancialRecord) => notified.current.add(r.capture_id));
+          items.forEach((r: FinancialRecordSummary) => notified.current.add(r.capture_id));
           seededRef.current = true;
           pruneNotified();
           return;
@@ -419,7 +419,7 @@ export function useDesktopAlerts(): void {
         // setter takes effect immediately, no remount needed.
         const threshold = readThreshold();
         const fresh = items.filter(
-          (r: FinancialRecord) =>
+          (r: FinancialRecordSummary) =>
             !notified.current.has(r.capture_id) &&
             (r.finance_relevance_score ?? 0) >= threshold,
         );
@@ -434,7 +434,7 @@ export function useDesktopAlerts(): void {
             symbols: (r.candidate_symbols ?? []).slice(0, 4),
           });
         }
-        items.forEach((r: FinancialRecord) => notified.current.add(r.capture_id));
+        items.forEach((r: FinancialRecordSummary) => notified.current.add(r.capture_id));
         pruneNotified();
       } catch {
         /* network blip — try again next tick */

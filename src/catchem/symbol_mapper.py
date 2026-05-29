@@ -138,6 +138,10 @@ class SymbolMapper:
         # exact substring + cashtag
         for m in re.finditer(r"\$([A-Z]{1,6})\b", text):
             sym = m.group(1)
+            # Same denylist the paren path applies — a cashtag like $CEO/$IPO/
+            # $SEC/$USA is an org/macro acronym, not a tradeable ticker.
+            if sym in _TICKER_DENYLIST:
+                continue
             if sym not in seen:
                 seen.add(sym)
                 out.append(SymbolMatch(text=f"${sym}", symbol=sym, score=1.0, source="cashtag"))
@@ -164,6 +168,15 @@ class SymbolMapper:
                     continue
                 sym = self._aliases[alias]
                 if sym in seen:
+                    continue
+                # Word-boundary re-validation: fuzz.partial_ratio scores a
+                # perfect 100 when the alias is a contiguous SUBSTRING of the
+                # text, so a >=5-char alias buried inside an unrelated word
+                # (Brentwood→"Brent", Disneyland→"Disney", Appleton→"Apple")
+                # would otherwise fabricate a false ticker. The alias_exact
+                # path already guards this via _alias_exact_patterns; apply the
+                # same token-boundary check here before accepting a fuzzy hit.
+                if not _alias_pattern(alias.lower()).search(lc):
                     continue
                 seen.add(sym)
                 out.append(SymbolMatch(text=alias, symbol=sym, score=score / 100.0, source="alias_fuzzy"))

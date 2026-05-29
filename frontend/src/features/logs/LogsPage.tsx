@@ -135,21 +135,25 @@ export function LogsPage() {
     // tail would be diffed against count 0 and the whole initial buffer
     // counted as new throughput.
     if (!logs.data) return;
-    const lines = logs.data.lines ?? [];
+    // Use the monotonic full-file count, NOT lines.length: the tail caps
+    // `lines` at 1000, so once the file exceeds the cap lines.length pins at
+    // 1000 and the diffed delta would read 0 forever (rate stuck at 0).
+    // total_lines keeps growing past the cap.
+    const totalCount = logs.data.total_lines;
     const now = Date.now();
     const next = deriveLinesPerMinute(
       rateRef.current.count,
       rateRef.current.ts,
-      lines.length,
+      totalCount,
       now,
     );
     // First sample: just record without surfacing a rate (we don't know
     // what "lines/min" means until we have two readings).
     if (rateRef.current.ts === 0) {
-      rateRef.current = { count: lines.length, ts: now, rate: 0 };
+      rateRef.current = { count: totalCount, ts: now, rate: 0 };
       return;
     }
-    rateRef.current = { count: lines.length, ts: now, rate: next };
+    rateRef.current = { count: totalCount, ts: now, rate: next };
   }, [logs.data, paused]);
 
   const lines = logs.data?.lines ?? [];

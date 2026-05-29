@@ -7,7 +7,7 @@
  * in FeedPage.tsx and reuses these primitives.
  */
 
-import type { FinancialRecord } from "@/types/api";
+import type { FinancialRecordSummary } from "@/types/api";
 
 /** Toggle a capture_id in a Set, returning a NEW Set (so React re-renders). */
 export function toggleSelection(prev: Set<string>, captureId: string): Set<string> {
@@ -25,7 +25,7 @@ export function toggleSelection(prev: Set<string>, captureId: string): Set<strin
  * checkbox + the Cmd+A shortcut. Caller passes the currently-visible
  * (post-filter) record list — never the full backend list.
  */
-export function selectAll(items: FinancialRecord[]): Set<string> {
+export function selectAll(items: FinancialRecordSummary[]): Set<string> {
   return new Set(items.map((i) => i.capture_id));
 }
 
@@ -41,7 +41,7 @@ export function clearSelection(): Set<string> {
  * keeps the toast count honest ("Added N symbols" instead of "Added N
  * symbols, some skipped").
  */
-export function extractUniqueSymbols(records: FinancialRecord[]): string[] {
+export function extractUniqueSymbols(records: FinancialRecordSummary[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const r of records) {
@@ -60,7 +60,7 @@ export function extractUniqueSymbols(records: FinancialRecord[]): string[] {
  * Duplicates kept — analyst may want each record's link even if the
  * destination repeats (rare in practice; we leave the call to them).
  */
-export function extractUrls(records: FinancialRecord[]): string[] {
+export function extractUrls(records: FinancialRecordSummary[]): string[] {
   return records
     .map((r) => (r.url ?? "").trim())
     .filter((u) => u.length > 0);
@@ -72,9 +72,9 @@ export function extractUrls(records: FinancialRecord[]): string[] {
  * what they see on screen, not the order they ticked checkboxes in).
  */
 export function selectedRecords(
-  all: FinancialRecord[],
+  all: FinancialRecordSummary[],
   selected: Set<string>,
-): FinancialRecord[] {
+): FinancialRecordSummary[] {
   if (selected.size === 0) return [];
   return all.filter((r) => selected.has(r.capture_id));
 }
@@ -91,10 +91,10 @@ export function selectedRecords(
 export interface ExportPayload {
   exported_at: string;
   count: number;
-  items: FinancialRecord[];
+  items: FinancialRecordSummary[];
 }
 
-export function buildExportPayload(items: FinancialRecord[]): ExportPayload {
+export function buildExportPayload(items: FinancialRecordSummary[]): ExportPayload {
   return {
     exported_at: new Date().toISOString(),
     count: items.length,
@@ -102,7 +102,7 @@ export function buildExportPayload(items: FinancialRecord[]): ExportPayload {
   };
 }
 
-export function buildExportBlob(items: FinancialRecord[]): Blob {
+export function buildExportBlob(items: FinancialRecordSummary[]): Blob {
   const payload = buildExportPayload(items);
   return new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
 }
@@ -122,7 +122,7 @@ export function buildExportFilename(now: Date = new Date()): string {
  * component can call it and tests can assert the pure helpers without
  * touching the DOM.
  */
-export function downloadSelection(items: FinancialRecord[]): void {
+export function downloadSelection(items: FinancialRecordSummary[]): void {
   const blob = buildExportBlob(items);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

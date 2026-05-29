@@ -179,6 +179,11 @@ class SidecarStatusResponse(_CompactBase):
 class LogTailResponse(_CompactBase):
     lines: list[str]
     truncated: bool
+    # Monotonic total line count of the underlying file (not just the returned
+    # tail). The UI's lines/min rate KPI must diff a value that keeps growing;
+    # diffing len(lines) plateaus at the cap once the file exceeds it and the
+    # rate reads 0 forever. Defaults to len(lines) for back-compat.
+    total_lines: int = 0
 
 
 class MarketQuote(_CompactBase):

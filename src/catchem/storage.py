@@ -17,6 +17,7 @@ import json
 import re
 import sqlite3
 import threading
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -181,6 +182,13 @@ class Storage:
         # overwrote the first batch. The ever-increasing sequence guarantees
         # a unique filename per flush regardless of clock resolution.
         self._parquet_seq = 0
+        # Per-instance token so two SEPARATE Storage objects pointed at the
+        # same parquet_dir (e.g. the demo path's transient Storage and the
+        # live supervisor's) can't mint byte-identical filenames on a
+        # same-second / same-seq / same-row-count flush and silently overwrite
+        # each other's batch — the seq counter alone only defeats collisions
+        # WITHIN one instance.
+        self._instance_id = uuid.uuid4().hex[:8]
         self._init_db()
 
     # ── DB --------------------------------------------------------------------
@@ -302,7 +310,18 @@ class Storage:
             # the inverted index inconsistent with the row. Issuing BEGIN
             # opens a real transaction so ``with conn:`` rolls the whole
             # write back atomically on any error and commits it as a unit.
-            conn.execute("BEGIN")
+            #
+            # BEGIN IMMEDIATE (not plain BEGIN/DEFERRED): a deferred
+            # transaction takes only a SHARED lock for the leading SELECT and
+            # tries to UPGRADE to RESERVED at the INSERT. If another
+            # connection to the SAME file (e.g. the demo path's transient
+            # Storage, which has its own in-process lock and so isn't
+            # serialized with us) also holds a SHARED lock, SQLite cannot
+            # resolve the upgrade by waiting and returns SQLITE_BUSY
+            # IMMEDIATELY — busy_timeout does NOT cover upgrade contention.
+            # IMMEDIATE acquires the write lock up front, so the second writer
+            # waits up to ``timeout`` instead of erroring out.
+            conn.execute("BEGIN IMMEDIATE")
             existed = conn.execute(
                 "SELECT 1 FROM records WHERE capture_id = ?",
                 (rec.capture_id,),
@@ -428,7 +447,7 @@ class Storage:
         self._parquet_seq += 1
         path = (
             self.parquet_dir
-            / f"records-{int(now.timestamp())}-{self._parquet_seq:06d}-{len(self._pending_rows):05d}.parquet"
+            / f"records-{int(now.timestamp())}-{self._instance_id}-{self._parquet_seq:06d}-{len(self._pending_rows):05d}.parquet"
         )
         pq.write_table(table, path)
         logger.info("parquet_flushed", path=str(path), rows=len(self._pending_rows))

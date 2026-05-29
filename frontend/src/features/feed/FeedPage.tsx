@@ -23,7 +23,7 @@ import {
   selectedRecords,
   toggleSelection,
 } from "@/features/feed/bulkSelection";
-import type { FinancialRecord } from "@/types/api";
+import type { FinancialRecordSummary } from "@/types/api";
 
 export function FeedPage() {
   // Subscribe to locale changes so the search placeholder and relevance
@@ -88,7 +88,7 @@ export function FeedPage() {
   const [alertThreshold, setAlertThresholdState] = useState<number>(() => getAlertThreshold());
 
 
-  const list = useQuery<{ items: FinancialRecord[] }>({
+  const list = useQuery<{ items: FinancialRecordSummary[] }>({
     queryKey: ["feed-list", filters.ac, filters.rc, filters.sym, filters.tag, filters.relevant],
     queryFn: async () => {
       // Tag filter wins when set — user tags are a deliberate analyst cut and
@@ -112,8 +112,8 @@ export function FeedPage() {
   // While a record is open in the drawer (or the user explicitly froze the
   // list), incoming rows are buffered instead of replacing the current
   // snapshot. This prevents the analyst's reading viewport from reordering.
-  const [stableRows, setStableRows] = useState<FinancialRecord[]>([]);
-  const [buffered, setBuffered] = useState<FinancialRecord[]>([]);
+  const [stableRows, setStableRows] = useState<FinancialRecordSummary[]>([]);
+  const [buffered, setBuffered] = useState<FinancialRecordSummary[]>([]);
   const isFrozen = !!captureId;
   // The last query key that fed `stableRows` — change → reset snapshot.
   const prevQueryKey = useRef<string>("");
@@ -973,7 +973,7 @@ function FeedStat({ label, value, hint, tone }: { label: string; value: string; 
 function FeedRow({
   r, onOpen, isFresh = false, isSelected = false, onToggleSelect, onFocusRow,
 }: {
-  r: FinancialRecord;
+  r: FinancialRecordSummary;
   onOpen: () => void;
   isFresh?: boolean;
   isSelected?: boolean;

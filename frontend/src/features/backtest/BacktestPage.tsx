@@ -242,8 +242,12 @@ export function BacktestPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.predictions_sample.map((p) => (
-                  <tr key={p.capture_id ?? `${p.predicted_score}-${p.ground_truth_score}`}>
+                {data.predictions_sample.map((p, i) => (
+                  // Fold the row index into the fallback key: two null-capture
+                  // rows can share identical predicted/ground-truth scores
+                  // (e.g. both 0.000/0.000), which would collide on a
+                  // score-only key and produce duplicate React keys.
+                  <tr key={p.capture_id ?? `row-${i}`}>
                     <td className="py-1 pr-2 font-mono">{p.capture_id ?? "—"}</td>
                     <td className="tabular-nums">{p.predicted_score.toFixed(3)}</td>
                     <td className="tabular-nums">{p.ground_truth_score.toFixed(3)}</td>

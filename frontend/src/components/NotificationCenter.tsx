@@ -169,7 +169,10 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
       system: 0,
     };
     for (const entry of history) {
-      const cat = entry.category ?? "toast";
+      const raw = entry.category ?? "toast";
+      // Guard against an out-of-union persisted category leaking a phantom
+      // key into the fixed Record (which would surface as NaN in the chips).
+      const cat = NOTIFICATION_CATEGORIES.includes(raw) ? raw : "toast";
       out[cat] += 1;
     }
     return out;
@@ -281,6 +284,10 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
             <ul className="grid gap-1">
               {filtered.map((entry) => {
                 const sev = severityFor(entry);
+                // Defensive: persisted entries may predate the current schema
+                // and lack `symbols`/`category`. Normalize at the read site so
+                // one malformed row can't white-screen the whole modal.
+                const symbols = Array.isArray(entry.symbols) ? entry.symbols : [];
                 const cat = entry.category ?? "toast";
                 const created = entry.createdAt ?? 0;
                 const isUnread = openedAt != null && created > openedAt;
@@ -319,14 +326,14 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
                       <div className="text-sm mt-0.5 text-[color:var(--fg)] line-clamp-2">
                         {entry.title}
                       </div>
-                      {(entry.domain || entry.symbols.length > 0 || entry.score > 0) && (
+                      {(entry.domain || symbols.length > 0 || entry.score > 0) && (
                         <div className="mt-1 flex flex-wrap items-center gap-1">
                           {entry.domain && (
                             <span className="text-[10px] text-[color:var(--fg-muted)] mr-1">
                               {entry.domain}
                             </span>
                           )}
-                          {entry.symbols.slice(0, 4).map((s) => (
+                          {symbols.slice(0, 4).map((s) => (
                             <Pill key={s} variant="sym">{s}</Pill>
                           ))}
                           {entry.score > 0 && (

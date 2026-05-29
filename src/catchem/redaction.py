@@ -21,6 +21,7 @@ crosses the wire.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -81,10 +82,22 @@ def safe_guard_view(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Strip filesystem path-like runs before substring matching so an
+# operator-chosen path (the default newsimpact_repo is "/tmp/merged_news-missing",
+# which literally contains "missing") can't hijack the classification. Matches
+# absolute POSIX/Windows paths embedded anywhere in the message.
+_PATH_RUN = re.compile(r"(?:[A-Za-z]:)?[\\/][^\s'\"]*")
+
+
 def _classify_guard_error(msg: str | None) -> str:
     if not msg:
         return "unknown"
-    msg = str(msg).lower()
+    # Drop path runs FIRST so path contents (e.g. ".../merged_news-missing/...")
+    # never drive the substring search — classification keys off the structured
+    # error wording the guard layer produces, not operator path strings. The
+    # keyword precedence below is unchanged (missing → unreadable/parse → …) so
+    # existing branch contracts still hold; only the path is no longer matchable.
+    msg = _PATH_RUN.sub(" ", str(msg)).lower()
     if "missing" in msg:
         return "missing_governance_index"
     if "unreadable" in msg or "parse" in msg:

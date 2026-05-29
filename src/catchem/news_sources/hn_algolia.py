@@ -42,7 +42,7 @@ from ..news_poller import (
 # `tags=story` restricts to submissions (drops comments/polls); a healthy
 # per-query page keeps each tick's recall high. Dedup absorbs the inevitable
 # overlap across polls.
-_HN_ALGOLIA_API = "http://hn.algolia.com/api/v1/search_by_date"
+_HN_ALGOLIA_API = "https://hn.algolia.com/api/v1/search_by_date"
 
 # Canonical HN discussion-page template — used when a hit has no external URL.
 _HN_ITEM_URL = "https://news.ycombinator.com/item?id={object_id}"

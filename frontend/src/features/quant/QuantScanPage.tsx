@@ -280,6 +280,7 @@ export function QuantScanPage() {
             cluster={selectedCluster}
             onClose={() => selectCluster(null)}
             watchlist={watchlist}
+            windowSize={windowSize}
           />
         ) : selectedCell ? (
           <HeatmapDetailDrawer
@@ -2103,10 +2104,12 @@ function ClusterDrillDown({
   cluster,
   onClose,
   watchlist,
+  windowSize,
 }: {
   cluster: EventClusterDTO;
   onClose: () => void;
   watchlist: string[];
+  windowSize: number;
 }) {
   const [narrative, setNarrative] = useState<string | null>(null);
   const [narrativeSource, setNarrativeSource] = useState<"deepseek" | "local" | null>(null);
@@ -2120,9 +2123,14 @@ function ClusterDrillDown({
   // Load actual member records (titles, scores, domains) alongside the
   // cluster summary. This is what turns the drawer from "a cluster
   // exists" into "here's what's IN the cluster" — drill-down depth.
+  // Thread the dashboard's windowSize so the backend re-clusters over the
+  // SAME corpus and the clicked cluster_id reproduces. Without this, any
+  // non-default window 404s the drill-down (the backend re-clusters over its
+  // own default window=1000 and computes a different membership set/id). The
+  // windowSize is part of the query key so a window change refetches.
   const members = useQuery({
-    queryKey: ["quant-cluster-members", cluster.cluster_id],
-    queryFn: () => api.quantClusterMembers(cluster.cluster_id, 20),
+    queryKey: ["quant-cluster-members", cluster.cluster_id, windowSize],
+    queryFn: () => api.quantClusterMembers(cluster.cluster_id, 20, windowSize),
     staleTime: 30_000,
   });
   // Trigger DeepSeek narrative on open.

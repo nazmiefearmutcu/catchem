@@ -767,6 +767,12 @@ class WebSocketNewsChannel:
             if self._sup.storage.get_record(cap_id) is not None:
                 return
         except Exception as exc:  # storage hiccup must not kill the reader
+            # Roll back the speculative `_seen.add(canon)` above (mirroring the
+            # ingest-failure path below) so a transient storage error on the
+            # dedup probe doesn't permanently suppress this URL: without the
+            # discard, the next arrival short-circuits at `if canon in self._seen`
+            # and is silently dropped until LRU eviction ~4096 URLs later.
+            self._seen.discard(canon)
             logger.info("ws_push_storage_check_failed", source=spec.name, error=str(exc))
             return
         try:

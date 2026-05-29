@@ -40,6 +40,13 @@ def bootstrap(skip_warm: bool = True) -> dict[str, Any]:
     if guard["status"] == "fail":
         logger.error("guard_failed", **guard)
         return summary
+    # A 'skip' means the guard verifier could not run at all (e.g. the script was
+    # not found in a packaged/wheel install). In production_safe mode that is a
+    # silent bypass of the NewsImpact quarantine gate — the opposite of the
+    # intended defense-in-depth — so treat it as fail-stop, not a quiet no-op.
+    if guard["status"] == "skip" and s.is_production_safe():
+        logger.error("guard_skipped_in_production_safe", **guard)
+        return summary
 
     # 4. (optional) warm HF cache
     summary["models_warmed"] = False
@@ -57,15 +64,43 @@ def bootstrap(skip_warm: bool = True) -> dict[str, Any]:
 
 
 def _count_finalized_jsonl(awareness_data_dir: Path) -> int:
-    root = awareness_data_dir / "jsonl"
-    if not root.exists():
-        return 0
-    return sum(1 for _ in root.glob("**/*.jsonl") if not _.name.endswith(".tmp"))
+    # Reuse the SAME discovery the reader/replay path uses: when Awareness writes
+    # captures directly under data_dir (no `jsonl/` subdir),
+    # discover_awareness_jsonl_root falls back to data_dir itself, so a hardcoded
+    # `data_dir / "jsonl"` scan reports 0 while replay actually finds & processes
+    # those files — a bootstrap health summary that lies about input availability.
+    from .awareness_reader import discover_awareness_jsonl_root, iter_finalized_files
+
+    root = discover_awareness_jsonl_root(awareness_data_dir)
+    return len(iter_finalized_files(root))
+
+
+def _verifier_script_path() -> Path | None:
+    """Locate scripts/verify_newsimpact_guard.py across source AND wheel layouts.
+
+    In an editable/source checkout the script lives at <repo>/scripts/ (parents[2]
+    of this module). In a packaged wheel the module is at
+    site-packages/catchem/bootstrap.py so parents[2] is site-packages — the repo
+    `scripts/` is not there. The wheel force-includes `scripts/**` (pyproject
+    [tool.hatch.build ... include]), which lands them next to the package, so we
+    also probe parents[1]/scripts (site-packages/scripts) and a packaged
+    `catchem/scripts/` copy. First existing path wins.
+    """
+    here = Path(__file__).resolve()
+    candidates = (
+        here.parents[2] / "scripts" / "verify_newsimpact_guard.py",  # source layout
+        here.parents[1] / "scripts" / "verify_newsimpact_guard.py",  # wheel: alongside pkg
+        here.parent / "scripts" / "verify_newsimpact_guard.py",       # wheel: inside pkg
+    )
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
 
 
 def _run_guard_verifier(newsimpact_root: Path) -> dict[str, Any]:
-    script = Path(__file__).resolve().parents[2] / "scripts" / "verify_newsimpact_guard.py"
-    if not script.exists():
+    script = _verifier_script_path()
+    if script is None:
         return {"status": "skip", "reason": "verifier_missing"}
     try:
         res = subprocess.run(

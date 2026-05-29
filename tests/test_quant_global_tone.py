@@ -522,3 +522,67 @@ def test_summarize_tone_all_dateless_falls_back_to_input_order() -> None:
     s = gt.summarize_tone([{"value": 1.0}, {"value": 2.0}, {"value": 9.0}])
     assert s["latest_tone"] == 9.0  # last in input order
     assert s["n_points"] == 3
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# /api/quant/global-tone single-flight (v80 audit fix)
+#
+# The old design held a threading.Lock only around the cache read/write, NOT
+# across the awaited GDELT fan-out, so N concurrent misses each fanned out —
+# the very stampede the cache exists to prevent. The fix holds a per-loop
+# asyncio.Lock across the fetch (double-checked inside), coalescing concurrent
+# misses into ONE compute.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_endpoint_single_flight_coalesces_concurrent_misses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "false")
+    monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "false")
+    reload_settings()
+    app = create_app(load_settings())
+
+    calls = {"n": 0}
+
+    async def _slow_compute(themes=None, *, client=None):
+        # Count fan-outs; sleep so the concurrent requests overlap inside the
+        # single-flight window (the first holds the lock, the rest wait).
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "by_theme": {"markets": {"n_points": 3, "latest_tone": 1.0}},
+            "overall_tone": 1.0,
+            "overall_state": "stable",
+        }
+
+    monkeypatch.setattr("catchem.quant.global_tone.compute_global_tone", _slow_compute)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+        results = await asyncio.gather(
+            *(ac.get("/api/quant/global-tone") for _ in range(6))
+        )
+
+    assert all(r.status_code == 200 for r in results)
+    # All six requests return the same payload…
+    assert all(r.json()["overall_tone"] == 1.0 for r in results)
+    # …but only ONE actually fanned out to GDELT (single-flight coalescing).
+    assert calls["n"] == 1, "6 concurrent misses must coalesce into a single compute"
+
+
+@pytest.mark.asyncio
+async def test_global_tone_lock_is_per_running_loop() -> None:
+    # The single-flight lock is created lazily per running loop and is stable
+    # within a loop (so concurrent requests on that loop share it).
+    from catchem import api as api_mod
+
+    lock_a = api_mod._global_tone_lock()
+    lock_b = api_mod._global_tone_lock()
+    assert lock_a is lock_b, "same running loop must reuse one lock"
+    assert isinstance(lock_a, asyncio.Lock)

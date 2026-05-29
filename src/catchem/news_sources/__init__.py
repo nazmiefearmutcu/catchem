@@ -36,7 +36,12 @@ def _discover() -> list[str]:
     repeated calls don't re-run registration.
     """
     loaded: list[str] = []
-    for mod in pkgutil.iter_modules(__path__):
+    # Import in a STABLE (name-sorted) order. `pkgutil.iter_modules` yields in
+    # filesystem order, which is not guaranteed across platforms/filesystems —
+    # and registration order is what `assemble_feeds` first-wins dedup keys on,
+    # so an unsorted walk could change which feed survives a name/URL collision
+    # between runs. Sorting makes discovery (and the final feed list) deterministic.
+    for mod in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
         name = mod.name
         if name.startswith("_"):
             continue  # private helpers, not source packs

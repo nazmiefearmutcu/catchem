@@ -97,15 +97,12 @@ def test_spend_history_aggregates_multiple_days(client: TestClient) -> None:
     """Two days with multiple calls each → 2 rows, correct USD + count."""
     now = datetime.now(UTC)
     db = _db_path(client)
-    # Day 0 (today): 2 calls, $0.01 + $0.02 = $0.03
+    # Day 0 (today): 2 calls, $0.01 + $0.02 = $0.03. Both anchored to the SAME
+    # instant (`now`) so the two calls always share a calendar day. (A prior
+    # `now - 1h` offset straddled midnight when the suite ran in the 00:00-01:00
+    # UTC window, splitting Day 0 into two day-rows and failing the count.)
     _insert_review(db, capture_id="cap-A", reviewer_id="deepseek", usd_cost=0.01, created_at=now)
-    _insert_review(
-        db,
-        capture_id="cap-B",
-        reviewer_id="deepseek",
-        usd_cost=0.02,
-        created_at=now - timedelta(hours=1),
-    )
+    _insert_review(db, capture_id="cap-B", reviewer_id="deepseek", usd_cost=0.02, created_at=now)
     # Day -2: 1 call, $0.005
     _insert_review(
         db,

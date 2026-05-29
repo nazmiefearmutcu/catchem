@@ -5,6 +5,7 @@ Both CLI and API construct a Supervisor and call ``run_*`` / ``process_one``.
 
 from __future__ import annotations
 
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
@@ -77,6 +78,13 @@ class Supervisor:
             "filtered": 0,
             "failed": 0,
         }
+        # webhook_stats is mutated from SEVERAL threads: `attempted` on the
+        # ingest worker(s) — process_capture runs in the poller's to_thread
+        # pool (up to 4) plus the WS-push reader — and sent/filtered/failed on
+        # the _webhook_pool workers. `dict[key] += 1` is a non-atomic
+        # read-modify-write, so concurrent increments silently drop counts.
+        # This lock serialises every mutation (and snapshot).
+        self._webhook_stats_lock = threading.Lock()
         self.webhook_last_status: str | None = None
         self.webhook_last_error: str | None = None
         logger.info(
@@ -123,7 +131,8 @@ class Supervisor:
         except Exception as exc:
             logger.warning("webhook_serialize_failed", error=str(exc))
             return
-        self.webhook_stats["attempted"] += 1
+        with self._webhook_stats_lock:
+            self.webhook_stats["attempted"] += 1
         try:
             self._webhook_pool.submit(self._webhook_runner, payload)
         except RuntimeError:
@@ -132,24 +141,33 @@ class Supervisor:
 
     def _webhook_runner(self, record: dict[str, Any]) -> None:
         """Thread-pool entry point. Updates counters; never raises."""
-        ok, status = send_webhook(record, self.settings.webhook)
+        ok, status = send_webhook(record, self.settings.webhook)  # network — outside the lock
         self.webhook_last_status = status
         if ok:
-            self.webhook_stats["sent"] += 1
+            with self._webhook_stats_lock:
+                self.webhook_stats["sent"] += 1
             self.webhook_last_error = None
         elif status == "filtered":
             # filtered is the by-design "skipped" path — don't count it
             # as a failure. The `attempted` counter still ticked because
             # we *tried* to dispatch.
-            self.webhook_stats["filtered"] += 1
+            with self._webhook_stats_lock:
+                self.webhook_stats["filtered"] += 1
         else:
-            self.webhook_stats["failed"] += 1
+            with self._webhook_stats_lock:
+                self.webhook_stats["failed"] += 1
             self.webhook_last_error = status
             logger.info(
                 "webhook_post_failed",
                 status=status,
                 capture_id=record.get("capture_id"),
             )
+
+    def webhook_stats_snapshot(self) -> dict[str, int]:
+        """A consistent copy of the webhook counters, taken under the lock so
+        callers (e.g. /api/webhook/status) never read a half-applied set."""
+        with self._webhook_stats_lock:
+            return dict(self.webhook_stats)
 
     # ── second-opinion hook (deterministic sampling + budget guard) ──────
     def _maybe_schedule_second_opinion(

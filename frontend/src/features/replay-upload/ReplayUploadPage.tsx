@@ -239,7 +239,17 @@ function PasteForm() {
 
   const m = useMutation({
     mutationFn: () => api.demoPaste({ title, text, domain, url: url || undefined }),
-    onSuccess: (r) => setResult(r),
+    onSuccess: (r) => {
+      setResult(r);
+      // The helper text promises the body is "cleared once you click
+      // Analyze", so honour it: empty the pasted inputs on success (the
+      // result is kept on screen). Without this the textarea retained the
+      // stale body and the displayed promise was false.
+      setTitle("");
+      setText("");
+      setDomain("demo.local");
+      setUrl("");
+    },
   });
   const runElapsed = useElapsed(m.isPending);
 

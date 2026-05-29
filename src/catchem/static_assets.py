@@ -34,6 +34,14 @@ from pathlib import Path
 
 # Track extracted-from-zip temp paths so they stay valid for the process lifetime.
 _KEEPALIVE = ExitStack()
+# Memoize each resolved asset path so `as_file` enters the keepalive ExitStack
+# (and, for zipped installs, extracts a temp copy) at most ONCE per distinct
+# name. These resolvers are on the per-request hot path; without the cache every
+# GET '/' / favicon hit leaked a closure (on-disk) or a fresh temp file (zip)
+# that was never released for the process lifetime. Keyed by name plus a
+# sentinel for the package-level `static` dir used by `static_dir()`.
+_RESOLVED_PATHS: dict[str, Path] = {}
+_STATIC_DIR_KEY = "\x00static-dir"
 
 
 def _validate_name(name: str) -> str:
@@ -78,8 +86,13 @@ def static_dir() -> Path:
         p = Path(env_dir).expanduser().resolve()
         if p.is_dir():
             return p
+    cached = _RESOLVED_PATHS.get(_STATIC_DIR_KEY)
+    if cached is not None:
+        return cached
     resource = files("catchem").joinpath("static")
-    return Path(_KEEPALIVE.enter_context(as_file(resource)))
+    resolved = Path(_KEEPALIVE.enter_context(as_file(resource)))
+    _RESOLVED_PATHS[_STATIC_DIR_KEY] = resolved
+    return resolved
 
 
 def get_static_path(name: str) -> Path | None:
@@ -98,6 +111,10 @@ def get_static_path(name: str) -> Path | None:
     if override is not None:
         return override
 
+    cached = _RESOLVED_PATHS.get(name)
+    if cached is not None:
+        return cached
+
     try:
         resource = files("catchem").joinpath("static", name)
     except (FileNotFoundError, ModuleNotFoundError):
@@ -105,7 +122,9 @@ def get_static_path(name: str) -> Path | None:
 
     if not resource.is_file():
         return None
-    return Path(_KEEPALIVE.enter_context(as_file(resource)))
+    resolved = Path(_KEEPALIVE.enter_context(as_file(resource)))
+    _RESOLVED_PATHS[name] = resolved
+    return resolved
 
 
 def open_static_bytes(name: str) -> bytes | None:

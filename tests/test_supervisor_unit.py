@@ -257,18 +257,27 @@ def test_budget_cache_invalidation_hook_rereads_storage(
     tmp_path: Path, write_jsonl, synth_capture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`invalidate_budget_cache()` drops the cached spend so the next read
-    hits SQLite again — the post-ingest hook the API relies on."""
+    re-aggregates from SQLite — the post-ingest hook the API relies on.
+
+    Spend recorded via ``add_spend()`` is now DURABLE (it writes a ledger
+    row), so it survives the cache invalidation. This is the fix for the
+    bug where narrative/stream spend lived only in memory and was silently
+    discarded whenever a settings PATCH invalidated the cache — which let
+    real DeepSeek spend quietly exceed ``usd_cap``. The re-read must still
+    reflect the recorded spend so the cap holds across an invalidation.
+    """
     sup = _make_supervisor(tmp_path, write_jsonl, synth_capture, monkeypatch)
     try:
         # Prime the cache.
         first = sup.reviewers.budget_state()
         assert first.spent_usd == 0.0
-        # Simulate spend accounting, then invalidate.
+        # Record spend, then force a storage re-read.
         sup.reviewers.add_spend(1.25)
         assert sup.reviewers.budget_state().spent_usd == pytest.approx(1.25)
         sup.reviewers.invalidate_budget_cache()
-        # Storage has no review rows, so a fresh read returns 0 again.
-        assert sup.reviewers.budget_state().spent_usd == 0.0
+        # Durable: the fresh re-read still sees the spend (regression guard —
+        # it used to drop to 0.0 here, bypassing the cap).
+        assert sup.reviewers.budget_state().spent_usd == pytest.approx(1.25)
     finally:
         sup.close()
 

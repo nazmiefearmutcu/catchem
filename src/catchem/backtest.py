@@ -38,7 +38,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-
 # Quintile cut points. Closed-open intervals `[low, high)` except the last
 # bin which is closed-closed so a perfect 1.0 prediction lands in 0.8-1.0
 # instead of being silently dropped. Tests pin both boundary behaviors.

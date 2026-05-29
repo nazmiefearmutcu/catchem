@@ -22,8 +22,8 @@ from ..schemas import AwarenessCaptureView
 from ..taxonomy import Taxonomy
 from .base import (
     REVIEWER_DEEPSEEK,
-    ReviewPayload,
     ReviewerError,
+    ReviewPayload,
 )
 from .prompts import SYSTEM_INSTRUCTION, build_user_prompt
 

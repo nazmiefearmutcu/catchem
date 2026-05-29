@@ -64,6 +64,15 @@ logger = get_logger("catchem.ws_push")
 # for a persistent socket rather than a per-tick fetch.
 WS_BACKOFF_LADDER_SECONDS: tuple[float, ...] = (1.0, 2.0, 5.0, 15.0, 30.0, 60.0)
 
+# Hard ceiling on the SSE accumulation buffer. The SSE read timeout is
+# intentionally infinite (an idle stream between events is normal), so a
+# misbehaving / hostile endpoint that streams bytes without ever emitting an
+# event boundary ("\n\n") would otherwise grow `buffer` without limit until
+# OOM. A few MB is far larger than any legitimate single SSE event; crossing it
+# means the peer is not speaking SSE, so we drop the connection and let the
+# backoff loop reconnect.
+MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024
+
 # Common JSON keys a squawk/news frame uses for its title + URL. Frames vary
 # wildly across providers, so we probe a small ordered set rather than pin one
 # shape. First non-empty wins. Operators with an exotic frame can pre-transform
@@ -603,7 +612,16 @@ class WebSocketNewsChannel:
                 raise
             except Exception as exc:
                 st.connected = False
-                st.consecutive_failures += 1
+                # A drop via exception (abnormal WS close, SSE network error) is
+                # the COMMON real-world failure. Mirror the graceful-return path:
+                # a session that delivered ≥1 frame is evidence the source is
+                # alive, so reset the failure count and reconnect at the fastest
+                # cadence — only escalate backoff when ZERO frames were seen
+                # (the signature of a never-connecting / dead endpoint).
+                if st.messages_received > messages_before:
+                    st.consecutive_failures = 0
+                else:
+                    st.consecutive_failures += 1
                 st.reconnects += 1
                 st.state = "error"
                 st.last_error = f"{exc.__class__.__name__}: {exc}"
@@ -689,6 +707,15 @@ class WebSocketNewsChannel:
                         return
                     buffer += chunk
                     payloads, buffer = _iter_sse_data_lines(buffer)
+                    # Guard against an endpoint that never emits an event
+                    # boundary: the remainder buffer would grow unbounded under
+                    # the infinite read timeout. Raise so the caller's backoff
+                    # loop reconnects instead of leaking memory until OOM.
+                    if len(buffer) > MAX_SSE_BUFFER_BYTES:
+                        raise RuntimeError(
+                            f"sse_buffer_overflow: {len(buffer)} bytes "
+                            f"without an event boundary (max {MAX_SSE_BUFFER_BYTES})"
+                        )
                     for payload in payloads:
                         if self._stop.is_set():
                             return

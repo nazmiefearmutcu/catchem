@@ -837,7 +837,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  portfolioDelete: (id: string) =>
+  portfolioDelete: (id: number) =>
     request<{ ok: boolean }>(`/api/portfolio/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
@@ -1545,8 +1545,10 @@ export function fmtDate(iso: string | null | undefined): string {
  *  - Future timestamps render as "in Xm" (rare — happens when the user
  *    pastes an article with a published_ts ahead of system clock, or
  *    when small clock skew makes a fresh ingest read as +1s).
- *  - Beyond 14 days, falls back to an absolute YYYY-MM-DD date so the
- *    UI doesn't accumulate "364d ago" oddities.
+ *  - Beyond 14 days in the PAST, falls back to an absolute YYYY-MM-DD date
+ *    so the UI doesn't accumulate "364d ago" oddities. Beyond 14 days in the
+ *    FUTURE it stays on the relative rail ("in Nd") — an absolute date there
+ *    would misleadingly read as a past instant.
  *
  * The {@link nowMs} parameter is for unit tests; production callers
  * omit it and we read Date.now() per call.
@@ -1566,7 +1568,11 @@ export function fmtRel(iso: string | null | undefined, nowMs: number = Date.now(
   if (absDelta < 3_600_000) return value(Math.floor(absDelta / 60_000), "m");
   if (absDelta < 86_400_000) return value(Math.floor(absDelta / 3_600_000), "h");
   if (absDelta < 14 * 86_400_000) return value(Math.floor(absDelta / 86_400_000), "d");
-  // Old item — show the date so the analyst doesn't see "92d ago".
+  // Old item (>14d in the PAST) — show the date so the analyst doesn't see
+  // "92d ago". Far-future timestamps (clock skew / a mis-pasted article) must
+  // NOT hit this branch: an absolute date there reads as if it were past, so
+  // keep them on the relative "in Nd" rail.
+  if (delta < 0) return value(Math.floor(absDelta / 86_400_000), "d");
   try {
     const d = new Date(t);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

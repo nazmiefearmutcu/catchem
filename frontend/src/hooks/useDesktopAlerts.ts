@@ -345,12 +345,34 @@ export function __resetNotificationStoreForTests(): void {
   _viewedEmit();
 }
 
+// Upper bound on the dedupe Set. Each tick only inspects api.recent(40), so
+// any id that can still re-appear lives well within the most-recent window.
+// A cap two orders of magnitude above 40 keeps the structure trivially small
+// while leaving generous headroom against rapid id churn. Without this the
+// Set grows monotonically for the lifetime of a long-lived desktop session.
+const NOTIFIED_CAP = 2_000;
+
 export function useDesktopAlerts(): void {
   const notified = useRef<Set<string>>(new Set());
   const seededRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
+
+    // Drop the oldest ids (insertion order is preserved by Set iteration)
+    // once the dedupe Set exceeds NOTIFIED_CAP, keeping only the most recent
+    // window. Prevents unbounded growth across a long-running session.
+    function pruneNotified() {
+      const set = notified.current;
+      if (set.size <= NOTIFIED_CAP) return;
+      const overflow = set.size - NOTIFIED_CAP;
+      const it = set.values();
+      for (let i = 0; i < overflow; i += 1) {
+        const { value, done } = it.next();
+        if (done) break;
+        set.delete(value);
+      }
+    }
 
     async function tick() {
       if (typeof window === "undefined") return;
@@ -362,6 +384,7 @@ export function useDesktopAlerts(): void {
         if (!seededRef.current) {
           items.forEach((r: FinancialRecord) => notified.current.add(r.capture_id));
           seededRef.current = true;
+          pruneNotified();
           return;
         }
         // Re-read each tick so the user's choice via the threshold
@@ -384,6 +407,7 @@ export function useDesktopAlerts(): void {
           });
         }
         items.forEach((r: FinancialRecord) => notified.current.add(r.capture_id));
+        pruneNotified();
       } catch {
         /* network blip — try again next tick */
       }

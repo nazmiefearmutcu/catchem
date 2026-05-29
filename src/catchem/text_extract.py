@@ -36,22 +36,29 @@ class _HTMLToText(HTMLParser):
         self._buf = StringIO()
         self._skip = 0
         self._first_heading: str | None = None
-        self._cap_next_heading_chars = 0
+        # Capture the heading's own text into a dedicated buffer instead of
+        # rsplit-ing the main buffer — otherwise inline text preceding the
+        # heading (e.g. "<span>Advertisement </span><h1>…</h1>") bleeds into
+        # the captured title, and multi-line headings fold to their last line.
+        self._in_heading = 0
+        self._heading_buf = StringIO()
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag in ("script", "style", "noscript", "iframe", "object", "embed"):
             self._skip += 1
         if tag in ("h1", "h2", "h3") and self._first_heading is None:
-            self._cap_next_heading_chars = 200
+            self._in_heading += 1
+            self._heading_buf = StringIO()
 
     def handle_endtag(self, tag: str) -> None:
         if tag in ("script", "style", "noscript", "iframe", "object", "embed"):
             self._skip = max(0, self._skip - 1)
-        if tag in ("h1", "h2", "h3") and self._cap_next_heading_chars > 0:
-            heading = self._buf.getvalue().rsplit("\n", 1)[-1].strip()
+        if tag in ("h1", "h2", "h3") and self._in_heading > 0:
+            self._in_heading = 0
+            # Collapse internal whitespace (incl. <br>-injected newlines).
+            heading = " ".join(self._heading_buf.getvalue().split())
             if heading:
-                self._first_heading = heading
-            self._cap_next_heading_chars = 0
+                self._first_heading = heading[:200].strip()
         if tag in ("p", "div", "br", "li", "tr"):
             self._buf.write("\n")
 
@@ -59,6 +66,8 @@ class _HTMLToText(HTMLParser):
         if self._skip:
             return
         self._buf.write(data)
+        if self._in_heading and self._first_heading is None:
+            self._heading_buf.write(data)
 
     @property
     def text(self) -> str:
@@ -153,7 +162,10 @@ def extract_text(filename: str, body: bytes) -> tuple[str | None, str]:
             t = obj.get("text") or obj.get("body") or ""
             title = obj.get("title")
             if t:
-                return title, str(t)
+                # Coerce a non-string title the same way as the body so the
+                # caller can safely `.strip()` the returned title hint — a
+                # crafted `{"title": 123}` must not crash the upload route.
+                return (str(title) if title is not None else None), str(t)
             raise ValueError("json upload has no 'text' field")
         raise ValueError("json upload must be an object with 'text' field")
 

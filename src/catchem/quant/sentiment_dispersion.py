@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 __all__ = [
     "DispersionResult",
-    "compute_dispersion",
     "compute_by_scope",
+    "compute_dispersion",
 ]
 
 

@@ -29,6 +29,7 @@ SSRF defense:
 from __future__ import annotations
 
 import ipaddress
+import socket
 from typing import Any
 from urllib.parse import urlparse
 
@@ -51,6 +52,33 @@ _BLOCKED_HOSTNAMES = frozenset({
     "ip6-localhost",
     "ip6-loopback",
 })
+
+
+def _looks_like_ipv4_shorthand(host: str) -> bool:
+    """True if `host` is a numeric/hex IPv4 literal that needs normalisation.
+
+    Catches the legacy forms ``ipaddress.ip_address`` rejects but the OS
+    resolver still maps to a real IPv4 address: a bare integer (``2130706433``),
+    a hex word (``0x7f000001``), short dotted (``127.1``), or any dotted form
+    whose every octet is a digit/hex token. A genuine DNS name always has at
+    least one label that is NOT a pure number/hex token (a TLD is alphabetic),
+    so this never matches ``slack.com`` / ``hooks.foo.io``. A standard
+    dotted-quad also matches, which is harmless — inet_aton round-trips it.
+    """
+    parts = host.split(".")
+    for part in parts:
+        if not part:
+            return False
+        token = part[2:] if part.lower().startswith("0x") else part
+        if not token:
+            return False
+        # Each octet must be all-decimal, or all-hex when 0x-prefixed.
+        if part.lower().startswith("0x"):
+            if not all(c in "0123456789abcdef" for c in token.lower()):
+                return False
+        elif not token.isdigit():
+            return False
+    return True
 
 
 def is_safe_webhook_url(url: str) -> bool:
@@ -104,6 +132,23 @@ def is_safe_webhook_url(url: str) -> bool:
         return False
     if host.endswith(".local"):
         return False
+    # Legacy IPv4 shorthands first. `ipaddress.ip_address` accepts ONLY
+    # dotted-quad / standard IPv6 and raises ValueError for the integer
+    # (``2130706433``), hex (``0x7f.0.0.1``), and short (``127.1``) forms —
+    # but the OS resolver maps all of them to a real address (127.0.0.1 for
+    # the examples). If we fell straight through to "hostname, accepted"
+    # those would bypass the loopback/metadata gate. So when a host looks
+    # like an all-numeric / hex IPv4 shorthand (no DNS-style label can be
+    # purely digits/hex-dotted), normalise it via inet_aton and run the
+    # taxonomy on the canonical dotted-quad. Genuinely alphabetic DNS names
+    # (slack.com, hooks.foo.io) fall through to "accepted".
+    if _looks_like_ipv4_shorthand(host):
+        try:
+            host = socket.inet_ntoa(socket.inet_aton(host))
+        except OSError:
+            # inet_aton couldn't make sense of it — not a usable IPv4 form;
+            # let the taxonomy below reject/accept on its own terms.
+            pass
     # IP literal? Run the full taxonomy. ip_address handles both IPv4
     # and IPv6, and rejects malformed strings via ValueError — those
     # are necessarily hostnames, which we accept (DNS-time defense is

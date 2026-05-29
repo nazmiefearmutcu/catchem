@@ -205,9 +205,29 @@ class Supervisor:
             logger.debug("deepseek_executor_unavailable", capture_id=cap.capture_id)
 
     # ── replay ───────────────────────────────────────────────────────────
-    def run_replay(self, max_records: int | None = None) -> dict[str, Any]:
-        root = discover_awareness_jsonl_root(self.settings.paths.awareness_data_dir)
-        runner = ReplayRunner(root=root, storage=self.storage, offset_persist_seconds=self.settings.replay.offset_persist_seconds)
+    def run_replay(
+        self, max_records: int | None = None, *, file: Path | None = None
+    ) -> dict[str, Any]:
+        """Replay finalized Awareness JSONL into storage.
+
+        ``file`` honors the CLI's documented single-file contract
+        (``catchem replay --path FILE``): when given, ONLY that one file is
+        ingested rather than every ``*.jsonl`` under its parent. It is scoped
+        by pointing the runner's root at the file's parent and using the exact
+        filename as the glob pattern, so siblings/descendants are not swept in.
+        ``file=None`` keeps the directory-discovery behavior (recursive
+        ``**/*.jsonl`` under the configured awareness data dir).
+        """
+        if file is not None:
+            root = file.parent
+            pattern = file.name
+        else:
+            root = discover_awareness_jsonl_root(self.settings.paths.awareness_data_dir)
+            # Honor the configured replay glob (relative to the discovered
+            # root) so `replay.awareness_jsonl_glob` actually scopes the scan
+            # rather than being dead config.
+            pattern = self.settings.replay.replay_pattern()
+        runner = ReplayRunner(root=root, storage=self.storage, pattern=pattern, offset_persist_seconds=self.settings.replay.offset_persist_seconds)
         records_before = self.storage.count_records()
         dlq_before = self.storage.dlq_count()
         inserted = 0

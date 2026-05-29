@@ -21,14 +21,15 @@ prefix style.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 __all__ = [
     "IntensityBucket",
     "_record_intensity",
-    "compute_overall",
     "compute_by_scope",
+    "compute_overall",
 ]
 
 

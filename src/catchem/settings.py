@@ -67,9 +67,36 @@ class GuardConfig(BaseModel):
 class ReplayConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     batch_size: int = 32
+    # Glob that scopes which finalized JSONL files a directory replay ingests.
+    # Resolved RELATIVE to the discovered awareness JSONL root (see
+    # Supervisor.run_replay → ReplayConfig.replay_pattern). The historical
+    # default carried a `data/jsonl/captures/` prefix that duplicated the root
+    # discovery; only the trailing portion past a `jsonl/` segment is used so
+    # the knob now actually narrows the scan instead of being a silent no-op.
     awareness_jsonl_glob: str = "data/jsonl/captures/**/*.jsonl"
     text_excerpt_chars: int = 2000
     offset_persist_seconds: float = 5.0
+
+    def replay_pattern(self) -> str:
+        """The glob to hand ReplayRunner, relative to the discovered root.
+
+        ``discover_awareness_jsonl_root`` already resolves down to the
+        ``…/jsonl`` directory, so a configured glob like
+        ``data/jsonl/captures/**/*.jsonl`` is trimmed to the part AFTER the
+        first ``jsonl/`` segment (``captures/**/*.jsonl``) to avoid a
+        double-``jsonl`` path that would match nothing. Globs without a
+        ``jsonl/`` segment are used verbatim. Empty / blank falls back to the
+        recursive default so a mis-set value never silently matches zero files.
+        """
+        raw = (self.awareness_jsonl_glob or "").strip()
+        if not raw:
+            return "**/*.jsonl"
+        marker = "jsonl/"
+        idx = raw.find(marker)
+        if idx != -1:
+            tail = raw[idx + len(marker):]
+            return tail or "**/*.jsonl"
+        return raw
 
 
 class LiveConfig(BaseModel):

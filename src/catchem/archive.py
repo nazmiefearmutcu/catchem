@@ -147,8 +147,30 @@ def _list_from_json(raw: str | None) -> str:
     return ", ".join(str(p) for p in parts)
 
 
+# Excel / Numbers / Sheets EXECUTE a cell whose text begins with one of these
+# as a FORMULA. Since titles/reasoning/domains come from external RSS feeds, an
+# attacker-influenced value like "=HYPERLINK(...)" or "+cmd|'/C calc'!A0" would
+# run the moment the user opens the archive CSV — CSV formula injection
+# (CWE-1236). The module's whole point is "open cleanly in Excel", so we
+# neutralize it: a leading apostrophe (the OWASP-recommended escape) forces the
+# spreadsheet to treat the cell as literal text and the formula never evaluates.
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: str) -> str:
+    """Prefix a leading formula-trigger char with `'` so spreadsheets keep the
+    cell as text. No-op for ordinary values (the common case)."""
+    if value and value[0] in _CSV_FORMULA_TRIGGERS:
+        return "'" + value
+    return value
+
+
 def row_to_csv_dict(row: dict[str, Any]) -> dict[str, str]:
-    """Project a SQLite row into the flat CSV schema. Pure function — tested."""
+    """Project a SQLite row into the flat CSV schema. Pure function — tested.
+
+    Externally-sourced text columns are run through `_csv_safe` to defuse CSV
+    formula injection; system-generated numeric/flag/date/id columns are left
+    untouched (they can never begin with a formula trigger)."""
     reason_text = (row.get("reason_text") or "").strip()
     evidence_raw = row.get("evidence_json") or "[]"
     try:
@@ -168,19 +190,19 @@ def row_to_csv_dict(row: dict[str, Any]) -> dict[str, str]:
     return {
         "ingested_at": row.get("created_at") or "",
         "published_at": row.get("published_ts") or "",
-        "domain": row.get("domain") or "",
-        "title": (row.get("title") or "").replace("\n", " ").replace("\r", " "),
-        "url": row.get("url") or "",
+        "domain": _csv_safe(row.get("domain") or ""),
+        "title": _csv_safe((row.get("title") or "").replace("\n", " ").replace("\r", " ")),
+        "url": _csv_safe(row.get("url") or ""),
         "score": f"{score:.3f}" if isinstance(score, (int, float)) else "",
         "is_finance_relevant": "1" if row.get("is_finance_relevant") else "0",
-        "asset_classes": _list_from_json(row.get("asset_classes_json")),
-        "reason_codes": _list_from_json(row.get("impact_reason_codes_json")),
-        "symbols": _list_from_json(row.get("candidate_symbols_json")),
-        "sentiment_label": row.get("sentiment_label") or "",
+        "asset_classes": _csv_safe(_list_from_json(row.get("asset_classes_json"))),
+        "reason_codes": _csv_safe(_list_from_json(row.get("impact_reason_codes_json"))),
+        "symbols": _csv_safe(_list_from_json(row.get("candidate_symbols_json"))),
+        "sentiment_label": _csv_safe(row.get("sentiment_label") or ""),
         "sentiment_score": f"{sent_score:.3f}" if isinstance(sent_score, (int, float)) else "",
-        "reasoning": reasoning.replace("\n", " ").replace("\r", " ")[:2000],
-        "language": row.get("language") or "",
-        "processing_mode": row.get("processing_mode") or "",
+        "reasoning": _csv_safe(reasoning.replace("\n", " ").replace("\r", " ")[:2000]),
+        "language": _csv_safe(row.get("language") or ""),
+        "processing_mode": _csv_safe(row.get("processing_mode") or ""),
         "diagnostic_enabled": "1" if row.get("diagnostic_enabled") else "0",
         "capture_id": row.get("capture_id") or "",
     }
@@ -217,7 +239,6 @@ class DriveArchiver:
         self._local_cap = max(50, int(local_cap_rows))
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
-        self._poke = asyncio.Event()
         # Re-entrant lock that serialises `_archive_once`. Without it, the
         # background tick and a manual /ui/archive-now click could both
         # enter the drain path and fight for the storage lock, deadlocking
@@ -280,8 +301,14 @@ class DriveArchiver:
         logger.info("drive_archiver_stopped")
 
     async def archive_now(self) -> ArchiveResult:
-        """Manually trigger an immediate archive sweep."""
-        self._poke.set()
+        """Manually trigger an immediate archive sweep.
+
+        Runs its own `_archive_once` on a worker thread and returns that
+        sweep's result. It runs INDEPENDENTLY of the background `_run` loop —
+        `_run_lock` serialises the two so they never overlap. (A previous
+        `_poke` event was set here but `_run` never awaited it, so it was a
+        no-op; removed.)
+        """
         return await asyncio.to_thread(self._archive_once)
 
     async def _run(self) -> None:
@@ -372,7 +399,7 @@ class DriveArchiver:
             # so the CSV write does not reach back into sqlite mid-fsync.
             with self._sup.storage._lock, self._sup.storage._connection() as conn:
                 # Old query was a correlated `WHERE capture_id NOT IN
-                # (SELECT capture_id ...)` — O(n×m) because SQLite re-runs
+                # (SELECT capture_id ...)` — O(n*m) because SQLite re-runs
                 # the inner SELECT for every candidate row in the outer
                 # scan. Rewriting against the integer rowid lets the
                 # planner hash-set the keep-list once and seek by primary

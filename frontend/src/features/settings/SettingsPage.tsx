@@ -1753,16 +1753,15 @@ function WebhookOutputCard() {
           {save.isPending ? "saving…" : "save changes"}
         </button>
         {(() => {
-          // Test button is enabled when there's SOMETHING to test against:
-          // either a saved URL on the server, OR a freshly-typed URL in
-          // the input field (which gets implicitly saved by the
-          // round-trip — server reads cfg.url, but the operator has
-          // signalled intent by typing). Disabled only when both are
-          // empty. This matches the spec: "DISABLED if URL field is
-          // empty AND no URL configured".
-          const hasTypedUrl = urlTouched && url.trim().length > 0;
-          const hasAnyUrl = d.url_configured || hasTypedUrl;
-          const testDisabled = !hasAnyUrl || test.isPending;
+          // Test button is enabled ONLY when a URL is SAVED server-side.
+          // The backend /api/webhook/test reads its target from the
+          // persisted cfg.url and ignores the request body's url field —
+          // so a freshly-typed-but-unsaved URL is NOT what gets tested.
+          // Enabling on a typed-only URL would test the OLD saved URL (or
+          // return no_url_configured), falsely "confirming" the new URL.
+          // The operator must Save first; until then the chip below the
+          // input already nudges them. Disabled while a test is in flight.
+          const testDisabled = !d.url_configured || test.isPending;
           return (
             <button
               type="button"
@@ -1770,9 +1769,9 @@ function WebhookOutputCard() {
               disabled={testDisabled}
               onClick={() => test.mutate()}
               title={
-                !hasAnyUrl
-                  ? "enter or save a webhook URL first"
-                  : "send a synthetic test payload"
+                !d.url_configured
+                  ? "save a webhook URL first, then test it"
+                  : "send a synthetic test payload to the saved URL"
               }
               data-testid="webhook-test-btn"
             >

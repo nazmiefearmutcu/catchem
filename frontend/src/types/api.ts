@@ -20,8 +20,26 @@ export interface GuardSnapshot {
   error?: string;
 }
 
+// The backend exposes TWO record shapes (see src/catchem/contracts.py):
+//
+//   • FinancialImpactSummary — the COMPACT row returned by every list/feed
+//     endpoint (`/recent`, `/records/by-symbol|by-asset-class|by-reason`,
+//     `/api/tags/{tag}/records`). It deliberately OMITS the heavy detail
+//     fields (candidate_entities, component_scores, evidence_sentences,
+//     reason_text, …) and ADDS `evidence_preview` + `evidence_count`.
+//   • FinancialImpactDetail — the FULL record returned only by
+//     `/record/{id}`, `/ui/summary` recent_top, and `DemoRunResponse.record`.
+//
+// They are mirrored here as `FinancialRecordSummary` (list) and
+// `FinancialRecord` (full). `FinancialRecord` extends the summary so detail
+// consumers keep every field, while the summary type stops list-row readers
+// from assuming detail-only fields are present (they are `undefined` at
+// runtime, which previously crashed with no compiler warning).
+//
 // Named FinancialRecord to avoid shadowing the built-in Record<K,V> utility type.
-export interface FinancialRecord {
+
+/** Compact list/feed row — mirrors backend FinancialImpactSummary. */
+export interface FinancialRecordSummary {
   capture_id: string;
   doc_id: string;
   title: string | null;
@@ -33,19 +51,39 @@ export interface FinancialRecord {
   asset_classes: string[];
   impact_reason_codes: string[];
   candidate_symbols: string[];
-  candidate_entities: string[];
-  impact_horizons: string[];
   sentiment_label: "positive" | "negative" | "neutral" | "unknown" | null;
   sentiment_score: number | null;
+  /** First evidence sentence (≤240 chars), if any. Summary-only field. */
+  evidence_preview: string | null;
+  /** Count of evidence sentences on the full record. Summary-only field. */
+  evidence_count: number;
+  diagnostic_multimodal_enabled: boolean;
+  published_ts: string | null;
+  created_at: string;
+}
+
+/**
+ * Full record — mirrors backend FinancialImpactDetail. Returned only by the
+ * detail/recent_top/demo paths. Extends {@link FinancialRecordSummary} so
+ * detail consumers see the compact fields too. The detail-only fields below
+ * (evidence_sentences, reason_text, component_scores, …) are NOT present on
+ * list rows — read them only off a `/record/{id}` payload.
+ *
+ * `evidence_preview` / `evidence_count` are summary-only on the wire, so they
+ * are widened to optional here (the detail payload doesn't carry them).
+ */
+export interface FinancialRecord
+  extends Omit<FinancialRecordSummary, "evidence_preview" | "evidence_count"> {
+  evidence_preview?: string | null;
+  evidence_count?: number;
+  candidate_entities: string[];
+  impact_horizons: string[];
   evidence_sentences: string[];
   reason_text: string | null;
   component_scores: Record<string, number>;
-  diagnostic_multimodal_enabled: boolean;
   diagnostic_multimodal_result: Record<string, unknown> | null;
   processing_mode: string;
   model_versions: Record<string, string>;
-  published_ts: string | null;
-  created_at: string;
 }
 
 export interface UISummary {

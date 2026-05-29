@@ -8,6 +8,7 @@ We mirror Awareness's design choice of `extra="forbid"` so additions are explici
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -70,7 +71,18 @@ class AwarenessCaptureView(BaseModel):
                 return v.replace(tzinfo=UTC)
             return v
         if isinstance(v, str):
-            return v  # let pydantic parse
+            # Parse-and-UTC-stamp here rather than deferring to pydantic: a
+            # naive ISO string (the common Awareness/RSS shape, e.g.
+            # '2026-05-27T14:30:00') would otherwise parse to a NAIVE datetime
+            # and this before-mode validator would never run again to stamp it,
+            # silently defeating the UTC-coercion contract.
+            try:
+                parsed = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except ValueError:
+                return v  # not ISO; let pydantic surface the error
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=UTC)
+            return parsed
         return v
 
 
@@ -125,6 +137,38 @@ class FinancialImpactRecord(BaseModel):
     def _excerpt_nonempty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("text_excerpt must be non-empty")
+        return v
+
+    @field_validator("sentiment_score")
+    @classmethod
+    def _finite_sentiment(cls, v: float | None) -> float | None:
+        # NaN/Inf survive `finance_relevance_score`'s ge/le bounds check
+        # (every comparison with NaN is False) but crash the Starlette
+        # JSONResponse renderer (allow_nan=False) → HTTP 500. Map non-finite
+        # to None at the contract boundary so it never reaches model_dump.
+        if v is not None and not math.isfinite(v):
+            return None
+        return v
+
+    @field_validator("component_scores")
+    @classmethod
+    def _finite_components(cls, v: dict[str, float]) -> dict[str, float]:
+        # Same NaN/Inf JSON-serialization hole as sentiment_score; drop any
+        # non-finite component value rather than emit an uncompliant float.
+        return {
+            k: f
+            for k, f in v.items()
+            if isinstance(f, (int, float)) and math.isfinite(f)
+        }
+
+    @field_validator("published_ts", "created_at")
+    @classmethod
+    def _record_utc(cls, v: datetime | None) -> datetime | None:
+        # Defense-in-depth: a naive published_ts threaded in from the service
+        # layer would serialize without an offset and render shifted by the
+        # viewer's UTC offset in the UI; stamp naive datetimes as UTC.
+        if isinstance(v, datetime) and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
         return v
 
 

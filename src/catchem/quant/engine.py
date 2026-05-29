@@ -173,7 +173,14 @@ class QuantEngine:
         return value
 
     def invalidate(self) -> None:
-        """Drop all cached signals — wired to the supervisor's post-ingest hook."""
+        """Drop all cached signals.
+
+        Called by the manual ``POST /api/quant/invalidate`` endpoint and the
+        ``/ui/news-poll-now`` (manual "Poll now") path. The background RSS
+        poller does not call this — after an automatic poll the signals
+        refresh via the ``cache_ttl_seconds`` (30s) expiry rather than an
+        event-driven hook.
+        """
         with self._cache_lock:
             self._cache.clear()
 

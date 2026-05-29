@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .symbol_mapper import _TICKER_DENYLIST
+
 _CASHTAG_RE = re.compile(r"\$([A-Z]{1,6})\b")
 _TICKER_PAREN_RE = re.compile(r"\(([A-Z]{2,6})\)")
 # Capitalized phrase runs up to 4 words
@@ -118,7 +120,17 @@ class EntityLinker:
         for m in _CASHTAG_RE.finditer(joined):
             add(m.group(1), "cashtag", "regex:cashtag")
         for m in _TICKER_PAREN_RE.finditer(joined):
-            add(m.group(1), "ticker", "regex:paren")
+            # Skip regulator/agency/macro acronyms (SEC, FDA, GDP, …) — the
+            # bare-paren regex matches ANY 2-6 char uppercase token, so without
+            # this denylist a "(SEC)"/"(FDA)" mention became a fake `ticker`
+            # hit. service.process then trusts ticker hits via the equities
+            # bridge (`_looks_like_equity_ticker` accepts bare uppercase) and
+            # mislabels a regulatory/macro/sports story as `equities`. Share
+            # symbol_mapper's `_TICKER_DENYLIST` so the two modules agree.
+            token = m.group(1)
+            if token in _TICKER_DENYLIST:
+                continue
+            add(token, "ticker", "regex:paren")
 
         for ccy in _KNOWN_CURRENCIES:
             if re.search(rf"\b{ccy}\b", joined):

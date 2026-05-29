@@ -93,6 +93,13 @@ const SESSION_LABELS: Record<string, string> = {
   weekend: "Weekend",
 };
 
+// Upper bound on the per-session burst-toast dedupe Set. Keys are
+// `${symbol}|${bucket_start}` and bucket_start advances every ~30m, so a
+// long-lived /scan tab would otherwise accumulate keys without bound. A
+// cap well above any realistic in-window burst count keeps the structure
+// tiny while leaving generous headroom; oldest keys are dropped first.
+const NOTIFIED_BURSTS_CAP = 500;
+
 export function QuantScanPage() {
   const [windowSize, setWindowSize] = useState<number>(1000);
   const [activeTab, setActiveTab] = useState<QuantTab>("events");
@@ -118,10 +125,19 @@ export function QuantScanPage() {
     queryFn: () => api.quantLiveRead(windowSize),
     refetchInterval: 60_000,
     staleTime: 30_000,
-    // Only fetch when needed — on mount, on window change, or on stream
-    // error. We disable polling while a stream is in flight because the
-    // stream's `done` envelope is the freshness signal.
-    enabled: stream.state !== "streaming",
+    // FALLBACK ONLY — fetch the non-streaming live-read solely when the
+    // stream has actually errored. The hero always auto-starts the stream
+    // on mount (and re-starts on window change), but `stream.start()` runs
+    // in a post-commit effect, so on the very first render the state is
+    // still "idle". The old `!== "streaming"` gate therefore evaluated TRUE
+    // on that first render and fired a real, budget-spending DeepSeek call
+    // BEFORE the effect flipped the stream to "streaming" — duplicating the
+    // stream's own request (cost=4 against the rate bucket + a redundant
+    // budget spend, since /api/quant/live-read has no server cache). The
+    // same race repeated on every window change. Gating on "error" keeps
+    // the hero non-blank when the stream fails while never double-billing
+    // on the happy path.
+    enabled: stream.state === "error",
   });
 
   // Auto-start the stream on mount and whenever the window size changes.
@@ -179,6 +195,21 @@ export function QuantScanPage() {
       const key = `${sym}|${b.bucket_start}`;
       if (notifiedBurstsRef.current.has(key)) continue;
       notifiedBurstsRef.current.add(key);
+      // Bound the dedupe Set so a /scan tab left open for days (a
+      // documented usage) doesn't accumulate one key per bucket forever.
+      // bucket_start advances every ~30m, so keys never recur once a
+      // bucket rolls off — dropping the oldest (Set preserves insertion
+      // order) keeps only the most-recent window. Mirrors the round-1
+      // cap in useDesktopAlerts.
+      if (notifiedBurstsRef.current.size > NOTIFIED_BURSTS_CAP) {
+        const overflow = notifiedBurstsRef.current.size - NOTIFIED_BURSTS_CAP;
+        const it = notifiedBurstsRef.current.values();
+        for (let i = 0; i < overflow; i += 1) {
+          const { value, done } = it.next();
+          if (done) break;
+          notifiedBurstsRef.current.delete(value);
+        }
+      }
       pushToast({
         id: `quant-burst-${key}`,
         title: `${sym} burst — ${b.observed} mentions in ${dashboard.data?.anomalies?.bucket_minutes ?? 30}m`,

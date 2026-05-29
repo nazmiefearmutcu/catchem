@@ -189,6 +189,26 @@ class ReviewerRegistry:
             else:
                 self._cached_spent_usd += amount
 
+    def _bump_cache_only(self, usd: float) -> None:
+        """Bump the in-memory spend cache WITHOUT writing a durable ledger row.
+
+        For spend that is ALREADY persisted durably elsewhere — namely
+        :meth:`run_and_persist_deepseek`, which writes a normal ``reviews`` row
+        (``reviewer_id=deepseek``) that :meth:`_durable_spent_usd` already sums
+        via ``sum_review_cost(REVIEWER_DEEPSEEK)``. Calling :meth:`add_spend`
+        there would write a SECOND durable row (``deepseek_narrative``) for the
+        same dollars, so a cache rebuild after ``invalidate_budget_cache()``
+        would count the spend twice and silently halve the effective
+        ``usd_cap``. The narrative / live-read / stream paths that write NO
+        reviews row keep calling :meth:`add_spend` (which persists the ledger).
+        """
+        amount = max(0.0, float(usd))
+        with self._lock:
+            if self._cached_spent_usd is None:
+                self._cached_spent_usd = self._durable_spent_usd()
+            else:
+                self._cached_spent_usd += amount
+
     def invalidate_budget_cache(self) -> None:
         """Drop the cached spend so the next `budget_state` reads SQLite."""
         with self._lock:
@@ -220,9 +240,12 @@ class ReviewerRegistry:
                 capture_id=cap.capture_id,
             )
             return self._persist_error(cap, exc.code, exc.message)
-        # Persist success + bump the cache.
+        # Persist success + bump the cache. The upsert_review above already
+        # writes the durable spend record (reviewer_id=deepseek), so bump the
+        # cache ONLY here — calling add_spend would write a duplicate ledger
+        # row and double-count this spend on the next cache rebuild.
         self._storage.upsert_review(payload.to_storage_row())
-        self.add_spend(payload.usd_cost)
+        self._bump_cache_only(payload.usd_cost)
         return payload
 
     def _persist_error(

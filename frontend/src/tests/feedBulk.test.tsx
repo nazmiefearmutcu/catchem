@@ -9,9 +9,13 @@ import {
   selectedRecords,
   toggleSelection,
 } from "@/features/feed/bulkSelection";
-import type { FinancialRecord } from "@/types/api";
+import type { FinancialRecordSummary } from "@/types/api";
 
-function makeRecord(overrides: Partial<FinancialRecord> = {}): FinancialRecord {
+// bulkSelection operates on the COMPACT list row (FinancialRecordSummary) —
+// that's what the feed list endpoints actually return. The helper builds a
+// summary shape (no detail-only fields); the bulk helpers only read
+// capture_id / candidate_symbols / url, all summary-present.
+function makeRecord(overrides: Partial<FinancialRecordSummary> = {}): FinancialRecordSummary {
   return {
     capture_id: "cap-1",
     doc_id: "doc-1",
@@ -24,17 +28,11 @@ function makeRecord(overrides: Partial<FinancialRecord> = {}): FinancialRecord {
     asset_classes: ["equity"],
     impact_reason_codes: ["EARNINGS"],
     candidate_symbols: ["AAPL"],
-    candidate_entities: [],
-    impact_horizons: [],
     sentiment_label: "positive",
     sentiment_score: 0.4,
-    evidence_sentences: [],
-    reason_text: null,
-    component_scores: {},
+    evidence_preview: null,
+    evidence_count: 0,
     diagnostic_multimodal_enabled: false,
-    diagnostic_multimodal_result: null,
-    processing_mode: "live",
-    model_versions: {},
     published_ts: "2026-05-28T10:00:00Z",
     created_at: "2026-05-28T10:00:01Z",
     ...overrides,

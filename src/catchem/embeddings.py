@@ -251,7 +251,12 @@ class VectorIndex:
             with self._cache_lock:
                 present = cid in self._cache
             if not present:
-                self._cache_put(cid, np.load(p))
+                # The archiver's delete() can unlink a .npy between this glob
+                # and the load (best-effort drain of archived vectors). A
+                # vanished file just means that vector is gone — skip it rather
+                # than letting FileNotFoundError abort the whole query.
+                with contextlib.suppress(FileNotFoundError):
+                    self._cache_put(cid, np.load(p))
         # Snapshot the items under the lock (cheap) so the O(n) cosine sweep
         # below iterates an immutable copy — a concurrent save()/load() can't
         # mutate the dict mid-iteration, and we don't hold the lock across the

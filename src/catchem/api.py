@@ -3685,7 +3685,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return LogTailResponse(lines=[], truncated=False)
         all_lines = text.splitlines()
         tail = all_lines[-lines:]
-        return LogTailResponse(lines=tail, truncated=len(all_lines) > len(tail))
+        return LogTailResponse(
+            lines=tail,
+            truncated=len(all_lines) > len(tail),
+            total_lines=len(all_lines),
+        )
 
     # ────────────────────────────────────────────────────────────────────────
     # /ui/* — aggregation endpoints for the premium frontend.

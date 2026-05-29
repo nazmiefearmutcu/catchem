@@ -556,8 +556,12 @@ class DriveArchiver:
                 # count_records() but vanishes from records_by_label() (the
                 # JOIN powering /records/by-* and the Tags page). BEGIN makes
                 # ``with conn:`` roll the entire DELETE back as a unit on any
-                # error, mirroring insert_record's fix.
-                conn.execute("BEGIN")
+                # error, mirroring insert_record's fix. IMMEDIATE (not
+                # deferred) so the SHARED→RESERVED upgrade can't return an
+                # instant SQLITE_BUSY against a concurrent writer on another
+                # connection to the same file (e.g. the demo's transient
+                # Storage) — it waits up to the connection timeout instead.
+                conn.execute("BEGIN IMMEDIATE")
                 for i in range(0, len(archived_ids), chunk_size):
                     chunk = archived_ids[i:i + chunk_size]
                     placeholders = ",".join("?" * len(chunk))
@@ -585,11 +589,25 @@ class DriveArchiver:
             # glob over an ever-larger orphaned pool. Best-effort: a missing
             # file or an absent vector index must never fail the sweep (the
             # rows are already archived + deleted).
+            # Race guard: a capture_id we just archived can be RE-INSERTED
+            # concurrently (RSS re-circulation / late WS frame / replay) —
+            # service.py saves the new vector BEFORE insert_record takes
+            # storage._lock, so a naive unconditional delete here would unlink
+            # a now-LIVE record's freshly-saved vector. Re-check each id is
+            # genuinely absent under storage._lock (which serializes against
+            # insert_record on the shared supervisor Storage) and only then
+            # drop its vector. Holding the lock for the whole pass also stops a
+            # reprocess from slipping a save() between our check and unlink.
             vector_index = getattr(self._sup, "vector_index", None)
             if vector_index is not None:
-                for cid in archived_ids:
-                    with contextlib.suppress(Exception):
-                        vector_index.delete(cid)
+                with self._sup.storage._lock, self._sup.storage._connection() as conn:
+                    for cid in archived_ids:
+                        still_present = conn.execute(
+                            "SELECT 1 FROM records WHERE capture_id = ?", (cid,)
+                        ).fetchone()
+                        if still_present is None:
+                            with contextlib.suppress(Exception):
+                                vector_index.delete(cid)
 
             self.last_run_at = datetime.now(UTC)
             return ArchiveResult(archived=len(rows), csv_path=csv_path, error=None)

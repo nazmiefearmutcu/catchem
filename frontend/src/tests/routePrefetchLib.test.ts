@@ -51,11 +51,18 @@ vi.mock("@/features/help/HelpPage", () => track("help"));
 
 type PrefetchModule = typeof import("@/lib/route-prefetch");
 
-/** Drain microtasks repeatedly so fire-and-forget `import()` chains settle. */
+/** Drain microtasks repeatedly so fire-and-forget `import()` chains settle.
+ *
+ * Iterations are generous (and the last few use a 1ms timer) because under
+ * full-suite CPU contention vitest's lazy mock resolution for a dynamic
+ * `import()` can lag past a tight setTimeout(0) drain — which previously made
+ * the "dispatches" assertions intermittently observe a not-yet-incremented
+ * counter. The extra rounds are cheap (no-op once the chain has settled) and
+ * make the dispatch observation deterministic regardless of scheduler load. */
 async function settle() {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 12; i++) {
     await Promise.resolve();
-    await new Promise<void>((r) => setTimeout(r, 0));
+    await new Promise<void>((r) => setTimeout(r, i < 8 ? 0 : 1));
   }
 }
 

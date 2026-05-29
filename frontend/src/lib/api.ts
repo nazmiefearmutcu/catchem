@@ -251,7 +251,7 @@ async function request<T>(
 
 import type {
   UISummary, UIFacets, UITimeline, UITrends, UIMatrix, UIBenchmark, UIBacktest, UISymbol,
-  UIConfig, UIMetrics, FinancialRecord, GuardSnapshot, MarketQuote, MarketQuoteBatchResponse,
+  UIConfig, UIMetrics, FinancialRecord, FinancialRecordSummary, GuardSnapshot, MarketQuote, MarketQuoteBatchResponse,
   DemoRunResponse, AppInfo, SidecarStatus, LogTail, NewsStatus, NewsPollNowResponse,
   NewsSourcesResponse, NewsAwareness, NewsCoverageGaps,
   ArchiveStatus, ArchiveNowResponse, ReplayRunResponse,
@@ -364,14 +364,14 @@ export const api = {
     ),
 
   recent: (limit = 50, relevantOnly = true) =>
-    request<{ items: FinancialRecord[] }>(`/recent?limit=${limit}&relevant_only=${relevantOnly}`),
+    request<{ items: FinancialRecordSummary[] }>(`/recent?limit=${limit}&relevant_only=${relevantOnly}`),
   record: (id: string) => request<FinancialRecord>(`/record/${encodeURIComponent(id)}`),
   bySymbol: (sym: string, limit = 50) =>
-    request<{ items: FinancialRecord[] }>(`/records/by-symbol/${encodeURIComponent(sym)}?limit=${limit}`),
+    request<{ items: FinancialRecordSummary[] }>(`/records/by-symbol/${encodeURIComponent(sym)}?limit=${limit}`),
   byAssetClass: (ac: string, limit = 50) =>
-    request<{ items: FinancialRecord[] }>(`/records/by-asset-class/${encodeURIComponent(ac)}?limit=${limit}`),
+    request<{ items: FinancialRecordSummary[] }>(`/records/by-asset-class/${encodeURIComponent(ac)}?limit=${limit}`),
   byReason: (rc: string, limit = 50) =>
-    request<{ items: FinancialRecord[] }>(`/records/by-reason/${encodeURIComponent(rc)}?limit=${limit}`),
+    request<{ items: FinancialRecordSummary[] }>(`/records/by-reason/${encodeURIComponent(rc)}?limit=${limit}`),
 
   // ── User-defined record tags ──────────────────────────────────────────
   // Free-form analyst tags layered on top of pipeline-derived labels.
@@ -402,7 +402,7 @@ export const api = {
       `/api/tags?limit=${limit}`,
     ),
   recordsByTag: (tag: string, limit = 50) =>
-    request<{ items: FinancialRecord[] }>(
+    request<{ items: FinancialRecordSummary[] }>(
       `/api/tags/${encodeURIComponent(tag)}/records?limit=${limit}`,
     ),
 
@@ -1107,7 +1107,7 @@ export interface QuantMember {
   url: string | null;
   published_ts: string | null;
   finance_relevance_score: number | null;
-  sentiment_label: "positive" | "neutral" | "negative" | null;
+  sentiment_label: "positive" | "neutral" | "negative" | "unknown" | null;
   asset_classes: string[];
   impact_reason_codes: string[];
   candidate_symbols: string[];

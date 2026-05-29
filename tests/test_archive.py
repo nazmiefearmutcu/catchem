@@ -344,3 +344,43 @@ def test_archive_csv_columns_are_stable_and_complete() -> None:
     assert "capture_id" in CSV_COLUMNS
     # No duplicates.
     assert len(CSV_COLUMNS) == len(set(CSV_COLUMNS))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CSV formula-injection escaping (CWE-1236)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_row_to_csv_dict_escapes_formula_injection() -> None:
+    # Feed-supplied values that start with a spreadsheet formula trigger must be
+    # neutralized with a leading apostrophe so Excel/Sheets treat them as text
+    # rather than executing them on open.
+    row = {
+        "title": '=HYPERLINK("http://evil","x")',
+        "domain": "+cmd|'/C calc'!A0",
+        "url": "@SUM(1+1)",
+        "candidate_symbols_json": json.dumps(["=1+2", "AAPL"]),
+        "reason_text": "-2+3 leading minus",
+    }
+    out = row_to_csv_dict(row)
+    assert out["title"].startswith("'="), "formula title must be apostrophe-escaped"
+    assert out["domain"].startswith("'+")
+    assert out["url"].startswith("'@")
+    assert out["symbols"].startswith("'="), "joined symbols starting with = must escape"
+    assert out["reasoning"].startswith("'-")
+
+
+def test_row_to_csv_dict_leaves_ordinary_values_untouched() -> None:
+    # No leading trigger → no apostrophe. Pins that the escape never mangles a
+    # normal news title (the overwhelmingly common case).
+    row = {
+        "title": "Fed raises rates by 25 bps",
+        "domain": "reuters.com",
+        "url": "https://reuters.com/x",
+        "candidate_symbols_json": json.dumps(["AAPL", "MSFT"]),
+    }
+    out = row_to_csv_dict(row)
+    assert out["title"] == "Fed raises rates by 25 bps"
+    assert out["domain"] == "reuters.com"
+    assert out["url"] == "https://reuters.com/x"
+    assert out["symbols"] == "AAPL, MSFT"

@@ -13,7 +13,7 @@ import { closeAllOverlays, useOverlaySurface } from "@/context/overlayCoordinato
  * Floating "?" button + right-side context-aware help drawer (v23, task #85).
  *
  * UX intent:
- *   - Bottom-right floating ? button always visible above content (z-30).
+ *   - Bottom-right floating ? button always visible above content.
  *   - Click opens a 360px-wide right-side drawer with PAGE-SPECIFIC content
  *     pulled from lib/page-help.ts via matchHelp(pathname).
  *   - No focus trap, no backdrop dim — analyst can still scroll & interact
@@ -124,7 +124,7 @@ export function HelpDrawer() {
         aria-controls="help-drawer"
         data-testid="help-drawer-trigger"
         title="Context help — quick tips for this page"
-        className="fixed bottom-4 right-4 z-30 inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-[#0b1018] font-bold text-sm shadow-soft hover:opacity-90 hover:-translate-y-0.5 transition-all"
+        className="fixed bottom-4 right-4 z-[45] inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-[#0b1018] font-bold text-sm shadow-soft hover:opacity-90 hover:-translate-y-0.5 transition-all"
       >
         ?
       </button>
@@ -149,7 +149,7 @@ export function HelpDrawer() {
         {...(!open ? { inert: "" as unknown as boolean } : {})}
         data-testid="help-drawer"
         data-state={open ? "open" : "closed"}
-        className="fixed inset-y-0 right-0 z-30 flex w-[calc(100vw-1rem)] sm:w-[360px] flex-col border-l border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft transition-transform duration-220 ease-out max-w-[calc(100vw-1rem)]"
+        className="fixed inset-y-0 right-0 z-[45] flex w-[calc(100vw-1rem)] sm:w-[360px] flex-col border-l border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft transition-transform duration-220 ease-out max-w-[calc(100vw-1rem)]"
         data-open={open ? "true" : "false"}
         style={{ transitionDuration: "220ms" }}
       >

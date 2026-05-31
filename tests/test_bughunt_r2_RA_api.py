@@ -40,7 +40,6 @@ from catchem.rate_limit import reset_all_buckets
 from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
 from catchem.settings import load_settings, reload_settings
 
-
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
@@ -552,6 +551,16 @@ def test_f12_stream_live_read_meters_without_usage_frame(client: TestClient, mon
     )
     assert r.status_code == 200, r.text
     assert sup.reviewers.deepseek() is not None
+    now = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
+    assert sup.storage.insert_record(
+        _make_record(
+            capture_id="live-read-metering-signal",
+            title="Apple earnings surprise lifts megacap sentiment",
+            domain="example.com",
+            published_ts=now,
+            created_at=now,
+        )
+    ) is True
 
     spend_calls: list[float] = []
     real_add_spend = sup.reviewers.add_spend

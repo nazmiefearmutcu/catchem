@@ -1,0 +1,57 @@
+name: Bug or taxonomy report
+description: Report a Catchem bug, bad label, missing symbol, or taxonomy regression.
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is wrong, in one or two sentences?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - FinancialImpactRecord shape
+        - Finance relevance
+        - Asset class
+        - Impact reason code
+        - Symbol or entity mapping
+        - Sentiment
+        - Evidence sentence
+        - UI/API rendering
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: record
+    attributes:
+      label: Input or output record
+      description: Paste the relevant Awareness capture or FinancialImpactRecord JSON. You can use docs/examples/financial-impact-records as the expected shape.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected classification
+      description: Include expected asset classes, reason codes, symbols, sentiment, and evidence sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual classification
+      description: Include current output, error logs, or screenshot if this is a UI/API issue.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "main@<sha>, release tag, or local branch"
+    validations:
+      required: true

@@ -12,6 +12,36 @@ if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
   };
 }
 
+// jsdom does not implement browser downloads. Letting default actions continue
+// on <a download> schedules a fake navigation and prints noisy "Not implemented:
+// navigation" errors after otherwise-passing tests. Prevent only download-link
+// navigation; normal links still behave as jsdom defines them.
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "click",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("a[download]")) event.preventDefault();
+    },
+    true,
+  );
+}
+
+// Production opts BrowserRouter into the React Router v7 future flags. Many
+// isolated component tests still mount tiny MemoryRouter harnesses directly;
+// those harnesses trigger dependency upgrade notices that drown out real
+// stderr signal but do not affect product behaviour. Suppress only that exact
+// notice family in the test environment.
+{
+  const warn = console.warn.bind(console);
+  console.warn = (...args: unknown[]) => {
+    const first = String(args[0] ?? "");
+    if (first.includes("React Router Future Flag Warning")) return;
+    warn(...args);
+  };
+}
+
 // ── jsdom ↔ undici AbortSignal realm bridge ──────────────────────────────
 // jsdom installs its OWN AbortController/AbortSignal on the global object.
 // Node's fetch/Request (undici) validate `signal` against node's NATIVE

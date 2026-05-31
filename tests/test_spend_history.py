@@ -75,7 +75,7 @@ def _insert_review(
 
 def _db_path(client: TestClient) -> Path:
     """Pull the live SQLite path off the running supervisor."""
-    from catchem.api import _get_supervisor  # noqa: PLC0415 — test-only import
+    from catchem.api import _get_supervisor
 
     sup = _get_supervisor()
     return sup.storage.db_path

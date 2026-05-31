@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { closeAllOverlays } from "@/context/overlayCoordinator";
 import { OPEN_SHORTCUT_OVERLAY_EVENT } from "@/components/CommandPalette";
 import { useTheme } from "@/hooks/useTheme";
 
@@ -24,6 +25,7 @@ export type MenuAction =
   | "show_shortcuts"
   | "api_docs"
   | "file_open"
+  | "dismiss_overlay"
   | "new_window";
 
 /** Public for tests — the DOM event name Rust dispatches into. */
@@ -78,6 +80,9 @@ export function useTauriMenu(): void {
           // plugin is intentionally not bundled (see Cargo.toml comment),
           // so this hand-off is the most honest behaviour.
           navigate("/replay");
+          break;
+        case "dismiss_overlay":
+          closeAllOverlays();
           break;
         case "new_window":
           // In the Tauri shell, this event normally never reaches the

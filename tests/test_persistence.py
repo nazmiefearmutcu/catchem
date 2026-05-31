@@ -4,15 +4,14 @@ Pins compute_persistence() pure-logic contract + the HTTP endpoint envelope.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from catchem.quant.persistence import compute_persistence
 
-
-UTC = timezone.utc
+UTC = UTC
 
 
 def _record(day_offset_from_today: int, asset_class: str = "equities", symbol: str = "AAPL", title: str = "") -> dict:
@@ -203,7 +202,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "false")
     monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "false")
     from catchem.api import create_app
-    from catchem.settings import reload_settings, load_settings
+    from catchem.settings import load_settings, reload_settings
     reload_settings()
     app = create_app(load_settings())
     with TestClient(app) as c:

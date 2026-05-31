@@ -31,7 +31,6 @@ from catchem.news_poller import (
     parse_feed,
 )
 
-
 # ── Finding 3: Atom <link rel='alternate'> selection ────────────────────────
 
 def test_atom_link_prefers_alternate_over_first_child() -> None:

@@ -122,7 +122,6 @@ def test_no_collision_with_other_packs() -> None:
     no other source pack already claimed a ``filing-`` name. assemble_feeds()
     silently drops a later dup, so an absent feed here would mean a clash."""
     assembled = list(assemble_feeds())
-    pack_names = {s.name for s in _specs()}
     # Every pack name must resolve to OUR url in the assembled output. If a
     # different pack had registered the same name first, assemble_feeds would
     # keep theirs and this would fail.

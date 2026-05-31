@@ -262,6 +262,26 @@ def test_catchem_logging_level_env_overrides_yaml(monkeypatch: pytest.MonkeyPatc
     assert s.logging.level == "ERROR"
 
 
+def test_catchem_api_run_normalizes_uvicorn_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The catchem-api console-script path must accept stdlib log aliases."""
+    from catchem import api as api_mod
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(app_obj, **kwargs):  # type: ignore[no-untyped-def]
+        captured["app"] = app_obj
+        captured.update(kwargs)
+
+    monkeypatch.setenv("CATCHEM_LOGGING__LEVEL", "WARN")
+    reload_settings()
+    monkeypatch.setattr(api_mod.uvicorn, "run", _fake_run)
+
+    api_mod.run()
+
+    assert captured["log_level"] == "warning"
+    assert captured["app"] is not None
+
+
 def test_catchem_release_mode_both_paths_together(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

@@ -18,6 +18,7 @@ import { dirname, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   STAGES,
+  getBootTokenFromUrl,
   setStage,
   showLogPath,
   showTimeout,
@@ -57,6 +58,8 @@ afterEach(() => {
   for (const child of Array.from(document.body.childNodes)) {
     document.body.removeChild(child);
   }
+  window.name = "";
+  window.sessionStorage.removeItem("catchem.boot_token");
 });
 
 // ── setStage ────────────────────────────────────────────────────────────────
@@ -155,6 +158,14 @@ describe("showLogPath", () => {
   });
 });
 
+describe("boot token", () => {
+  test("extracts boot_token from a URL query string", () => {
+    expect(getBootTokenFromUrl("http://127.0.0.1:8087/index.html?boot_token=abc123")).toBe("abc123");
+    expect(getBootTokenFromUrl("http://127.0.0.1:8087/index.html#boot_token=abc123")).toBe("abc123");
+    expect(getBootTokenFromUrl("http://127.0.0.1:8087/")).toBe("");
+  });
+});
+
 // ── startBootShim — the actual state machine ───────────────────────────────
 
 function immediateSleep() {
@@ -188,6 +199,89 @@ describe("startBootShim", () => {
     expect(fetcher.mock.calls[0][0]).toBe("http://127.0.0.1:8087/healthz");
     expect(rowClasses("ready")).toContain("done");
     expect(document.getElementById("actions").classList).not.toContain("show");
+  });
+
+  test("persists the boot token for the React app", async () => {
+    const navigate = vi.fn();
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name) => (name === "x-catchem-boot-token" ? "abc123" : null) },
+    });
+
+    await startBootShim({
+      endpoint: "http://127.0.0.1:8087",
+      bootToken: "abc123",
+      deadlineMs: 5_000,
+      pollMs: 10,
+      spawnRowMs: 0,
+      bundleRowMs: 0,
+      fetcher,
+      navigate,
+      sleep: immediateSleep,
+      doc: document,
+      now: () => 1_000,
+    });
+
+    expect(window.sessionStorage.getItem("catchem.boot_token")).toBe("abc123");
+    expect(navigate).toHaveBeenCalledWith("http://127.0.0.1:8087/?boot_token=abc123#boot_token=abc123");
+    expect(window.name).toBe("catchem.boot_token=abc123");
+  });
+
+  test("includes the boot token in the health probe when provided", async () => {
+    const navigate = vi.fn();
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name) => (name === "x-catchem-boot-token" ? "abc123" : null) },
+    });
+
+    await startBootShim({
+      endpoint: "http://127.0.0.1:8087",
+      bootToken: "abc123",
+      deadlineMs: 5_000,
+      pollMs: 10,
+      spawnRowMs: 0,
+      bundleRowMs: 0,
+      fetcher,
+      navigate,
+      sleep: immediateSleep,
+      doc: document,
+      now: () => 1_000,
+    });
+
+    expect(fetcher.mock.calls[0][0]).toBe("http://127.0.0.1:8087/healthz?boot_token=abc123");
+  });
+
+  test("ignores 200 health responses that do not echo the boot token header", async () => {
+    const navigate = vi.fn();
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+    });
+
+    let clock = 0;
+    const result = await startBootShim({
+      endpoint: "http://127.0.0.1:8087",
+      bootToken: "abc123",
+      deadlineMs: 200,
+      pollMs: 50,
+      spawnRowMs: 0,
+      bundleRowMs: 0,
+      fetcher,
+      navigate,
+      sleep: () => {
+        clock += 50;
+        return Promise.resolve();
+      },
+      doc: document,
+      now: () => clock,
+    });
+
+    expect(result.outcome).toBe("timeout");
+    expect(result.lastErr).toBe("boot token mismatch");
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   test("retries on transient HTTP errors then succeeds", async () => {

@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-global-shortcut = "2.3.1"
 # Plugins that USED to be registered (shell, dialog, fs, notification, opener,
 # process) were removed in commit-after-capabilities-narrowing. JS has zero
 # `@tauri-apps/api` imports anywhere in `frontend/` or `desktop/catchem/web/`

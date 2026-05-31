@@ -12,7 +12,7 @@ Covers the contract:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from catchem.quant.market_time import (
     SESSIONS,
@@ -23,7 +23,7 @@ from catchem.quant.market_time import (
 
 
 def _utc(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
-    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+    return datetime(year, month, day, hour, minute, tzinfo=UTC)
 
 
 # ── classify_session ─────────────────────────────────────────────────────

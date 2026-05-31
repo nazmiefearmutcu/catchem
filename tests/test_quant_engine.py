@@ -182,9 +182,9 @@ def test_safe_call_records_failure_into_diagnostics_buffer() -> None:
     - leave a structured entry in the ring buffer with class + message
     """
     from catchem.quant.engine import (
-        _safe_call,
-        _diagnostics_snapshot,
         _diagnostics_clear,
+        _diagnostics_snapshot,
+        _safe_call,
     )
 
     _diagnostics_clear()
@@ -201,7 +201,7 @@ def test_safe_call_records_failure_into_diagnostics_buffer() -> None:
     assert entry["signal"] == "event_clustering"
     assert entry["error_class"] == "ValueError"
     assert "schema drift" in entry["error"]
-    assert "traceback_head" in entry and entry["traceback_head"]
+    assert entry.get("traceback_head")
     assert entry["elapsed_ms"] >= 0.0
     assert "ts" in entry
 
@@ -209,10 +209,10 @@ def test_safe_call_records_failure_into_diagnostics_buffer() -> None:
 def test_diagnostics_ring_buffer_bounded_at_50() -> None:
     """Bursty failure storm must not eat memory — newest 50 kept, older drop."""
     from catchem.quant.engine import (
-        _safe_call,
-        _diagnostics_snapshot,
-        _diagnostics_clear,
         _SIGNAL_FAILURES,
+        _diagnostics_clear,
+        _diagnostics_snapshot,
+        _safe_call,
     )
 
     _diagnostics_clear()
@@ -234,7 +234,7 @@ def test_diagnostics_ring_buffer_bounded_at_50() -> None:
 def test_engine_diagnostics_aggregates_per_signal_counts(stub_storage) -> None:
     """``QuantEngine.diagnostics()`` rolls up failures into ``{signal: count}``
     and orders ``recent`` newest-first for the UI."""
-    from catchem.quant.engine import _safe_call, _diagnostics_clear
+    from catchem.quant.engine import _diagnostics_clear, _safe_call
 
     _diagnostics_clear()
 
@@ -584,7 +584,7 @@ def test_dashboard_snapshot_fans_out_and_serializes(loaded_engine: QuantEngine) 
     values for every one of the 10 signal slots."""
     snap = loaded_engine.dashboard_snapshot(limit=500)
 
-    assert snap["n_records_window"] == 500
+    assert snap["n_records_window"] == 3
     assert snap["n_clusters"] >= 1
     # clusters serialized to plain dicts (no dataclass leaks).
     assert isinstance(snap["clusters"], list)
@@ -673,7 +673,7 @@ def test_cache_is_thread_safe_under_concurrent_signal_fanout(
             loaded_engine.dashboard_snapshot(limit=500)
             if i % 5 == 0:
                 loaded_engine.invalidate()
-        except BaseException as exc:  # noqa: BLE001 — capture for assert
+        except BaseException as exc:
             errors.append(exc)
 
     with ThreadPoolExecutor(max_workers=8) as pool:

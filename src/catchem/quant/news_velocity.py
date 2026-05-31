@@ -4,7 +4,7 @@ the rate is accelerating or decelerating.
 
 Computes:
 - ``current_rate_per_min`` — records/min in the most recent bucket
-- ``ema_fast`` (α=0.3) and ``ema_slow`` (α=0.05) — EMAs over the bucket
+- ``ema_fast`` (alpha=0.3) and ``ema_slow`` (alpha=0.05) — EMAs over the bucket
   sequence; ``ema_fast`` reacts quickly to fresh arrivals while
   ``ema_slow`` carries the slower baseline used for divergence checks.
 - ``baseline_rate`` — median bucket rate over the window (robust to

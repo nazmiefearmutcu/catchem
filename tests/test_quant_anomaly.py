@@ -6,7 +6,7 @@ points at exactly one expectation.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -18,13 +18,12 @@ from catchem.quant.anomaly import (
     detect_anomalies,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-_BASE = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def _ts(offset_minutes: float) -> str:
@@ -81,7 +80,7 @@ def _records_in_bucket(
 
 
 def test_empty_records_yields_empty_report() -> None:
-    """No records → all axes empty, params echoed."""
+    """No records => all axes empty, params echoed."""
 
     report = detect_anomalies([], bucket_minutes=30, window_buckets=12, z_threshold=2.0)
     assert isinstance(report, AnomalyReport)
@@ -104,7 +103,7 @@ def test_invalid_window_buckets_raises() -> None:
 
 
 def test_single_bucket_no_anomalies() -> None:
-    """One bucket of data → no priors → no anomalies on any axis."""
+    """One bucket of data => no priors => no anomalies on any axis."""
 
     records = _records_in_bucket(
         0, 50, candidate_symbols=["AAPL"], sentiment_label="positive"
@@ -134,7 +133,7 @@ def test_insufficient_history_no_anomalies() -> None:
 
 
 def test_uniform_volume_yields_no_volume_anomaly() -> None:
-    """Flat 5/bucket × 8 buckets has 0 variance → z=0 → no anomaly."""
+    """Flat 5/bucket x 8 buckets has 0 variance => z=0 => no anomaly."""
 
     records: list[dict] = []
     for b in range(8):
@@ -144,7 +143,7 @@ def test_uniform_volume_yields_no_volume_anomaly() -> None:
 
 
 def test_sudden_volume_spike_fires_high_severity() -> None:
-    """~5/bucket noisy baseline, last bucket explodes to 50 → high severity.
+    """~5/bucket noisy baseline, last bucket explodes to 50 => high severity.
 
     We jitter the prior counts slightly so the sample std is non-zero —
     a perfectly flat baseline collapses to z=0 by design (see module
@@ -168,7 +167,7 @@ def test_sudden_volume_spike_fires_high_severity() -> None:
 
 
 def test_volume_anomaly_severity_ladder() -> None:
-    """|z| 2–3 = low, 3–4 = medium, >=4 = high."""
+    """|z| 2-3 = low, 3-4 = medium, >=4 = high."""
 
     from catchem.quant.anomaly import _severity  # type: ignore[attr-defined]
 
@@ -187,7 +186,7 @@ def test_volume_anomaly_severity_ladder() -> None:
 
 
 def test_sentiment_flip_to_deep_negative_fires_bearish_shock() -> None:
-    """Sustained mildly-positive 8 buckets, then deep negative → bearish_shock.
+    """Sustained mildly-positive 8 buckets, then deep negative => bearish_shock.
 
     Vary the positive/neutral mix per baseline bucket so the rolling
     net-sentiment series has non-zero variance (a flat baseline collapses
@@ -243,7 +242,7 @@ def test_sentiment_buckets_with_no_labels_skip_baseline() -> None:
 
 
 def test_symbol_burst_fires_for_aapl() -> None:
-    """AAPL once/bucket × 10 buckets, then 8 in one bucket → fires."""
+    """AAPL once/bucket x 10 buckets, then 8 in one bucket => fires."""
 
     records: list[dict] = []
     for b in range(10):
@@ -402,8 +401,8 @@ def test_parse_ts_handles_zulu_suffix() -> None:
 
     parsed = _parse_ts("2026-01-01T12:00:00Z")
     assert parsed is not None
-    assert parsed.tzinfo is timezone.utc
-    assert parsed == datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert parsed.tzinfo is UTC
+    assert parsed == datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def test_parse_ts_rejects_malformed_iso() -> None:
@@ -422,7 +421,7 @@ def test_parse_ts_naive_assumed_utc() -> None:
 
     parsed = _parse_ts("2026-01-01T12:00:00")
     assert parsed is not None
-    assert parsed.tzinfo is timezone.utc
+    assert parsed.tzinfo is UTC
     assert parsed.hour == 12
 
 
@@ -433,7 +432,7 @@ def test_parse_ts_offset_converted_to_utc() -> None:
 
     parsed = _parse_ts("2026-01-01T12:00:00+02:00")
     assert parsed is not None
-    assert parsed.tzinfo == timezone.utc
+    assert parsed.tzinfo == UTC
     # 12:00 at +02:00 == 10:00 UTC.
     assert parsed.hour == 10
 
@@ -445,7 +444,7 @@ def test_record_falls_back_to_created_at() -> None:
 
     rec = {"published_ts": None, "created_at": "2026-01-01T12:00:00Z"}
     ts = _record_timestamp(rec)
-    assert ts == datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def test_records_without_any_timestamp_are_dropped() -> None:
@@ -486,12 +485,12 @@ def test_undated_records_dropped_but_dated_ones_kept() -> None:
 
 
 def test_direction_bullish_requires_positive_z_and_level() -> None:
-    """Positive z above the net-level threshold → bullish_shock."""
+    """Positive z above the net-level threshold => bullish_shock."""
 
     from catchem.quant.anomaly import _direction  # type: ignore[attr-defined]
 
     assert _direction(3.0, 0.5) == "bullish_shock"
-    # Positive z but net below threshold → neutral, not bullish.
+    # Positive z but net below threshold => neutral, not bullish.
     assert _direction(3.0, 0.10) == "neutral"
 
 
@@ -513,7 +512,7 @@ def test_direction_neutral_when_signs_disagree() -> None:
 
 
 def test_sentiment_flip_to_strong_positive_fires_bullish_shock() -> None:
-    """A mildly-negative baseline then a strong-positive bucket → bullish_shock.
+    """A mildly-negative baseline then a strong-positive bucket => bullish_shock.
 
     Mirrors the bearish test but inverts polarity so the bullish branch of
     ``_direction`` is exercised end-to-end.
@@ -529,7 +528,7 @@ def test_sentiment_flip_to_strong_positive_fires_bullish_shock() -> None:
         records += _records_in_bucket(
             b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}"
         )
-    # Bucket 8: all positive → net = +1.0.
+    # Bucket 8: all positive => net = +1.0.
     records += _records_in_bucket(8, 5, sentiment_label="positive")
     report = detect_anomalies(records)
     assert len(report.sentiment_shocks) == 1

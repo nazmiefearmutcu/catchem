@@ -2,12 +2,25 @@ import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { HelpDrawer } from "@/components/HelpDrawer";
+import { MENU_EVENT, useTauriMenu } from "@/hooks/useTauriMenu";
 import { matchHelp, PAGE_HELP } from "@/lib/page-help";
 
 function renderAt(pathname: string) {
   return render(
     <MemoryRouter initialEntries={[pathname]}>
       <HelpDrawer />
+    </MemoryRouter>,
+  );
+}
+
+function renderMenuAwareAt(pathname: string) {
+  function Harness() {
+    useTauriMenu();
+    return <HelpDrawer />;
+  }
+  return render(
+    <MemoryRouter initialEntries={[pathname]}>
+      <Harness />
     </MemoryRouter>,
   );
 }
@@ -97,6 +110,20 @@ describe("<HelpDrawer>", () => {
     );
   });
 
+  it("closes when the close button is pressed down", () => {
+    renderAt("/");
+    fireEvent.click(screen.getByTestId("help-drawer-trigger"));
+    expect(screen.getByTestId("help-drawer")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
+    fireEvent.pointerDown(screen.getByTestId("help-drawer-close"));
+    expect(screen.getByTestId("help-drawer")).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+  });
+
   it("closes on Escape key while open", () => {
     renderAt("/");
     fireEvent.click(screen.getByTestId("help-drawer-trigger"));
@@ -105,6 +132,40 @@ describe("<HelpDrawer>", () => {
       "open",
     );
     fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByTestId("help-drawer")).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+  });
+
+  it("closes on Escape from the focused drawer surface even without bubbling", () => {
+    renderAt("/");
+    fireEvent.click(screen.getByTestId("help-drawer-trigger"));
+    expect(screen.getByTestId("help-drawer")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
+    fireEvent.keyDown(screen.getByTestId("help-drawer-close"), {
+      key: "Escape",
+      bubbles: false,
+    });
+    expect(screen.getByTestId("help-drawer")).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+  });
+
+  it("closes when the native dismiss_overlay bridge is dispatched", () => {
+    renderMenuAwareAt("/");
+    fireEvent.click(screen.getByTestId("help-drawer-trigger"));
+    expect(screen.getByTestId("help-drawer")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
+    fireEvent(
+      window,
+      new CustomEvent(MENU_EVENT, { detail: "dismiss_overlay" }),
+    );
     expect(screen.getByTestId("help-drawer")).toHaveAttribute(
       "data-state",
       "closed",

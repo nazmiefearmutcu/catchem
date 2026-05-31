@@ -9,7 +9,8 @@
 //! 2. **Sidecar lifecycle** (`sidecar_restart`, `sidecar_stop`) — handled
 //!    directly in Rust via the `AppState` sidecar manager.
 //! 3. **Frontend-delegated actions** (`export_db`, `import_db`, `reload`,
-//!    `toggle_theme`, `show_shortcuts`, `api_docs`, `file_open`) — Rust
+//!    `toggle_theme`, `show_shortcuts`, `api_docs`, `file_open`,
+//!    `dismiss_overlay`) — Rust
 //!    dispatches a `CustomEvent('catchem:menu', {detail: <id>})` into the
 //!    webview using `webview.eval(<hardcoded JS literal>)`. The hook in
 //!    `frontend/src/hooks/useTauriMenu.ts` listens for these. The IPC event
@@ -22,7 +23,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
 /// Frontend-delegated menu ids — the ones handled by the JS hook in
 /// `frontend/src/hooks/useTauriMenu.ts`. Listed here as the single source
@@ -34,6 +35,7 @@ pub const FRONTEND_MENU_IDS: &[&str] = &[
     "show_shortcuts",
     "api_docs",
     "file_open",
+    "dismiss_overlay",
 ];
 
 /// True when an id should be handed to the frontend (vs. handled in Rust).
@@ -65,7 +67,7 @@ pub fn nav_route_for(id: &str) -> Option<&'static str> {
 ///
 /// Returns `true` when the dispatch was attempted (regardless of webview
 /// presence); `false` if the id isn't a known frontend-delegated action.
-pub fn dispatch_frontend_menu(handle: &AppHandle, id: &str) -> bool {
+pub fn dispatch_frontend_menu<R: tauri::Runtime>(handle: &AppHandle<R>, id: &str) -> bool {
     // Hardcoded literals — no interpolation from external input.
     let script: &str = match id {
         "export_db" => {
@@ -86,9 +88,12 @@ pub fn dispatch_frontend_menu(handle: &AppHandle, id: &str) -> bool {
         "file_open" => {
             "try{window.dispatchEvent(new CustomEvent('catchem:menu',{detail:'file_open'}))}catch(e){}"
         }
+        "dismiss_overlay" => {
+            "try{window.dispatchEvent(new CustomEvent('catchem:menu',{detail:'dismiss_overlay'}))}catch(e){}"
+        }
         _ => return false,
     };
-    if let Some(win) = handle.get_webview_window("main") {
+    if let Some(win) = active_webview(handle) {
         if let Err(e) = win.eval(script) {
             log::warn!("menu dispatch_frontend_menu failed id={id} err={e}");
         }
@@ -96,12 +101,49 @@ pub fn dispatch_frontend_menu(handle: &AppHandle, id: &str) -> bool {
     true
 }
 
-/// Reload the main webview (Cmd+R menu item). Kept alongside dispatch so
-/// lib.rs stays focused on routing menu events to the right helper.
-pub fn reload_main_webview(handle: &AppHandle) {
-    if let Some(win) = handle.get_webview_window("main") {
+/// Reload the active webview (Cmd+R menu item). Falls back to `main` when
+/// the focused window cannot be resolved as a webview.
+pub fn reload_active_webview<R: tauri::Runtime>(handle: &AppHandle<R>) {
+    if let Some(win) = active_webview(handle) {
         if let Err(e) = win.eval("window.location.reload()") {
-            log::warn!("menu reload_main_webview failed: {e}");
+            log::warn!("menu reload_active_webview failed: {e}");
+        }
+    }
+}
+
+/// Resolve the webview that should receive menu-driven actions.
+///
+/// Prefer the currently focused window so menu commands work on secondary
+/// dashboards too. Fall back to `main` for launch-time and edge cases where
+/// focus cannot be resolved yet.
+fn active_webview<R: tauri::Runtime>(handle: &AppHandle<R>) -> Option<WebviewWindow<R>> {
+    if let Some(webview) = handle
+        .webview_windows()
+        .values()
+        .find(|webview| webview.is_focused().unwrap_or(false))
+    {
+        return Some(webview.clone());
+    }
+    handle.get_webview_window("main")
+}
+
+/// Navigate the active webview to a same-origin route on the local sidecar.
+/// Used by the Rust menu router so navigation items land in the focused
+/// dashboard rather than always forcing the `main` window.
+pub fn navigate_active_webview_to_route<R: tauri::Runtime>(
+    handle: &AppHandle<R>,
+    endpoint: &str,
+    route: &str,
+) {
+    if let Some(win) = active_webview(handle) {
+        let url_str = format!("{endpoint}{route}");
+        match tauri::Url::parse(&url_str) {
+            Ok(url) => {
+                if let Err(e) = win.navigate(url) {
+                    log::warn!("menu navigate failed: {e}");
+                }
+            }
+            Err(e) => log::warn!("bad menu url {url_str}: {e}"),
         }
     }
 }
@@ -345,7 +387,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let help_submenu = SubmenuBuilder::new(app, "Help")
         .item(
             &MenuItemBuilder::new("Catchem Help")
-                .id("open_help")
+                .id("help_open")
                 .accelerator("CmdOrCtrl+?")
                 .build(app)?,
         )
@@ -375,4 +417,15 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&sidecar_submenu)
         .item(&help_submenu)
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nav_route_for;
+
+    #[test]
+    fn help_menu_id_maps_to_help_route() {
+        assert_eq!(nav_route_for("help_open"), Some("/help"));
+        assert_eq!(nav_route_for("open_help"), None);
+    }
 }

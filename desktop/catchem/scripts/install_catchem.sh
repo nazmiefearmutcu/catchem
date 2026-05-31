@@ -37,6 +37,11 @@ if [ "${1:-}" = "--release" ]; then
   RELEASE=1
 fi
 
+cleanup_staged_sidecar() {
+  rm -rf "$CATCHEM_DIR/src-tauri/resources"
+}
+trap cleanup_staged_sidecar EXIT
+
 cd "$CATCHEM_DIR"
 
 # 1. Build the bundle. Release installs must go through the release script
@@ -49,9 +54,15 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
     echo "[install_catchem] rebuilding React bundle"
     (cd "$REPO_ROOT/frontend" && npm install --silent --no-audit --no-fund && npm run build)
 
+    echo "[install_catchem] packaging bundled sidecar"
+    bash "$CATCHEM_DIR/scripts/build_sidecar.sh"
+    mkdir -p src-tauri/resources/sidecar
+    rm -rf src-tauri/resources/sidecar/*
+    cp -R sidecar-out/catchem-sidecar/* src-tauri/resources/sidecar/
+
     echo "[install_catchem] cargo-tauri build ($PROFILE)"
     cd src-tauri
-    cargo-tauri build $BUILD_FLAG
+    cargo-tauri build $BUILD_FLAG --config '{"bundle":{"targets":["app"],"resources":{"resources/sidecar/":"sidecar"}}}'
     cd ..
   fi
 fi
@@ -65,9 +76,7 @@ fi
 # 3. Inject the privacy-keys plist + ad-hoc sign + strip quarantine.
 echo "[install_catchem] injecting plist + signing"
 bash "$CATCHEM_DIR/scripts/inject_info_plist.sh" "$APP_SRC"
-if [ "$RELEASE" -eq 1 ]; then
-  bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_SRC"
-fi
+bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_SRC"
 
 # 4. Copy to /Applications. Use ditto (preserves resource forks +
 #    metadata correctly across .app bundles — cp -R is *not* safe for
@@ -94,9 +103,7 @@ if [ -d "$APP_DST" ]; then
   fi
 fi
 /usr/bin/ditto --rsrc "$APP_SRC" "$APP_DST"
-if [ "$RELEASE" -eq 1 ]; then
-  bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_DST"
-fi
+bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_DST"
 
 # 5. Re-register with LaunchServices so the menu bar + Spotlight pick
 #    up the (possibly updated) bundle immediately.

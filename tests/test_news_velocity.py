@@ -6,8 +6,7 @@ points at exactly one expectation.
 
 from __future__ import annotations
 
-import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -18,8 +17,7 @@ from catchem.quant.news_velocity import (
     compute_velocity,
 )
 
-
-_BASE = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def _ts(offset_seconds: float) -> str:
@@ -278,7 +276,7 @@ def test_parse_ts_z_suffix_is_normalised_to_utc_offset() -> None:
     assert parsed is not None
     assert parsed.tzinfo is not None
     assert parsed.utcoffset() == timedelta(0)
-    assert parsed == datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert parsed == datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def test_parse_ts_offset_timestamp_is_converted_to_utc() -> None:
@@ -286,7 +284,7 @@ def test_parse_ts_offset_timestamp_is_converted_to_utc() -> None:
 
     # 12:00 at +02:00 == 10:00 UTC.
     parsed = _parse_ts("2026-01-01T12:00:00+02:00")
-    assert parsed == datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    assert parsed == datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +295,7 @@ def test_parse_ts_offset_timestamp_is_converted_to_utc() -> None:
 def _at(epoch_seconds: int) -> str:
     """ISO timestamp at an absolute epoch second (for bucket-boundary control)."""
 
-    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(epoch_seconds, tz=UTC).isoformat()
 
 
 def test_single_bucket_sequence_has_zero_stdev_and_zero_accel() -> None:

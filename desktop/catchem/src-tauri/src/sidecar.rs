@@ -67,6 +67,9 @@ impl SidecarState {
         // never be enabled from the desktop shell.
         cmd.env("CATCHEM_MODE", "production_safe");
         cmd.env("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "false");
+        if let Ok(boot_token) = std::env::var("CATCHEM_BOOT_TOKEN") {
+            cmd.env("CATCHEM_BOOT_TOKEN", boot_token);
+        }
         // The Python settings layer keys host/port under `api.host` and
         // `api.port`, so the env override has to use pydantic-settings'
         // nested delimiter (`__`). Without the double underscore the
@@ -309,7 +312,14 @@ fn days_to_ymd(z: i64) -> (i64, u32, u32) {
 
 /// Poll `/healthz` until 200 or timeout.
 pub async fn wait_for_health(cfg: &SidecarConfig, timeout: Duration) -> WaitForHealthOutcome {
-    let url = format!("{}/healthz", cfg.endpoint());
+    let boot_token = std::env::var("CATCHEM_BOOT_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty());
+    let url = if let Some(boot_token) = boot_token.as_deref() {
+        format!("{}/healthz?boot_token={}", cfg.endpoint(), boot_token)
+    } else {
+        format!("{}/healthz", cfg.endpoint())
+    };
     let started = Instant::now();
     let mut last_status: Option<u16> = None;
     let mut last_error: Option<String> = None;
@@ -322,13 +332,24 @@ pub async fn wait_for_health(cfg: &SidecarConfig, timeout: Duration) -> WaitForH
         match client.get(&url).send().await {
             Ok(resp) => {
                 last_status = Some(resp.status().as_u16());
-                if resp.status().is_success() {
+                let boot_header_ok = match boot_token.as_deref() {
+                    Some(expected) => resp
+                        .headers()
+                        .get("x-catchem-boot-token")
+                        .and_then(|value| value.to_str().ok())
+                        .is_some_and(|got| got == expected),
+                    None => true,
+                };
+                if resp.status().is_success() && boot_header_ok {
                     return WaitForHealthOutcome {
                         healthy: true,
                         elapsed_ms: started.elapsed().as_millis(),
                         last_status,
                         last_error: None,
                     };
+                }
+                if resp.status().is_success() && boot_token.is_some() {
+                    last_error = Some("boot token header mismatch".to_string());
                 }
             }
             Err(e) => {
@@ -400,5 +421,183 @@ mod tests {
         let mut p = std::env::temp_dir();
         p.push("catchem-test-missing-does-not-exist-xyz");
         assert!(load_env_file_from_path(&p).is_none());
+    }
+}
+
+#[cfg(test)]
+mod wait_for_health_tests {
+    use super::{wait_for_health, SidecarConfig};
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::watch;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock")
+    }
+
+    fn sidecar_config(port: u16) -> SidecarConfig {
+        SidecarConfig {
+            python: PathBuf::from("/usr/bin/env"),
+            cwd: PathBuf::from("/tmp"),
+            host: "127.0.0.1".to_string(),
+            port,
+            release_mode: false,
+        }
+    }
+
+    async fn spawn_health_server(
+        boot_token_header: Option<String>,
+        request_paths: Arc<Mutex<Vec<String>>>,
+    ) -> (SocketAddr, watch::Sender<bool>, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (stop_tx, mut stop_rx) = watch::channel(false);
+
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    changed = stop_rx.changed() => {
+                        if changed.is_ok() && *stop_rx.borrow() {
+                            break;
+                        }
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
+                    accepted = listener.accept() => {
+                        let (mut socket, _) = accepted.expect("accept");
+                        let mut buf = vec![0_u8; 4096];
+                        let n = socket.read(&mut buf).await.expect("read request");
+                        let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let path = request
+                            .lines()
+                            .next()
+                            .and_then(|line| line.split_whitespace().nth(1))
+                            .unwrap_or("")
+                            .to_string();
+                        request_paths.lock().expect("paths lock").push(path);
+
+                        let body = b"{\"status\":\"ok\"}";
+                        let mut response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+                            body.len()
+                        );
+                        if let Some(token) = boot_token_header.as_deref() {
+                            response.push_str(&format!(
+                                "X-Catchem-Boot-Token: {}\r\n",
+                                token
+                            ));
+                        }
+                        response.push_str("\r\n");
+                        socket
+                            .write_all(response.as_bytes())
+                            .await
+                            .expect("write headers");
+                        socket.write_all(body).await.expect("write body");
+                        socket.shutdown().await.expect("shutdown socket");
+                    }
+                }
+            }
+        });
+
+        (addr, stop_tx, handle)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn returns_healthy_without_boot_token_when_plain_healthz_answers() {
+        let _guard = env_guard();
+        std::env::remove_var("CATCHEM_BOOT_TOKEN");
+
+        let request_paths = Arc::new(Mutex::new(Vec::new()));
+        let (addr, stop_tx, handle) = spawn_health_server(None, request_paths.clone()).await;
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_health(&sidecar_config(addr.port()), Duration::from_millis(500)),
+        )
+        .await
+        .expect("wait_for_health timed out");
+        assert!(outcome.healthy, "{outcome:?}");
+        assert_eq!(outcome.last_status, Some(200));
+        assert_eq!(outcome.last_error, None);
+
+        stop_tx.send(true).expect("stop signal");
+        handle.await.expect("server task");
+
+        let paths = request_paths.lock().expect("paths");
+        assert_eq!(paths.as_slice(), ["/healthz"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn returns_healthy_only_when_boot_token_header_matches() {
+        let _guard = env_guard();
+        std::env::set_var("CATCHEM_BOOT_TOKEN", "abc123");
+
+        let request_paths = Arc::new(Mutex::new(Vec::new()));
+        let (addr, stop_tx, handle) =
+            spawn_health_server(Some("abc123".to_string()), request_paths.clone()).await;
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_health(&sidecar_config(addr.port()), Duration::from_millis(500)),
+        )
+        .await
+        .expect("wait_for_health timed out");
+        assert!(outcome.healthy, "{outcome:?}");
+        assert_eq!(outcome.last_status, Some(200));
+        assert_eq!(outcome.last_error, None);
+
+        stop_tx.send(true).expect("stop signal");
+        handle.await.expect("server task");
+
+        let paths = request_paths.lock().expect("paths");
+        assert!(
+            paths.iter().any(|path| path.contains("boot_token=abc123")),
+            "health probe must include the boot token query: {paths:?}"
+        );
+
+        std::env::remove_var("CATCHEM_BOOT_TOKEN");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn times_out_when_boot_token_header_does_not_match() {
+        let _guard = env_guard();
+        std::env::set_var("CATCHEM_BOOT_TOKEN", "abc123");
+
+        let request_paths = Arc::new(Mutex::new(Vec::new()));
+        let (addr, stop_tx, handle) = spawn_health_server(None, request_paths.clone()).await;
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_health(&sidecar_config(addr.port()), Duration::from_millis(600)),
+        )
+        .await
+        .expect("wait_for_health timed out");
+        assert!(!outcome.healthy, "{outcome:?}");
+        assert_eq!(outcome.last_status, Some(200));
+        assert_eq!(
+            outcome.last_error.as_deref(),
+            Some("boot token header mismatch")
+        );
+
+        stop_tx.send(true).expect("stop signal");
+        handle.await.expect("server task");
+
+        let paths = request_paths.lock().expect("paths");
+        assert!(
+            paths.iter().all(|path| path.contains("boot_token=abc123")),
+            "all health probes should carry the boot token query: {paths:?}"
+        );
+
+        std::env::remove_var("CATCHEM_BOOT_TOKEN");
     }
 }

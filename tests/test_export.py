@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 from pathlib import Path
 
 import pytest
@@ -24,7 +23,6 @@ from fastapi.testclient import TestClient
 from catchem.api import create_app
 from catchem.rate_limit import reset_all_buckets
 from catchem.settings import load_settings, reload_settings
-
 
 FED_ARTICLE = (
     "The Federal Reserve raised its benchmark interest rate by 25 basis points "

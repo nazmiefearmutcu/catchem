@@ -346,7 +346,7 @@ def test_signals_diagnostics_healthy_text(monkeypatch) -> None:
         status_code = 200
 
         @staticmethod
-        def raise_for_status() -> None:  # noqa: D401
+        def raise_for_status() -> None:
             return None
 
         @staticmethod

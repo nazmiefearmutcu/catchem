@@ -25,7 +25,7 @@ Algorithm summary:
        when following, mean gap to nearest follower when leading.
     4. Score each source with
        ``lead_rate * 0.6 + min(1.0, log10(events_led + 1) / 2.0) * 0.4``
-       so a domain that leads once and a domain that leads 50× are not
+       so a domain that leads once and a domain that leads 50x are not
        weighted identically.
 
 Design constraints honoured:
@@ -155,7 +155,7 @@ def _composite_score(events_led: int, lead_rate: float) -> float:
     """Blend lead_rate (quality) with volume of leadership.
 
     ``lead_rate`` is in ``[0, 1]``. The volume term saturates at 100
-    leaderships (``log10(100 + 1) / 2.0 ≈ 1.004``) and is clipped to 1.0
+    leaderships (``log10(100 + 1) / 2.0 ~= 1.004``) and is clipped to 1.0
     so the score stays bounded in ``[0, 1]``.
     """
     volume_term = min(1.0, math.log10(events_led + 1) / 2.0) if events_led >= 0 else 0.0

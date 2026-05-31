@@ -45,6 +45,7 @@ describe("useTauriMenu — Rust menu -> React bridge", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     document.documentElement.classList.remove("dark");
   });
 
@@ -126,9 +127,11 @@ describe("useTauriMenu — Rust menu -> React bridge", () => {
   });
 
   it("ignores unknown menu actions without throwing", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     render(<MemoryRouter><Harness /></MemoryRouter>);
     expect(() => dispatch("does_not_exist")).not.toThrow();
     expect(openSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith("[useTauriMenu] unknown menu action:", "does_not_exist");
   });
 
   it("removes the event listener on unmount (no leak across remounts)", () => {

@@ -95,6 +95,21 @@ describe("PAGE_HELP registry integrity", () => {
       ).toBe(true);
     }
   });
+
+  it("describes live-read DeepSeek usage as conditional, not guaranteed", () => {
+    const overviewText = [
+      ...PAGE_HELP["/"].quickTips,
+      ...PAGE_HELP["/"].questions.flatMap((qa) => [qa.q, qa.a]),
+    ].join(" ");
+    const scanText = [
+      ...PAGE_HELP["/scan"].quickTips,
+      ...PAGE_HELP["/scan"].questions.flatMap((qa) => [qa.q, qa.a]),
+    ].join(" ");
+
+    expect(overviewText).toContain("non-empty signal context");
+    expect(scanText).toContain("empty windows stay local");
+    expect(`${overviewText} ${scanText}`).not.toMatch(/DeepSeek narrator|DeepSeek's live/i);
+  });
 });
 
 describe("matchHelp", () => {

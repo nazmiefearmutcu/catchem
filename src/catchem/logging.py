@@ -11,7 +11,7 @@ import structlog
 
 _CONFIGURED = False
 
-# Sidecar log rotation policy. 5 MB × (1 live + 3 backups) ≈ 20 MB worst-case
+# Sidecar log rotation policy. 5 MB x (1 live + 3 backups) ~= 20 MB worst-case
 # on disk — small enough to fit happily under macOS `~/Library/Logs/Catchem/`
 # but large enough to retain an hour-plus of structured logs at the chatty
 # DEBUG levels we occasionally enable for postmortems. ``RotatingFileHandler``

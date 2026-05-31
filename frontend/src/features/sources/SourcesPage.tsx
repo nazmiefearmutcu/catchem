@@ -529,7 +529,7 @@ export function SourcesPage() {
   };
 
   return (
-    <div className="grid gap-5" data-testid="sources-page">
+    <div className="grid gap-5 overflow-x-hidden" data-testid="sources-page">
       {/* Premium hero — mirrors the LogsPage / OpsPage structure. */}
       <section
         className={`relative overflow-hidden rounded-xl border ${heroAccent} bg-gradient-to-br via-[color:var(--bg-elev)] to-[color:var(--bg-elev)] p-6`}
@@ -544,8 +544,8 @@ export function SourcesPage() {
                 : "bg-bad/20"
           } blur-3xl`}
         />
-        <div className="relative flex flex-wrap items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3">
+        <div className="relative flex flex-col gap-3 mb-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="relative flex h-2 w-2">
               <span
                 className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotAccent} opacity-75`}
@@ -587,7 +587,7 @@ export function SourcesPage() {
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">
             <Link to="/feed" className="btn" data-testid="sources-back-to-feed">
               View Live Feed
             </Link>

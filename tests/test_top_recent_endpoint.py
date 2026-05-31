@@ -16,7 +16,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "false")
     monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "false")
     from catchem.api import create_app
-    from catchem.settings import reload_settings, load_settings
+    from catchem.settings import load_settings, reload_settings
     reload_settings()
     app = create_app(load_settings())
     with TestClient(app) as c:

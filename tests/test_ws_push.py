@@ -18,8 +18,9 @@ import is ever needed.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,7 +32,6 @@ from catchem.ws_push import (
     WsSourceSpec,
     parse_ws_message,
 )
-
 
 # ── Fakes ──────────────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ class _StubSettings:
         catchem_output_dir = Path("/tmp/catchem-ws-test")
 
     class news:
-        websocket_sources: list[dict[str, str]] = []
+        websocket_sources: ClassVar[list[dict[str, str]]] = []
 
 
 def _make_channel(sources=None, settings=None) -> WebSocketNewsChannel:
@@ -318,7 +318,7 @@ def test_channel_builds_sources_from_settings() -> None:
             catchem_output_dir = Path("/tmp")
 
         class news:
-            websocket_sources = [
+            websocket_sources: ClassVar[list[dict[str, str]]] = [
                 {"name": "wire", "url": "wss://a/ws", "fallback_domain": "a.com"},
                 {"url": "wss://b/ws"},          # name defaults to url
                 {"name": "no-url"},              # dropped (no url)

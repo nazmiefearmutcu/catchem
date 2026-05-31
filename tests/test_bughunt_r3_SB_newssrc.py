@@ -25,7 +25,6 @@ from catchem.news_sources.gdelt_gkg import _parse_gkg
 from catchem.news_sources.hn_algolia import _build_url as _hn_build_url
 from catchem.news_sources.hn_algolia import _hn_algolia_feeds
 
-
 # ---------------------------------------------------------------------------
 # Finding 1: GDELT title HTML-unescape
 # ---------------------------------------------------------------------------

@@ -26,6 +26,10 @@
 
 export const STAGES = Object.freeze(["boot", "spawn", "health", "bundle", "ready"]);
 
+const BOOT_TOKEN_STORAGE_KEY = "catchem.boot_token";
+const BOOT_TOKEN_WINDOW_NAME_PREFIX = "catchem.boot_token=";
+const BOOT_TOKEN_HASH_PREFIX = "#boot_token=";
+
 export const DEFAULTS = Object.freeze({
   endpoint: "http://127.0.0.1:8087",
   deadlineMs: 30_000,
@@ -83,6 +87,43 @@ export function appendCode(node, t) {
   const c = node.ownerDocument.createElement("code");
   c.textContent = t;
   node.appendChild(c);
+}
+
+/**
+ * Extract the boot token from a URL's query string. The Tauri shell
+ * appends `?boot_token=...` to the boot page URL so the shim only trusts
+ * the sidecar process that launched in the same session.
+ */
+export function getBootTokenFromUrl(href) {
+  try {
+    const url = new URL(href);
+    const queryToken = url.searchParams.get("boot_token") || "";
+    if (queryToken) return queryToken;
+    const hash = url.hash || "";
+    if (hash.startsWith(BOOT_TOKEN_HASH_PREFIX)) {
+      return hash.slice(BOOT_TOKEN_HASH_PREFIX.length) || "";
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+export function persistBootToken(token) {
+  if (!token || typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(BOOT_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // Best-effort only. The boot shim still works because the token is
+    // already in hand for this navigation.
+  }
+  try {
+    if (typeof window !== "undefined") {
+      window.name = `${BOOT_TOKEN_WINDOW_NAME_PREFIX}${token}`;
+    }
+  } catch {
+    // window.name is a best-effort fallback for the cross-origin hop.
+  }
 }
 
 /**
@@ -148,12 +189,25 @@ export async function startBootShim(options = {}) {
     pollMs = DEFAULTS.pollMs,
     spawnRowMs = DEFAULTS.spawnRowMs,
     bundleRowMs = DEFAULTS.bundleRowMs,
+    bootToken = null,
     fetcher = globalThis.fetch.bind(globalThis),
     navigate = (url) => globalThis.window.location.replace(url),
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     doc = globalThis.document,
     now = () => Date.now(),
   } = options;
+
+  const resolvedBootToken =
+    bootToken ?? getBootTokenFromUrl(
+      doc?.defaultView?.location?.href ??
+      globalThis.window?.location?.href ??
+      globalThis.location?.href ??
+      "",
+    );
+  persistBootToken(resolvedBootToken);
+  const healthzUrl = resolvedBootToken
+    ? `${endpoint}/healthz?boot_token=${encodeURIComponent(resolvedBootToken)}`
+    : `${endpoint}/healthz`;
 
   setStage(doc, "boot", "done");
   setStage(doc, "spawn", "active");
@@ -168,16 +222,25 @@ export async function startBootShim(options = {}) {
   let lastErr = "";
   while (now() < deadline) {
     try {
-      const r = await fetcher(endpoint + "/healthz", { cache: "no-store" });
-      if (r && r.ok) {
+      const r = await fetcher(healthzUrl, { cache: "no-store" });
+      const bootHeader = r?.headers?.get?.("x-catchem-boot-token") || "";
+      const bootHeaderOk =
+        !resolvedBootToken || bootHeader === resolvedBootToken;
+      if (r && r.ok && bootHeaderOk) {
         setStage(doc, "bundle", "active");
         await sleep(bundleRowMs);
         setStage(doc, "ready", "done");
-        const url = endpoint + "/";
+        const url = resolvedBootToken
+          ? `${endpoint}/?boot_token=${encodeURIComponent(resolvedBootToken)}#boot_token=${encodeURIComponent(resolvedBootToken)}`
+          : `${endpoint}/`;
         navigate(url);
         return { outcome: "navigated", url };
       }
-      lastErr = "HTTP " + (r ? r.status : "??");
+      if (r && r.ok && resolvedBootToken && !bootHeaderOk) {
+        lastErr = "boot token mismatch";
+      } else {
+        lastErr = "HTTP " + (r ? r.status : "??");
+      }
     } catch (e) {
       lastErr = (e && e.message) || String(e);
     }

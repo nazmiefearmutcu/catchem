@@ -17,8 +17,8 @@ import type { GlobalTone, GlobalToneTheme } from "@/types/api";
 
 /**
  * Tiny inline markdown renderer (bold + para-break). Mirrored from /scan
- * so DeepSeek live-read narratives render with proper emphasis on the
- * home page instead of literal asterisks.
+ * so hosted or local live-read narratives render with proper emphasis on
+ * the home page instead of literal asterisks.
  */
 function renderMd(text: string): ReactNode[] {
   const blocks = text.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
@@ -68,8 +68,10 @@ export function OverviewPage() {
   const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary });
   const trends = useQuery({ queryKey: ["trends"], queryFn: () => api.trends(500) });
   const bench = useQuery({ queryKey: ["bench"], queryFn: api.benchmarkLatest });
-  // Pull the same DeepSeek live-read used by /scan so the home page
-  // leads with the same analyst-grade narrative.
+  // Pull the same source-aware live-read used by /scan so the home page
+  // leads with the same analyst-grade narrative. The backend chooses
+  // DeepSeek only when configured, budgeted, and worth calling; otherwise
+  // it returns deterministic local synthesis.
   const liveRead = useQuery({
     queryKey: ["quant-live-read", 1000],
     queryFn: () => api.quantLiveRead(1000),
@@ -187,7 +189,7 @@ export function OverviewPage() {
 
   return (
     <div className="grid gap-5">
-      {/* Hero: DeepSeek live read narrative — first thing the analyst sees. */}
+      {/* Hero: source-aware live-read narrative — first thing the analyst sees. */}
       <section className="relative overflow-hidden rounded-xl border border-accent/40 hero-gradient p-6">
         <div
           aria-hidden

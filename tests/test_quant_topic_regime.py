@@ -11,11 +11,9 @@ import math
 import pytest
 
 from catchem.quant.topic_regime import (
-    RegimeBucket,
     RegimeReport,
     detect_regime_shifts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

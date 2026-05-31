@@ -8,17 +8,14 @@ prove the API really is duck-typed against ``.cluster_id`` /
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from catchem.quant.lead_lag import (
     LeadLagReport,
-    PerEventLeadLag,
-    SourceLeadLagScore,
     attribute_lead_lag,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -35,7 +32,7 @@ class _ClusterStub:
 
 
 def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _rec(capture_id: str, domain: str, published_ts: str, **extra) -> dict:
@@ -79,8 +76,8 @@ def test_two_clusters_consistent_leader_reuters_wins() -> None:
     Expect reuters lead_rate == 1.0 on 2 events, bloomberg's mean follow
     lag = 60s (always 60s behind the leader), ft's = 30s.
     """
-    base_a = datetime(2026, 5, 27, 10, 0, 0, tzinfo=timezone.utc)
-    base_b = datetime(2026, 5, 27, 14, 30, 0, tzinfo=timezone.utc)
+    base_a = datetime(2026, 5, 27, 10, 0, 0, tzinfo=UTC)
+    base_b = datetime(2026, 5, 27, 14, 30, 0, tzinfo=UTC)
     cluster_a, recs_a = _build_chain_event(
         "evt-A", base_a, ["reuters.com", "ft.com", "bloomberg.com"], gap_seconds=30
     )
@@ -136,7 +133,7 @@ def test_two_clusters_consistent_leader_reuters_wins() -> None:
 
 
 def test_singleton_cluster_has_leader_and_no_followers() -> None:
-    base = datetime(2026, 5, 27, 9, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 9, 0, 0, tzinfo=UTC)
     cap = "solo-1"
     rec = _rec(cap, "reuters.com", _iso(base))
     cluster = _ClusterStub(cluster_id="solo", capture_ids=(cap,))
@@ -170,7 +167,7 @@ def test_empty_inputs_return_empty_report() -> None:
 def test_missing_published_ts_falls_back_to_created_at() -> None:
     """A record without ``published_ts`` should still place into the
     timeline via ``created_at`` instead of crashing or being dropped."""
-    base = datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
     # Reuters has no published_ts but does have created_at, and it's the
     # earliest of the three, so it should still be picked as leader.
     rec_reuters = {
@@ -198,7 +195,7 @@ def test_missing_published_ts_falls_back_to_created_at() -> None:
 def test_same_domain_dupes_collapse_to_minimum_lag() -> None:
     """Two ft.com captures inside the same event must contribute one
     follower entry (the faster one), not two."""
-    base = datetime(2026, 5, 27, 11, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 11, 0, 0, tzinfo=UTC)
     rec_leader = _rec("d-reuters", "reuters.com", _iso(base))
     rec_ft_fast = _rec("d-ft-1", "ft.com", _iso(base + timedelta(seconds=20)))
     rec_ft_slow = _rec("d-ft-2", "ft.com", _iso(base + timedelta(seconds=400)))
@@ -230,7 +227,7 @@ def test_malformed_clusters_are_skipped() -> None:
     guard in ``attribute_lead_lag``. The one well-formed cluster still
     produces a report; the malformed siblings vanish without raising.
     """
-    base = datetime(2026, 5, 27, 8, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 8, 0, 0, tzinfo=UTC)
     good_cluster, good_recs = _build_chain_event(
         "ok", base, ["reuters.com", "ft.com"], gap_seconds=30
     )
@@ -250,7 +247,7 @@ def test_records_without_capture_id_are_not_indexed() -> None:
     ``by_capture``. A cluster pointing only at such records resolves no
     members and falls through to the empty-placeholder path.
     """
-    base = datetime(2026, 5, 27, 7, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 7, 0, 0, tzinfo=UTC)
     # capture_id is None / blank / non-string ⇒ all skipped during indexing.
     rec_none = {"capture_id": None, "domain": "x.com", "published_ts": _iso(base)}
     rec_blank = {"capture_id": "", "domain": "y.com", "published_ts": _iso(base)}
@@ -303,7 +300,7 @@ def test_missing_domain_defaults_to_unknown() -> None:
     Covers the ``_domain_of`` default branch. The blank-domain record is
     the earliest, so ``unknown`` becomes the leader domain.
     """
-    base = datetime(2026, 5, 27, 6, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 6, 0, 0, tzinfo=UTC)
     rec_blank_domain = {
         "capture_id": "u-1",
         "domain": "   ",  # whitespace-only ⇒ falls back to "unknown"
@@ -358,7 +355,7 @@ def test_cluster_referencing_unknown_capture_skips_that_member() -> None:
     Covers the ``rec is None: continue`` branch in the member-resolution
     loop. The surviving (resolvable) member still drives a valid event.
     """
-    base = datetime(2026, 5, 27, 5, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 5, 0, 0, tzinfo=UTC)
     rec = _rec("present", "reuters.com", _iso(base))
     cluster = _ClusterStub(
         cluster_id="partial",

@@ -6,7 +6,7 @@ regression there points at exactly one expectation.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -15,7 +15,6 @@ from catchem.quant.spillover import (
     SpilloverReport,
     compute_spillover,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,7 +50,7 @@ def _ts(base: datetime, minutes: int) -> str:
 
 # Anchor datetime used by most synthetic streams. Picking 09:00 keeps
 # bucket starts visually obvious in failure output.
-_BASE = datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)
+_BASE = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
 
 def _flood(

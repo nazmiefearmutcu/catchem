@@ -48,7 +48,7 @@ _REGIONAL_EM_FEEDS: tuple[tuple[str, str, str], ...] = (
     ("rem-bloomberght", "https://www.bloomberght.com/rss/sondakika", "bloomberght.com"),
     # Dünya gazetesi — long-running TR financial daily; site-wide RSS.
     ("rem-dunya-ekonomi", "https://www.dunya.com/rss", "dunya.com"),
-    # Anadolu Ajansı — state news agency, economy desk RSS (Turkish).
+    # Anadolu Ajansi — state news agency, economy desk RSS (Turkish).
     ("rem-anadolu-ekonomi", "https://www.aa.com.tr/tr/rss/default?cat=ekonomi", "aa.com.tr"),
     # Habertürk — major outlet, economy section RSS.
     ("rem-haberturk-ekonomi", "https://www.haberturk.com/rss/ekonomi.xml", "haberturk.com"),

@@ -53,7 +53,7 @@ class _FakeStorage:
     def __init__(self, pairs: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
         self._pairs = pairs
 
-    def reviews_with_pair(self, a: str, b: str, limit: int = 500):  # noqa: ANN001
+    def reviews_with_pair(self, a: str, b: str, limit: int = 500):
         return self._pairs[:limit]
 
 
@@ -182,7 +182,7 @@ class _FlakyStorage:
     def __init__(self) -> None:
         self.calls = 0
 
-    def get_record(self, cap_id: str):  # noqa: ANN001
+    def get_record(self, cap_id: str):
         self.calls += 1
         if self.calls == 1:
             raise RuntimeError("transient sqlite lock on dedup probe")

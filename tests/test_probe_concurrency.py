@@ -38,7 +38,6 @@ from catchem.news_poller import (
     ParsedItem,
 )
 
-
 # ── Stubs ────────────────────────────────────────────────────────────────────
 
 

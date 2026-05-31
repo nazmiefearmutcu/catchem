@@ -17,7 +17,8 @@ Scope additions over the existing two files:
   * ``quant-snapshot`` ``--output`` to a file.
   * ``ping-deepseek`` — no-key error, mocked HTTP success, mocked HTTP failure,
     mocked transport error. ``httpx.Client`` is always mocked so no live call
-    is made even though a real key is baked into ``.env``.
+    is made, and key-requiring cases wire their own fake key instead of
+    depending on a developer ``.env``.
 
 All cases run through ``typer.testing.CliRunner`` and rely on the autouse
 ``isolated_env`` fixture (conftest.py) which points the SQLite path at
@@ -262,7 +263,7 @@ def test_validate_guards_propagates_return_code(monkeypatch) -> None:
     class _FakeProc:
         returncode = 0
 
-    def _fake_run(_cmd, *a, **kw):  # noqa: ANN001
+    def _fake_run(_cmd, *a, **kw):
         return _FakeProc()
 
     # `subprocess` is imported lazily inside the command body; that binds the
@@ -513,7 +514,7 @@ def test_ping_deepseek_no_key_exits_1(monkeypatch) -> None:
 
     real_load = cli_mod.load_settings
 
-    def _load_no_key(*a, **kw):  # noqa: ANN001
+    def _load_no_key(*a, **kw):
         s = real_load(*a, **kw)
         s.reviewers.deepseek.api_key = ""
         return s
@@ -537,20 +538,30 @@ class _FakeClient:
     def __init__(self, resp: _FakeResp) -> None:
         self._resp = resp
 
-    def __enter__(self) -> "_FakeClient":
+    def __enter__(self) -> _FakeClient:
         return self
 
-    def __exit__(self, *exc) -> bool:  # noqa: ANN002
+    def __exit__(self, *exc) -> bool:
         return False
 
-    def post(self, *a, **kw) -> _FakeResp:  # noqa: ANN002
+    def post(self, *a, **kw) -> _FakeResp:
         return self._resp
+
+
+def _enable_mocked_deepseek(monkeypatch) -> None:
+    """Wire a fake key so ping-deepseek reaches the mocked httpx client."""
+    from catchem.settings import reload_settings
+
+    monkeypatch.setenv("CATCHEM_REVIEWERS__DEEPSEEK__ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_REVIEWERS__DEEPSEEK__API_KEY", "test-key-not-real")
+    reload_settings()
 
 
 def test_ping_deepseek_success_mocked(monkeypatch) -> None:
     """200 from the mocked client → ok line + exit 0. No live call."""
     import httpx
 
+    _enable_mocked_deepseek(monkeypatch)
     monkeypatch.setattr(
         httpx, "Client", lambda *a, **kw: _FakeClient(_FakeResp(200))
     )
@@ -563,6 +574,7 @@ def test_ping_deepseek_failure_mocked(monkeypatch) -> None:
     """Non-200 → fail line on stderr + exit 1, error excerpt surfaced."""
     import httpx
 
+    _enable_mocked_deepseek(monkeypatch)
     monkeypatch.setattr(
         httpx, "Client",
         lambda *a, **kw: _FakeClient(_FakeResp(401, text="invalid api key")),
@@ -578,6 +590,7 @@ def test_ping_deepseek_json_failure_mocked(monkeypatch) -> None:
     """--json on a failure emits the structured envelope and still exits 1."""
     import httpx
 
+    _enable_mocked_deepseek(monkeypatch)
     monkeypatch.setattr(
         httpx, "Client",
         lambda *a, **kw: _FakeClient(_FakeResp(429, text="rate limited")),
@@ -593,6 +606,8 @@ def test_ping_deepseek_json_failure_mocked(monkeypatch) -> None:
 def test_ping_deepseek_transport_error_mocked(monkeypatch) -> None:
     """An httpx transport error inside the client.post call → exit 1 + message."""
     import httpx
+
+    _enable_mocked_deepseek(monkeypatch)
 
     class _BoomClient:
         def __enter__(self):
@@ -637,7 +652,7 @@ def test_watch_single_tick_then_interrupt(seeded_storage, monkeypatch) -> None:
     """
     import time
 
-    def _interrupt(_secs):  # noqa: ANN001
+    def _interrupt(_secs):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(time, "sleep", _interrupt)
@@ -656,7 +671,7 @@ def test_watch_single_tick_empty_when_floor_too_high(seeded_storage, monkeypatch
     """One tick with an unreachable min-score → the empty-state line, exit 0."""
     import time
 
-    def _interrupt(_secs):  # noqa: ANN001
+    def _interrupt(_secs):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(time, "sleep", _interrupt)
@@ -675,21 +690,26 @@ def test_serve_binds_and_invokes_uvicorn(monkeypatch) -> None:
     actually listens; assert the resolved port reached uvicorn.run."""
     import sys
     import types
+    from catchem.settings import reload_settings
 
     captured: dict = {}
 
     fake_uvicorn = types.ModuleType("uvicorn")
 
-    def _fake_run(app_obj, **kwargs):  # noqa: ANN001
+    def _fake_run(app_obj, **kwargs):
         captured["host"] = kwargs.get("host")
         captured["port"] = kwargs.get("port")
+        captured["log_level"] = kwargs.get("log_level")
         captured["app"] = app_obj
 
     fake_uvicorn.run = _fake_run
     monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+    monkeypatch.setenv("CATCHEM_LOGGING__LEVEL", "WARN")
+    reload_settings()
 
     result = runner.invoke(app, ["serve", "--host", "127.0.0.1", "--port", "9099"])
     assert result.exit_code == 0, result.output
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 9099
+    assert captured["log_level"] == "warning"
     assert captured["app"] is not None

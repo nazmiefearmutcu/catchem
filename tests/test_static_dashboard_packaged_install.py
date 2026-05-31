@@ -112,10 +112,12 @@ def test_wheel_install_smoke_serves_dashboard(tmp_path: Path) -> None:
         pytest.skip("python -m build not installed; pip install build to run this test")
 
     repo = Path(__file__).resolve().parents[1]
+    venv_python = repo / ".venv" / "bin" / "python"
+    python = str(venv_python if venv_python.exists() else Path(sys.executable))
     out_dir = tmp_path / "dist"
     out_dir.mkdir()
     res = subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(out_dir), str(repo)],
+        [python, "-m", "build", "--wheel", "--outdir", str(out_dir), str(repo)],
         capture_output=True, text=True, timeout=180,
     )
     if res.returncode != 0:

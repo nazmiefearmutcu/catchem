@@ -24,7 +24,7 @@ import { OverviewPage } from "@/features/overview/OverviewPage";
  * can't paint) is out of the render path.
  *
  * Coverage: (1) renders without crashing on a fully-populated payload, the
- * DeepSeek hero + the five KPI tiles show their mocked values; (2) the page
+ * source-aware live-read hero + the five KPI tiles show their mocked values; (2) the page
  * renders gracefully while `summary` is still loading (skeleton, no throw);
  * (3) it renders gracefully on an *empty* dataset (zeroed totals, no recent
  * rows, empty trends) without crashing.
@@ -208,7 +208,7 @@ describe("OverviewPage (smoke)", () => {
   it("renders the dashboard with KPI tiles + hero from mocked data", async () => {
     renderOverview();
 
-    // Hero leads with the DeepSeek synthesis title once liveRead resolves.
+    // Hero leads with the source-specific synthesis title once liveRead resolves.
     expect(await screen.findByRole("heading", { name: /deepseek synthesis/i })).toBeInTheDocument();
 
     // The KPI tile row + all five default tiles render (drag-reorder landmarks).
@@ -269,6 +269,21 @@ describe("OverviewPage (smoke)", () => {
 
     // Empty recent_top shows the "No records yet" empty state, not a crash.
     expect(screen.getByText(/no records yet/i)).toBeInTheDocument();
+  });
+
+  it("shows local fallback provenance when live-read stays local", async () => {
+    liveReadMock.mockResolvedValue({
+      narrative: "0 records in window across 0 active clusters.",
+      source: "local",
+      fallback_reason: "empty_context",
+      context: { window_records: 0 },
+      generated_at: "2026-05-28T12:00:00Z",
+    });
+
+    renderOverview();
+
+    expect(await screen.findByRole("heading", { name: /local synthesis/i })).toBeInTheDocument();
+    expect(screen.getByText(/fallback: empty_context/i)).toBeInTheDocument();
   });
 
   it("renders the global news tone panel: overall state + per-theme chips", async () => {

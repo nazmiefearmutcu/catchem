@@ -76,7 +76,7 @@ export function HelpPage() {
                 Local-first news-to-finance analyst workstation
               </h1>
               <div className="mt-1 text-[11px] text-[color:var(--fg-muted)]">
-                v{info.data?.version ?? "—"} · everything runs on this machine · {GLOSSARY.length} glossary terms · no cloud calls
+                v{info.data?.version ?? "—"} · local storage by default · {GLOSSARY.length} glossary terms · optional DeepSeek API only when enabled
               </div>
             </div>
           </div>

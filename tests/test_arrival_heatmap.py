@@ -93,7 +93,9 @@ def test_timezone_shifts_which_cell_record_lands_in() -> None:
     assert utc["timezone"] == "UTC"
     assert et["timezone"] == "America/New_York"
     assert tk["timezone"] == "Asia/Tokyo"
-    by_key = lambda out: {(c["weekday"], c["hour"]) for c in out["cells"] if c["count"]}
+    def by_key(out: dict) -> set[tuple[int, int]]:
+        return {(c["weekday"], c["hour"]) for c in out["cells"] if c["count"]}
+
     assert by_key(utc) == {(3, 0)}
     assert by_key(et) == {(2, 20)}
     assert by_key(tk) == {(3, 9)}

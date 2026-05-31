@@ -60,6 +60,14 @@ read-only / quarantined and never trained from this workspace.
 - **500+ backend pytest cases / 200+ Vitest cases** plus the legacy
   guard suite that pins the NewsImpact safety boundary.
 
+## Example output fixtures
+
+Contributor-facing `FinancialImpactRecord` examples live in
+[`docs/examples/financial-impact-records`](docs/examples/financial-impact-records).
+They cover positive equity news, negative macro/rates news, and a non-finance
+control item. The pytest suite validates every JSON file in that directory
+against the canonical Pydantic schema.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or newer

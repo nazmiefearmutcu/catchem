@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import FrozenInstanceError, asdict, dataclass
 
 import pytest
 
@@ -12,7 +12,6 @@ from catchem.quant.market_reaction import (
     ReactionReport,
     compute_reaction,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -190,7 +189,7 @@ def test_dataclasses_are_frozen() -> None:
         benchmark_return_pct=1.1,
         excess_return_pct=1.6,
     )
-    with pytest.raises(Exception):  # FrozenInstanceError
+    with pytest.raises(FrozenInstanceError):
         row.symbol = "MSFT"  # type: ignore[misc]
 
     report = ReactionReport(
@@ -201,7 +200,7 @@ def test_dataclasses_are_frozen() -> None:
         benchmark_symbol="SPY",
         fallback_reason=None,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         report.benchmark_symbol = "QQQ"  # type: ignore[misc]
 
 

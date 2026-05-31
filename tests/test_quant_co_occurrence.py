@@ -11,13 +11,9 @@ from typing import Any
 import pytest
 
 from catchem.quant.co_occurrence import (
-    AssetConcentration,
-    AssetReasonCell,
     CoOccurrenceReport,
-    SymbolEdge,
     compute_co_occurrence,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -63,7 +59,7 @@ def test_records_with_no_assets_or_reasons_yield_no_cells() -> None:
     records = [_rec("c1", symbols=["AAPL"]), _rec("c2", symbols=["MSFT"])]
     report = compute_co_occurrence(records)
     assert report.total_records == 2
-    # No assets/reasons anywhere → no cells, no concentration entries.
+    # No assets/reasons anywhere => no cells, no concentration entries.
     assert report.asset_reason_cells == ()
     assert report.asset_concentration == ()
     # Symbols counted but no co-mention pairs (singletons).
@@ -72,7 +68,7 @@ def test_records_with_no_assets_or_reasons_yield_no_cells() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (a) asset × reason cells — lift behaviour
+# (a) asset x reason cells — lift behaviour
 # ---------------------------------------------------------------------------
 
 
@@ -94,7 +90,7 @@ def test_uniform_records_have_neutral_lift_of_one() -> None:
 
 def test_disjoint_asset_reason_combos_have_max_lift() -> None:
     # 10 records, each with its OWN (asset_i, reason_i). Each row and each
-    # column has total 1 in a 10×10 grid → an exclusively-coupled pair has
+    # column has total 1 in a 10x10 grid => an exclusively-coupled pair has
     # lift = (count*total)/(row*col) = (1*10)/(1*1) = 10. So every diagonal
     # cell is maximally enriched (no off-diagonal noise to dilute it).
     records = [
@@ -119,10 +115,10 @@ def test_over_represented_pair_has_lift_above_one() -> None:
     #   crypto        1           2        row_total = 3
     #   col_total     7           3        total = 10
     #
-    # lift(equities, earnings) = (6 * 10) / (7 * 7) ≈ 1.224  → enriched
-    # lift(equities, m_and_a)  = (1 * 10) / (7 * 3) ≈ 0.476  → suppressed
-    # lift(crypto, earnings)   = (1 * 10) / (3 * 7) ≈ 0.476  → suppressed
-    # lift(crypto, m_and_a)    = (2 * 10) / (3 * 3) ≈ 2.222  → most enriched
+    # lift(equities, earnings) = (6 * 10) / (7 * 7) ~= 1.224  => enriched
+    # lift(equities, m_and_a)  = (1 * 10) / (7 * 3) ~= 0.476  => suppressed
+    # lift(crypto, earnings)   = (1 * 10) / (3 * 7) ~= 0.476  => suppressed
+    # lift(crypto, m_and_a)    = (2 * 10) / (3 * 3) ~= 2.222  => most enriched
     records: list[dict[str, Any]] = []
     for i in range(6):
         records.append(
@@ -158,11 +154,11 @@ def test_over_represented_pair_has_lift_above_one() -> None:
 def test_cells_sorted_by_lift_desc_then_count_desc() -> None:
     # Build a contingency table where two cells share the same lift but
     # differ in count, so the secondary "count DESC" tiebreaker is exercised.
-    # 4 disjoint asset×reason groups, each fully exclusive:
-    #   (equities, earnings)  : 3 records   → lift = 3 * 12 / (3 * 3) = 4
-    #   (crypto, regulation)  : 3 records   → lift = 3 * 12 / (3 * 3) = 4
-    #   (fx, central_bank)    : 4 records   → lift = 4 * 12 / (4 * 4) = 3
-    #   (bonds, supply)       : 2 records   → lift = 2 * 12 / (2 * 2) = 6
+    # 4 disjoint assetxreason groups, each fully exclusive:
+    #   (equities, earnings)  : 3 records   => lift = 3 * 12 / (3 * 3) = 4
+    #   (crypto, regulation)  : 3 records   => lift = 3 * 12 / (3 * 3) = 4
+    #   (fx, central_bank)    : 4 records   => lift = 4 * 12 / (4 * 4) = 3
+    #   (bonds, supply)       : 2 records   => lift = 2 * 12 / (2 * 2) = 6
     records: list[dict[str, Any]] = []
     for i in range(3):
         records.append(
@@ -340,7 +336,7 @@ def test_herfindahl_in_unit_interval_for_mixed_reasons() -> None:
 
 
 def test_top_reasons_capped_at_five() -> None:
-    # One asset with 7 distinct reasons, equal weight → ties broken alpha.
+    # One asset with 7 distinct reasons, equal weight => ties broken alpha.
     reasons = [f"r{i}" for i in range(7)]
     records = [
         _rec(f"c{i}", assets=["equities"], reasons=[reasons[i]])
@@ -424,7 +420,7 @@ def test_report_is_deterministic_for_same_input() -> None:
 
 
 def test_top_n_caps_apply() -> None:
-    # 12 disjoint (asset, reason) records → 12 cells of lift=1 each.
+    # 12 disjoint (asset, reason) records => 12 cells of lift=1 each.
     records = [
         _rec(f"c{i}", assets=[f"a{i}"], reasons=[f"r{i}"])
         for i in range(12)

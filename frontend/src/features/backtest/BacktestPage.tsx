@@ -57,21 +57,21 @@ export function BacktestPage() {
       }`;
 
   return (
-    <div className="grid gap-5">
+    <div className="grid w-full min-w-0 gap-5">
       {/* Hero — same accent-gradient pattern as the benchmark page so the
           two evaluation surfaces read as one family. */}
-      <section className="relative overflow-hidden rounded-xl border border-accent/40 hero-gradient p-6">
+      <section className="relative w-full min-w-0 overflow-hidden rounded-xl border border-accent/40 hero-gradient p-6">
         <div
           aria-hidden
           className="pointer-events-none absolute -top-20 -left-20 h-48 w-48 rounded-full bg-accent/20 blur-3xl"
         />
         <div className="relative flex flex-wrap items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
             </span>
-            <div>
+            <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">
                 {t("backtest.eyebrow")}
               </div>
@@ -84,7 +84,7 @@ export function BacktestPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             <label
               className="flex items-center gap-1 text-[10px] text-[color:var(--fg-muted)]"
               title="How many recent paired reviews to evaluate"
@@ -114,7 +114,7 @@ export function BacktestPage() {
             </button>
           </div>
         </div>
-        <div className="relative grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 text-[11px]">
+        <div className="relative grid w-full min-w-0 gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 text-[11px]">
           <BacktestStat
             label="items evaluated"
             value={evaluated.toString()}
@@ -148,7 +148,7 @@ export function BacktestPage() {
       {/* Calibration chart — bar pair per quintile of predicted scores so
           the analyst can see at a glance whether the stub's "70-80%" bucket
           really lines up with DeepSeek's actual rating. */}
-      <section className="card">
+      <section className="card w-full min-w-0">
         <div className="flex items-baseline justify-between gap-2 mb-2">
           <h2 className="label">calibration · predicted vs ground truth</h2>
           <span className="text-[10px] text-[color:var(--fg-muted)]">
@@ -191,11 +191,11 @@ export function BacktestPage() {
           />
         )}
         {data.calibration_bins.length > 0 && (
-          <ul className="mt-3 grid gap-1 text-[10px] text-[color:var(--fg-muted)]">
+          <ul className="mt-3 grid w-full min-w-0 gap-1 text-[10px] text-[color:var(--fg-muted)]">
             {data.calibration_bins.map((b) => (
               <li
                 key={`${b.bin_low}-${b.bin_high}`}
-                className="grid grid-cols-[110px_60px_1fr] gap-2 items-center tabular-nums"
+                className="grid w-full min-w-0 grid-cols-[minmax(0,110px)_minmax(0,60px)_minmax(0,1fr)] gap-2 items-center tabular-nums"
               >
                 <span>
                   bin {b.bin_low.toFixed(1)}–{b.bin_high.toFixed(1)}
@@ -221,7 +221,7 @@ export function BacktestPage() {
 
       {/* Predictions sample — the raw rows so the analyst can spot-check.
           Capped at 50 by the backend to keep the wire payload small. */}
-      <section className="card">
+      <section className="card w-full min-w-0">
         <div className="flex items-baseline justify-between gap-2 mb-2">
           <h2 className="label">predictions sample</h2>
           <span className="text-[10px] text-[color:var(--fg-muted)]">
@@ -300,7 +300,7 @@ function BacktestStat({
           ? "text-warn"
           : "";
   return (
-    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
+    <div className="w-full min-w-0 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
       <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">
         {label}
       </div>

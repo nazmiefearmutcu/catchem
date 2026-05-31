@@ -50,6 +50,7 @@ src/catchem/static/app/
 .claude/
 
 # Catchem build artifacts
+desktop/catchem/src-tauri/target
 desktop/catchem/src-tauri/target/
 desktop/catchem/web/dist/
 desktop/catchem/web/node_modules/
@@ -61,3 +62,9 @@ desktop/catchem/src-tauri/Cargo.lock
 # PyInstaller sidecar staging (created+trap-removed by build_catchem_release.sh;
 # an interrupted build leaves it behind — never source)
 desktop/catchem/src-tauri/resources/
+
+# Local promo/render workspaces are large generated artifacts, not app source.
+videos/
+
+# Playwright CLI captures are local verification artifacts.
+.playwright-cli/

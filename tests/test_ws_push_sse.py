@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -62,7 +63,7 @@ class _StubSettings:
 
     class news:
         websocket_enabled = False
-        websocket_sources: list[dict[str, str]] = []
+        websocket_sources: ClassVar[list[dict[str, str]]] = []
 
 
 def _make_channel(sources=None, settings=None) -> WebSocketNewsChannel:
@@ -270,7 +271,7 @@ def test_enabled_with_no_sources_falls_back_to_defaults() -> None:
 
         class news:
             websocket_enabled = True
-            websocket_sources: list[dict[str, str]] = []
+            websocket_sources: ClassVar[list[dict[str, str]]] = []
 
     chan = WebSocketNewsChannel(
         supervisor=_FakeSupervisor(),  # type: ignore[arg-type]
@@ -293,7 +294,7 @@ def test_explicit_sources_override_defaults() -> None:
 
         class news:
             websocket_enabled = True
-            websocket_sources = [
+            websocket_sources: ClassVar[list[dict[str, str]]] = [
                 {"name": "my-sse", "url": "https://x/sse", "kind": "sse", "parser": "generic"},
             ]
 

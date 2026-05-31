@@ -425,8 +425,10 @@ class QuantEngine:
         """
         from concurrent.futures import ThreadPoolExecutor
 
-        # Prime the corpus cache so every worker reads from memory.
-        _ = self._recent_records(limit=limit, relevant_only=False)
+        # Prime the corpus cache so every worker reads from memory, and keep
+        # the actual row count for the dashboard contract. This is not always
+        # equal to the requested limit on a fresh/empty workstation.
+        records = self._recent_records(limit=limit, relevant_only=False)
 
         signals: dict[str, Any] = {}
         novelty_limit = min(200, limit)
@@ -447,7 +449,7 @@ class QuantEngine:
 
         clusters = signals.get("clusters") or []
         return {
-            "n_records_window": limit,
+            "n_records_window": len(records),
             "n_clusters": len(clusters),
             "clusters": [_dataclass_to_dict(c) for c in clusters[:50]],
             "source_leaderboard": _dataclass_to_dict(signals.get("leaderboard")) if signals.get("leaderboard") else None,

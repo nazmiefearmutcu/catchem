@@ -147,7 +147,7 @@ export function ReplayUploadPage() {
 
 function ModeStrip({ current, onChange }: { current: Tab; onChange: (t: Tab) => void }) {
   return (
-    <div role="tablist" aria-label="Replay/Upload mode" className="grid grid-cols-3 gap-2">
+    <div role="tablist" aria-label="Replay/Upload mode" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       {(["paste", "upload", "replay"] as const).map((t) => {
         const Icon = TAB_ICON[t];
         const active = t === current;
@@ -331,7 +331,7 @@ function PasteForm() {
             max 5 MB · cleared once you click <strong className="text-[color:var(--fg-dim)]">Analyze</strong>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
             <label htmlFor="paste-domain" className="label">
               domain
@@ -461,7 +461,7 @@ function UploadForm() {
   return (
     <>
       <div className="card grid gap-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
             <label htmlFor="up-title" className="label">
               title (optional — uses first heading otherwise)

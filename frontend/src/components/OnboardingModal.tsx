@@ -62,7 +62,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     eyebrow: "Local-first · runs on your machine",
     title: "Welcome to Catchem",
     body:
-      "Catchem reads financial news and RSS on your laptop as stories break, then tags every item three ways: which asset class it would move, which direction it points (bullish, bearish, or neutral), and how soon the impact is likely to land. Nothing leaves your machine — there are no cloud calls.",
+      "Catchem reads financial news and RSS on your laptop as stories break, then tags every item three ways: which asset class it would move, which direction it points (bullish, bearish, or neutral), and how soon the impact is likely to land. Core ingestion and storage stay on your machine; optional DeepSeek review and narrative calls only run when enabled.",
   },
   {
     eyebrow: "Step 2 of 4 · the view you'll live in",

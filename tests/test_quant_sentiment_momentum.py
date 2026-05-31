@@ -6,7 +6,7 @@ regression there points at exactly one expectation.
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC
 
 import pytest
 
@@ -22,7 +22,6 @@ from catchem.quant.sentiment_momentum import (
     _safe_float,
     compute_sentiment_momentum,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -536,7 +535,7 @@ def test_parse_ts_naive_string_is_assumed_utc() -> None:
 
     parsed = _parse_ts("2024-01-01T09:00:00")
     assert parsed is not None
-    assert parsed.tzinfo is timezone.utc
+    assert parsed.tzinfo is UTC
     assert parsed.isoformat() == "2024-01-01T09:00:00+00:00"
 
 
@@ -545,7 +544,7 @@ def test_parse_ts_offset_string_is_normalized_to_utc() -> None:
 
     parsed = _parse_ts("2024-01-01T12:00:00+03:00")
     assert parsed is not None
-    assert parsed.tzinfo is timezone.utc
+    assert parsed.tzinfo is UTC
     # 12:00 at +03:00 is 09:00 UTC.
     assert parsed.isoformat() == "2024-01-01T09:00:00+00:00"
 

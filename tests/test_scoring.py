@@ -23,7 +23,6 @@ from catchem.scoring import (
 )
 from catchem.taxonomy import Taxonomy, default_taxonomy_path, load_taxonomy
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -337,6 +336,8 @@ def test_negative_below_block_does_not_veto(taxonomy) -> None:
         ),
         taxonomy,
     )
+    assert out.finance_relevance_score < 0.35
+    assert out.is_finance_relevant is False
     # raw = 0.30*0.49 + 0.30*0.49 = 0.294 < floor -> not relevant for floor reason,
     # but specifically NOT because of the veto. Bump priors to clear the floor:
     out2 = score(

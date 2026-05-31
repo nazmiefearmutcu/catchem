@@ -263,10 +263,10 @@ export function LogsPage() {
   if (logs.error) return <ErrorBox err={logs.error} />;
 
   return (
-    <div className="grid gap-5" data-testid="logs-page">
+    <div className="grid w-full min-w-0 gap-5" data-testid="logs-page">
       {/* Hero: synthesized log status + 4 KPI tiles. */}
       <section
-        className={`relative overflow-hidden rounded-xl border ${heroAccent} bg-gradient-to-br via-[color:var(--bg-elev)] to-[color:var(--bg-elev)] p-6`}
+        className={`relative w-full min-w-0 overflow-hidden rounded-xl border ${heroAccent} bg-gradient-to-br via-[color:var(--bg-elev)] to-[color:var(--bg-elev)] p-6`}
       >
         <div
           aria-hidden
@@ -279,7 +279,7 @@ export function LogsPage() {
           } blur-3xl`}
         />
         <div className="relative flex flex-wrap items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="relative flex h-2 w-2">
               {!paused && (
                 <span
@@ -290,7 +290,7 @@ export function LogsPage() {
                 className={`relative inline-flex h-2 w-2 rounded-full ${dotAccent}`}
               />
             </span>
-            <div>
+            <div className="min-w-0">
               <div
                 className={`text-[10px] uppercase tracking-[0.25em] ${eyebrowAccent} font-semibold`}
               >
@@ -306,7 +306,7 @@ export function LogsPage() {
             </div>
           </div>
           <button
-            className="btn shrink-0"
+            className="btn max-w-full"
             onClick={() => {
               qc.invalidateQueries({ queryKey: ["logs-page-tail"] });
             }}
@@ -314,7 +314,7 @@ export function LogsPage() {
             refresh
           </button>
         </div>
-        <div className="relative grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 text-[11px]">
+        <div className="relative grid w-full min-w-0 gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 text-[11px]">
           <LogsStat label="total" value={totalLines.toLocaleString()} hint="visible in tail" />
           <LogsStat
             label="errors"
@@ -343,8 +343,8 @@ export function LogsPage() {
       </section>
 
       {/* Toolbar */}
-      <section className="card">
-        <div className="flex flex-wrap items-center gap-2">
+      <section className="card w-full min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <label className="text-[10px] uppercase tracking-wider text-[color:var(--fg-muted)]">
             level
           </label>
@@ -367,7 +367,7 @@ export function LogsPage() {
             placeholder="search lines…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2 py-1 text-xs min-w-[160px] flex-1 max-w-md"
+            className="min-w-[160px] flex-1 max-w-md rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2 py-1 text-xs"
           />
           <label className="flex items-center gap-1 text-xs cursor-pointer select-none">
             <input
@@ -389,7 +389,7 @@ export function LogsPage() {
           </label>
           <button
             type="button"
-            className="btn ml-auto"
+            className="btn ml-auto max-w-full"
             data-testid="logs-copy-button"
             onClick={copyVisible}
             disabled={filtered.length === 0}
@@ -405,7 +405,7 @@ export function LogsPage() {
       </section>
 
       {/* Log viewer */}
-      <section className="card relative">
+      <section className="card relative w-full min-w-0">
         <h2 className="label mb-2">
           tail{" "}
           <span className="text-[color:var(--fg-muted)] font-normal">
@@ -451,7 +451,7 @@ export function LogsPage() {
             <pre
               ref={scrollRef}
               data-testid="logs-viewer"
-              className="max-h-[60vh] overflow-y-auto text-[10px] leading-relaxed bg-[color:var(--bg-elev2)] rounded p-2 font-mono"
+            className="max-h-[60vh] w-full min-w-0 max-w-full overflow-y-auto overflow-x-auto text-[10px] leading-relaxed bg-[color:var(--bg-elev2)] rounded p-2 font-mono"
             >
               {filtered.map(({ line, level }, idx) => (
                 <div
@@ -503,7 +503,7 @@ function LogsStat({
           ? "text-bad"
           : "";
   return (
-    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
+    <div className="w-full min-w-0 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
       <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">
         {label}
       </div>

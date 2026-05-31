@@ -102,6 +102,11 @@
   .kbd {
     @apply rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-1.5 py-0.5 text-[10px] font-mono;
   }
+
+  /* Decorative hero blobs are visual noise and can force mobile overflow. */
+  [class*="blur-3xl"] {
+    display: none !important;
+  }
 }
 
 @layer utilities {

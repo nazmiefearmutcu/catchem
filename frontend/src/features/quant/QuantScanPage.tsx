@@ -67,11 +67,18 @@ import type {
 /**
  * Awareness Quant Lens — depth analytics cockpit.
  *
- * 10 signals across 9 ECharts visualizations + per-signal DeepSeek narrative.
+ * 10 signals across 9 ECharts visualizations + per-signal narrative helpers.
  * Read-only; never mutates the primary record stream.
  */
 type HeatmapCell = { asset: string; reason: string };
 type QuantTab = "events" | "sentiment" | "sources" | "anomalies" | "network" | "time";
+type NarrativeSource = "deepseek" | "local";
+type SignalNarrative = {
+  text: string;
+  source: NarrativeSource;
+  fallbackReason?: string;
+  usdCost?: number;
+};
 
 const TAB_LABELS: Record<QuantTab, string> = {
   events: "Events",
@@ -302,12 +309,12 @@ export function QuantScanPage() {
   );
 }
 
-// ── Hero "Live Read" — DeepSeek narrative + window control + export ──────
+// ── Hero "Live Read" — narrative + window control + export ───────────────
 
 /**
  * Tiny inline Markdown renderer for the live-read narrative.
  *
- * DeepSeek consistently returns markdown bold (`**…**`) for headline
+ * Hosted narratives often return markdown bold (`**...**`) for headline
  * tokens like "Dominant story:" — we surface them as visual emphasis
  * rather than literal asterisks. We don't pull a full markdown lib in
  * (echarts is already heavy); this handles the 3 patterns the prompt
@@ -465,7 +472,7 @@ function HeroLiveRead({
             onClick={onRegenerate}
             disabled={stream.state === "streaming"}
             data-testid="live-read-regenerate"
-            title="re-run the DeepSeek live read"
+            title="re-run the live read"
           >
             {stream.state === "streaming" ? "streaming…" : (
               <span className="inline-flex items-center gap-1">
@@ -1052,7 +1059,7 @@ function TabHero({
   secondaryTone,
   narrative,
   loading,
-  narrativeLabel = "DeepSeek narrative",
+  narrativeLabel = "Signal narrative",
 }: {
   tone: "accent" | "warn" | "good" | "bad";
   eyebrow: string;
@@ -1063,7 +1070,7 @@ function TabHero({
   secondaryLabel?: React.ReactNode;
   secondaryValue?: React.ReactNode;
   secondaryTone?: string;
-  narrative: string | null;
+  narrative: SignalNarrative | null;
   loading: boolean;
   narrativeLabel?: string;
 }) {
@@ -1116,11 +1123,14 @@ function TabHero({
         )}
       </div>
       <div className="relative mt-3 rounded-md border border-accent/20 bg-accent/5 p-2">
-        <div className="text-[9px] uppercase tracking-wider text-accent mb-1">
-          {loading ? `${narrativeLabel} · thinking…` : narrativeLabel}
+        <div className="mb-1 flex flex-wrap items-baseline gap-2 text-[9px] uppercase tracking-wider">
+          <span className="text-accent">
+            {loading ? `${narrativeLabel} · thinking…` : narrativeLabel}
+          </span>
+          <NarrativeProvenance narrative={narrative} />
         </div>
         <p className="text-[12px] italic leading-relaxed text-[color:var(--fg)]">
-          {narrative || (loading ? "Generating an interpretation…" : "—")}
+          {narrative?.text || (loading ? "Generating an interpretation…" : "—")}
         </p>
       </div>
     </section>
@@ -1149,10 +1159,10 @@ function TopEventHero({
       return sb - sa;
     })[0];
   }, [clusters]);
-  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.quantExplain("cluster", payload),
-    onSuccess: (r) => setNarrative(r.narrative),
+    onSuccess: (r) => setNarrative(toSignalNarrative(r)),
   });
   useEffect(() => {
     if (!top) return;
@@ -1249,11 +1259,11 @@ function TopMomentumHero({
     if (!report?.tickers || report.tickers.length === 0) return null;
     return [...report.tickers].sort((a, b) => Math.abs(b.momentum) - Math.abs(a.momentum))[0];
   }, [report]);
-  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       api.quantExplain("anomaly", payload),
-    onSuccess: (r) => setNarrative(r.narrative),
+    onSuccess: (r) => setNarrative(toSignalNarrative(r)),
   });
   useEffect(() => {
     if (!top) return;
@@ -1305,7 +1315,7 @@ function TopMomentumHero({
       secondaryValue={insufficient ? "—" : (top.momentum >= 0 ? "+" : "") + top.momentum.toFixed(2)}
       narrative={narrative}
       loading={explain.isPending}
-      narrativeLabel="DeepSeek momentum read"
+      narrativeLabel="momentum narrative"
     />
   );
 }
@@ -1319,10 +1329,10 @@ function TopSourceHero({
 }) {
   const top = leaderboard?.sources?.[0] ?? null;
   const leader = leadLag?.per_source && [...leadLag.per_source].sort((a, b) => b.composite_score - a.composite_score)[0];
-  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.quantExplain("cluster", payload),
-    onSuccess: (r) => setNarrative(r.narrative),
+    onSuccess: (r) => setNarrative(toSignalNarrative(r)),
   });
   useEffect(() => {
     if (!top) return;
@@ -1368,7 +1378,7 @@ function TopSourceHero({
       secondaryValue={`${(top.composite_score * 100).toFixed(0)}%`}
       narrative={narrative}
       loading={explain.isPending}
-      narrativeLabel="DeepSeek source read"
+      narrativeLabel="source narrative"
     />
   );
 }
@@ -1384,10 +1394,10 @@ function TopNetworkHero({
 }) {
   const top = report?.asset_reason_cells?.[0] ?? null;
   const topEdge = spillover?.edges?.[0] ?? null;
-  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.quantExplain("spillover", payload),
-    onSuccess: (r) => setNarrative(r.narrative),
+    onSuccess: (r) => setNarrative(toSignalNarrative(r)),
   });
   useEffect(() => {
     if (!top && !topEdge) return;
@@ -1444,7 +1454,7 @@ function TopNetworkHero({
       secondaryValue={`${top.lift.toFixed(2)}×`}
       narrative={narrative}
       loading={explain.isPending}
-      narrativeLabel="DeepSeek network read"
+      narrativeLabel="network narrative"
     />
   );
 }
@@ -1458,10 +1468,10 @@ function TopAnomalyHero({
   report: AnomalyReportDTO | null;
   watchlist: string[];
 }) {
-  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.quantExplain("anomaly", payload),
-    onSuccess: (r) => setNarrative(r.narrative),
+    onSuccess: (r) => setNarrative(toSignalNarrative(r)),
   });
 
   // Pick the single most extreme signal across all 3 anomaly axes.
@@ -1512,7 +1522,7 @@ function TopAnomalyHero({
     return cands[0] ?? null;
   }, [report, watchlist]);
 
-  // Auto-fire DeepSeek narrative whenever the top signal changes.
+  // Auto-fire a narrative whenever the top signal changes.
   useEffect(() => {
     if (!top) return;
     setNarrative(null);
@@ -1559,11 +1569,12 @@ function TopAnomalyHero({
         </div>
       </div>
       <div className="relative mt-3 rounded-md border border-accent/20 bg-accent/5 p-2">
-        <div className="text-[9px] uppercase tracking-wider text-accent mb-1">
-          {explain.isPending ? "DeepSeek thinking…" : "DeepSeek narrative"}
+        <div className="mb-1 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-wider text-accent">
+          <span>{explain.isPending ? "Generating narrative…" : "Signal narrative"}</span>
+          <NarrativeProvenance narrative={narrative} />
         </div>
         <p className="text-[12px] italic leading-relaxed text-[color:var(--fg)]">
-          {narrative || (explain.isPending ? "Generating an interpretation…" : "—")}
+          {narrative?.text || (explain.isPending ? "Generating an interpretation…" : "—")}
         </p>
       </div>
     </section>
@@ -1605,6 +1616,39 @@ function fmtSecs(seconds: number | null | undefined): string {
   return `${(s / 3600).toFixed(1)}h`;
 }
 
+function toSignalNarrative(r: {
+  narrative: string;
+  source: NarrativeSource;
+  fallback_reason?: string;
+  usd_cost?: number;
+}): SignalNarrative {
+  return {
+    text: r.narrative,
+    source: r.source,
+    fallbackReason: r.fallback_reason,
+    usdCost: r.usd_cost,
+  };
+}
+
+function NarrativeProvenance({ narrative }: { narrative: SignalNarrative | null }) {
+  if (!narrative) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <span className={narrative.source === "deepseek" ? "text-accent" : "text-warn"}>
+        {narrative.source === "deepseek" ? "DeepSeek" : "local"}
+      </span>
+      {narrative.fallbackReason && (
+        <span className="text-warn">fallback: {narrative.fallbackReason}</span>
+      )}
+      {narrative.usdCost != null && (
+        <span className="tabular-nums text-[color:var(--fg-muted)]">
+          ${narrative.usdCost.toFixed(5)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── header / control strip ────────────────────────────────────────────────
 
 function Header({
@@ -1637,7 +1681,7 @@ function Header({
         <div>
           <h2 className="text-sm font-semibold">Awareness Quant Lens</h2>
           <p className="text-[11px] text-[color:var(--fg-muted)] mt-0.5">
-            10 depth signals · ECharts visualisations · DeepSeek narrative overlay
+            10 depth signals · ECharts visualisations · optional narrative overlay
           </p>
         </div>
         <span className="text-[10px] text-[color:var(--fg-dim)]">
@@ -1699,13 +1743,13 @@ function Header({
   );
 }
 
-// ── 1. Regime line chart with KL spikes + DeepSeek explain ────────────────
+// ── 1. Regime line chart with KL spikes + narrative explain ───────────────
 
 function RegimeLineChart({ report }: { report: RegimeReportDTO | null }) {
-  const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.quantExplain("regime_shift", payload),
-    onSuccess: (r) => setNarrative(r.narrative),
+    onSuccess: (r) => setNarrative(toSignalNarrative(r)),
   });
 
   if (!report || report.buckets.length === 0) {
@@ -1739,7 +1783,7 @@ function RegimeLineChart({ report }: { report: RegimeReportDTO | null }) {
               disabled={explain.isPending}
               onClick={() => explain.mutate(lastShift as unknown as Record<string, unknown>)}
             >
-              {explain.isPending ? "explaining…" : "explain latest with DeepSeek"}
+              {explain.isPending ? "explaining…" : "explain latest"}
             </button>
           )}
         </div>
@@ -1803,9 +1847,14 @@ function RegimeLineChart({ report }: { report: RegimeReportDTO | null }) {
         })}
       />
       {narrative && (
-        <p className="text-[11px] text-[color:var(--fg-dim)] italic border-t border-[color:var(--border-subtle)] pt-2">
-          {narrative}
-        </p>
+        <div className="border-t border-[color:var(--border-subtle)] pt-2">
+          <div className="mb-1 text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">
+            <NarrativeProvenance narrative={narrative} />
+          </div>
+          <p className="text-[11px] text-[color:var(--fg-dim)] italic">
+            {narrative.text}
+          </p>
+        </div>
       )}
     </section>
   );
@@ -1814,11 +1863,11 @@ function RegimeLineChart({ report }: { report: RegimeReportDTO | null }) {
 // ── 2. Anomaly strip (volume + sentiment + symbol bursts) ─────────────────
 
 function AnomalyStrip({ report, watchlist }: { report: AnomalyReportDTO | null; watchlist: string[] }) {
-  const [narrative, setNarrative] = useState<{ kind: string; text: string } | null>(null);
+  const [narrative, setNarrative] = useState<{ kind: string; result: SignalNarrative } | null>(null);
   const explain = useMutation({
     mutationFn: (input: { kind: "anomaly"; payload: Record<string, unknown> }) =>
       api.quantExplain(input.kind, input.payload),
-    onSuccess: (r, vars) => setNarrative({ kind: vars.kind, text: r.narrative }),
+    onSuccess: (r, vars) => setNarrative({ kind: vars.kind, result: toSignalNarrative(r) }),
   });
   if (!report) return null;
   const totalAnomalies =
@@ -1876,10 +1925,11 @@ function AnomalyStrip({ report, watchlist }: { report: AnomalyReportDTO | null; 
       </div>
       {narrative && (
         <div className="rounded-md border border-accent/20 bg-accent/5 p-2">
-          <div className="text-[9px] uppercase tracking-wider text-accent mb-1">
-            DeepSeek anomaly narrative
+          <div className="mb-1 flex flex-wrap items-baseline gap-2 text-[9px] uppercase tracking-wider">
+            <span className="text-accent">Anomaly narrative</span>
+            <NarrativeProvenance narrative={narrative.result} />
           </div>
-          <p className="text-[11px] italic leading-snug">{narrative.text}</p>
+          <p className="text-[11px] italic leading-snug">{narrative.result.text}</p>
         </div>
       )}
     </section>
@@ -1930,8 +1980,8 @@ function AnomalySubpanel({
                     type="button"
                     className="text-[9px] text-[color:var(--fg-muted)] hover:text-accent"
                     onClick={() => onExplain(r.payload!)}
-                    title="explain with DeepSeek"
-                    aria-label="Explain with DeepSeek"
+                    title="explain signal"
+                    aria-label="Explain signal"
                   >
                     ?
                   </button>
@@ -1979,8 +2029,8 @@ function SymbolBurstSubpanel({
                   type="button"
                   className="text-[9px] text-[color:var(--fg-muted)] hover:text-accent"
                   onClick={() => onExplain(b)}
-                  title="explain with DeepSeek"
-                  aria-label={`Explain symbol burst for ${b.symbol} with DeepSeek`}
+                  title="explain symbol burst"
+                  aria-label={`Explain symbol burst for ${b.symbol}`}
                 >
                   ?
                 </button>
@@ -2022,7 +2072,7 @@ function EventClustersPanel({
     <section className="card grid gap-3">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="label">event clusters · {clusters.length}</h2>
-        <span className="text-[10px] text-[color:var(--fg-dim)]">click to inspect with DeepSeek</span>
+        <span className="text-[10px] text-[color:var(--fg-dim)]">click to inspect narrative</span>
       </div>
       <EChart
         height={140}
@@ -2098,7 +2148,7 @@ function EventClustersPanel({
   );
 }
 
-// ── Cluster drill-down drawer with DeepSeek narrative ─────────────────────
+// ── Cluster drill-down drawer with source-aware narrative ─────────────────
 
 function ClusterDrillDown({
   cluster,
@@ -2111,13 +2161,11 @@ function ClusterDrillDown({
   watchlist: string[];
   windowSize: number;
 }) {
-  const [narrative, setNarrative] = useState<string | null>(null);
-  const [narrativeSource, setNarrativeSource] = useState<"deepseek" | "local" | null>(null);
+  const [narrative, setNarrative] = useState<SignalNarrative | null>(null);
   const explain = useMutation({
     mutationFn: () => api.quantExplain("cluster", cluster as unknown as Record<string, unknown>),
     onSuccess: (r) => {
-      setNarrative(r.narrative);
-      setNarrativeSource(r.source);
+      setNarrative(toSignalNarrative(r));
     },
   });
   // Load actual member records (titles, scores, domains) alongside the
@@ -2133,7 +2181,8 @@ function ClusterDrillDown({
     queryFn: () => api.quantClusterMembers(cluster.cluster_id, 20, windowSize),
     staleTime: 30_000,
   });
-  // Trigger DeepSeek narrative on open.
+  // Trigger a narrative on open; the backend reports whether it used
+  // DeepSeek or the local interpretation fallback.
   useEffect(() => {
     setNarrative(null);
     explain.mutate();
@@ -2172,14 +2221,17 @@ function ClusterDrillDown({
       <div className="rounded-md border border-accent/20 bg-accent/5 p-2 mt-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[9px] uppercase tracking-wider text-accent">
-            {narrativeSource === "deepseek" ? "DeepSeek narrative" : "local interpretation"}
+            {narrative?.source === "deepseek" ? "DeepSeek narrative" : "local interpretation"}
           </span>
           {explain.isPending && (
             <span className="text-[9px] text-[color:var(--fg-muted)]">thinking…</span>
           )}
         </div>
+        <div className="mt-1 text-[9px] uppercase tracking-wider">
+          <NarrativeProvenance narrative={narrative} />
+        </div>
         <p className="text-[11px] italic mt-1 leading-snug">
-          {narrative || (explain.isPending ? "Generating…" : "—")}
+          {narrative?.text || (explain.isPending ? "Generating…" : "—")}
         </p>
       </div>
       <MemberRecordsList
@@ -4141,7 +4193,7 @@ function HelpRail() {
     { mark: "z", tone: "text-warn font-mono", title: "z-score", sub: "rolling stdev surprise; 2σ = anomaly, 4σ = high" },
     { mark: "▲", tone: "text-good", title: "Coherence", sub: "intra-cluster similarity (1.0 = identical stories)" },
     { mark: "×", tone: "text-accent", title: "Lift", sub: "co-occurrence vs independence baseline" },
-    { mark: "?", tone: "text-[color:var(--fg-muted)]", title: "Explain", sub: "DeepSeek narrative on click" },
+    { mark: "?", tone: "text-[color:var(--fg-muted)]", title: "Explain", sub: "narrative on click" },
   ];
   return (
     <aside className="card text-xs grid gap-2">
@@ -4160,7 +4212,7 @@ function HelpRail() {
         ))}
       </ul>
       <p className="pt-1 text-[10px] text-[color:var(--fg-muted)] border-t border-[color:var(--border-subtle)] leading-relaxed">
-        Single <code className="font-mono">/api/quant/dashboard</code> fan-out, 30s cache, paralleled across 9 signals. DeepSeek narratives gated by a USD budget cap.
+        Single <code className="font-mono">/api/quant/dashboard</code> fan-out, 30s cache, paralleled across 9 signals. External narratives are budget-gated; local interpretation keeps the UI usable.
       </p>
     </aside>
   );

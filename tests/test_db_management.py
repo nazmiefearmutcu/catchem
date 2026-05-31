@@ -18,7 +18,6 @@ from catchem.api import create_app
 from catchem.rate_limit import reset_all_buckets
 from catchem.settings import load_settings, reload_settings
 
-
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
 

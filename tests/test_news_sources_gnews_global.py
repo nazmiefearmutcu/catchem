@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
-from catchem.news_poller import DEFAULT_FEEDS, assemble_feeds
+from catchem.news_poller import assemble_feeds
 from catchem.news_sources.gnews_global import gnews_global_feeds
 
 # The pack ships roughly a dozen locale feeds; pin a tolerant lower bound so

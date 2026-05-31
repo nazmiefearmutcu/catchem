@@ -27,7 +27,6 @@ from catchem.news_poller import (
 )
 from catchem.settings import load_settings, reload_settings
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 

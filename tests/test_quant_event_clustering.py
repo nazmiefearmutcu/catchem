@@ -7,7 +7,8 @@ no storage, no env wiring required.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -18,7 +19,6 @@ from catchem.quant.event_clustering import (
     pairwise_similarity,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ from catchem.quant.event_clustering import (
 
 def _iso(dt: datetime) -> str:
     """ISO-8601 with explicit UTC offset."""
-    return dt.astimezone(timezone.utc).isoformat()
+    return dt.astimezone(UTC).isoformat()
 
 
 def _rec(
@@ -46,7 +46,7 @@ def _rec(
     sentiment_score: float | None = 0.5,
 ) -> dict[str, Any]:
     """Build a FinancialImpactRecord-shaped dict."""
-    now = datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
     if isinstance(published_ts, datetime):
         published_ts = _iso(published_ts)
     if isinstance(created_at, datetime):
@@ -85,7 +85,7 @@ def test_empty_list_returns_empty():
 
 def test_fed_rate_hike_clusters_into_one_event():
     """Five outlets covering a Fed rate hike within ~10min cluster together."""
-    base = datetime(2026, 5, 27, 14, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 14, 0, tzinfo=UTC)
     outlets = ["reuters.com", "bloomberg.com", "wsj.com", "ft.com", "cnbc.com"]
     titles = [
         "Fed raises rates by 25 basis points",
@@ -121,7 +121,7 @@ def test_fed_rate_hike_clusters_into_one_event():
 def test_unrelated_records_do_not_cluster():
     """Sports article + Fed announcement → no cluster (both become singletons,
     both dropped since min_cluster_size=2 by default)."""
-    base = datetime(2026, 5, 27, 9, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 9, 0, tzinfo=UTC)
     fed = _rec(
         "cap-fed",
         title="Fed hikes interest rates 25 basis points",
@@ -154,7 +154,7 @@ def test_unrelated_records_do_not_cluster():
 def test_record_outside_time_window_does_not_cluster():
     """A late-arriving outlet beyond ``window_seconds`` becomes its own
     cluster even though the content matches."""
-    base = datetime(2026, 5, 27, 10, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 10, 0, tzinfo=UTC)
     common = dict(
         title="Apple unveils new MacBook Pro lineup",
         symbols=["AAPL"],
@@ -184,7 +184,7 @@ def test_record_outside_time_window_does_not_cluster():
 def test_cluster_id_is_deterministic():
     """Running the same input twice yields identical cluster_ids, and the
     SHA-1 is stable across orderings of the input list."""
-    base = datetime(2026, 5, 27, 11, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 11, 0, tzinfo=UTC)
     records = [
         _rec(
             f"cap-{i}",
@@ -212,7 +212,7 @@ def test_cluster_id_is_deterministic():
 def test_dominant_symbols_ranked_by_frequency():
     """Most-frequent symbols appear first; symbols seen in only 1 member
     are dropped from the dominant list."""
-    base = datetime(2026, 5, 27, 13, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 13, 0, tzinfo=UTC)
     # NVDA appears in all 4, AAPL in 3, MSFT in 2, TSLA only in 1 (dropped).
     records = [
         _rec(
@@ -264,7 +264,7 @@ def test_dominant_symbols_ranked_by_frequency():
 
 def test_coherence_reasonable_for_tight_cluster():
     """A near-identical group of headlines yields coherence well above 0.5."""
-    base = datetime(2026, 5, 27, 15, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 15, 0, tzinfo=UTC)
     records = [
         _rec(
             f"cap-tight-{i}",
@@ -291,7 +291,7 @@ def test_coherence_reasonable_for_tight_cluster():
 
 
 def test_missing_published_ts_falls_back_to_created_at():
-    base = datetime(2026, 5, 27, 16, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 16, 0, tzinfo=UTC)
     r1 = _rec(
         "cap-x1",
         title="Apple raises iPhone prices in Europe",
@@ -318,7 +318,7 @@ def test_missing_published_ts_falls_back_to_created_at():
 
 
 def test_min_cluster_size_one_keeps_singletons():
-    base = datetime(2026, 5, 27, 17, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 17, 0, tzinfo=UTC)
     r = _rec(
         "cap-only",
         title="One-off headline about something obscure",
@@ -332,7 +332,7 @@ def test_min_cluster_size_one_keeps_singletons():
 
 
 def test_size_two_coherence_equals_single_pair_score():
-    base = datetime(2026, 5, 27, 18, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 18, 0, tzinfo=UTC)
     a = _rec(
         "pa",
         title="Tesla beats earnings expectations on strong deliveries",
@@ -360,7 +360,7 @@ def test_size_two_coherence_equals_single_pair_score():
 def test_non_finance_records_still_cluster_on_text_and_symbols():
     """Records flagged ``is_finance_relevant=False`` still cluster if they
     share enough signal — the module is a pure clusterer, not a filter."""
-    base = datetime(2026, 5, 27, 19, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 19, 0, tzinfo=UTC)
     common = dict(
         symbols=["BTC"],
         title="Bitcoin tops 100000 dollars amid bullish sentiment",
@@ -381,7 +381,7 @@ def test_non_finance_records_still_cluster_on_text_and_symbols():
 
 def test_does_not_crash_on_none_fields():
     """Defensive: a record with all optional list fields = None must not raise."""
-    base = datetime(2026, 5, 27, 20, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 20, 0, tzinfo=UTC)
     sparse = {
         "capture_id": "sparse",
         "title": None,
@@ -405,7 +405,7 @@ def test_does_not_crash_on_none_fields():
 
 def test_returns_eventcluster_instances():
     """Public API surface check: list[EventCluster], frozen dataclasses."""
-    base = datetime(2026, 5, 27, 21, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 27, 21, 0, tzinfo=UTC)
     pair = [
         _rec(
             "pc-1",
@@ -425,15 +425,15 @@ def test_returns_eventcluster_instances():
     out = cluster_records(pair)
     assert len(out) == 1
     assert isinstance(out[0], EventCluster)
-    # frozen=True → cannot mutate.
-    with pytest.raises(Exception):
+    # frozen=True -> cannot mutate.
+    with pytest.raises(FrozenInstanceError):
         out[0].size = 99  # type: ignore[misc]
 
 
 def test_module_import_surface():
     """Imports declared in the task brief must work."""
-    from catchem.quant.event_clustering import cluster_records as fn  # noqa: F401
     from catchem.quant.event_clustering import EventCluster as EC  # noqa: F401
+    from catchem.quant.event_clustering import cluster_records as fn  # noqa: F401
 
 
 def test_pairwise_similarity_identical_dict_reference_is_one():

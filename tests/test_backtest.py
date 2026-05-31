@@ -6,7 +6,7 @@ tuples, and produces a `BacktestRun` dataclass. So we don't need a real
 SQLite — a small stand-in object is enough to exercise every branch.
 
 Coverage targets:
-    * empty storage → zero-valued summary, empty bins/predictions
+    * empty storage => zero-valued summary, empty bins/predictions
     * paired rows with valid scores populate predictions + calibration
     * calibration bins respect the [low, high) ranges (1.0 lands in last bin)
     * sample-size clamps (min 10) so we never call storage with a silly limit
@@ -24,7 +24,6 @@ from fastapi.testclient import TestClient
 from catchem.api import create_app
 from catchem.backtest import BacktestRun, run_backtest
 from catchem.settings import load_settings, reload_settings
-
 
 # ── stand-in storage / supervisor ──────────────────────────────────────────
 
@@ -132,12 +131,12 @@ class TestRunBacktest:
         # Six rows fanned across the five [low, high) bins, plus a row at
         # exactly 1.0 to verify the last bin is closed on the high side.
         pairs = [
-            _make_pair("c0", stub_score=0.05, deepseek_score=0.10),  # 0.0–0.2
-            _make_pair("c1", stub_score=0.30, deepseek_score=0.35),  # 0.2–0.4
-            _make_pair("c2", stub_score=0.45, deepseek_score=0.55),  # 0.4–0.6
-            _make_pair("c3", stub_score=0.65, deepseek_score=0.70),  # 0.6–0.8
-            _make_pair("c4", stub_score=0.85, deepseek_score=0.90),  # 0.8–1.0
-            _make_pair("c5", stub_score=1.00, deepseek_score=0.95),  # 0.8–1.0 (closed)
+            _make_pair("c0", stub_score=0.05, deepseek_score=0.10),  # 0.0-0.2
+            _make_pair("c1", stub_score=0.30, deepseek_score=0.35),  # 0.2-0.4
+            _make_pair("c2", stub_score=0.45, deepseek_score=0.55),  # 0.4-0.6
+            _make_pair("c3", stub_score=0.65, deepseek_score=0.70),  # 0.6-0.8
+            _make_pair("c4", stub_score=0.85, deepseek_score=0.90),  # 0.8-1.0
+            _make_pair("c5", stub_score=1.00, deepseek_score=0.95),  # 0.8-1.0 (closed)
         ]
         sup = FakeSupervisor(FakeStorage(pairs))
         run = run_backtest(sup, sample_size=100)
@@ -191,8 +190,9 @@ class TestRunBacktest:
             "error_code": None,
             "payload": {"finance_relevance_score": 0.5},
         }
-        pairs = [(stub_no_score, ds_ok)] + [
-            _make_pair("y", stub_score=0.2, deepseek_score=0.3)
+        pairs = [
+            (stub_no_score, ds_ok),
+            _make_pair("y", stub_score=0.2, deepseek_score=0.3),
         ]
         sup = FakeSupervisor(FakeStorage(pairs))
         run = run_backtest(sup, sample_size=100)
@@ -201,7 +201,7 @@ class TestRunBacktest:
 
     def test_sample_size_clamps_to_minimum(self) -> None:
         # Even if a caller passes 1 we want at least 10 — preserves a
-        # meaningful evaluation window. Tests the float→int path too.
+        # meaningful evaluation window. Tests the float=>int path too.
         sup = FakeSupervisor(FakeStorage([]))
         run_backtest(sup, sample_size=1)  # type: ignore[arg-type]
         assert sup.storage.last_call is not None

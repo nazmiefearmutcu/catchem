@@ -427,8 +427,8 @@ function ReviewsHero({
         aria-hidden
         className="pointer-events-none absolute -top-20 -left-20 h-48 w-48 rounded-full bg-accent/20 blur-3xl"
       />
-      <div className="relative flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-center gap-3">
+      <div className="relative flex flex-col gap-3 mb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
@@ -446,7 +446,7 @@ function ReviewsHero({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">
           <ExportMenu
             label="export pairs"
             formats={["csv", "json"]}
@@ -457,7 +457,7 @@ function ReviewsHero({
           />
           <button
             type="button"
-            className="chip text-[10px] no-print hover:bg-[color:var(--bg-elev2)]"
+            className="chip hidden text-[10px] no-print hover:bg-[color:var(--bg-elev2)] sm:inline-flex"
             onClick={() => window.print()}
             title="Print this page or save as PDF"
           >
@@ -466,7 +466,7 @@ function ReviewsHero({
               print / save PDF
             </span>
           </button>
-          <span className="chip text-[10px]" title={`model ${model}`}>
+          <span className="chip hidden text-[10px] sm:inline-flex" title={`model ${model}`}>
             {model}
           </span>
         </div>

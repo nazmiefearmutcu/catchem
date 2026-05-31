@@ -27,7 +27,6 @@ from catchem import api as api_mod
 from catchem.api import create_app
 from catchem.settings import load_settings, reload_settings
 
-
 REQUIRED_TOP_KEYS = {"ok", "checks", "issues", "generated_at", "schema_version"}
 EXPECTED_SUBSYSTEM_KEYS = {
     "uptime_ok",
@@ -52,7 +51,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_deep_health_happy_path_returns_200_ok_true(client: TestClient) -> None:
-    """All subsystems pass on a fresh sidecar → 200 + ok:true + no issues."""
+    """All subsystems pass on a fresh sidecar => 200 + ok:true + no issues."""
     r = client.get("/api/health/deep")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -126,7 +125,7 @@ def test_deep_health_news_poller_stale_detection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When the poller is enabled and its last_run_at is older than
-    ``5 × interval_seconds``, the deep probe must flag it stale + 503."""
+    ``5 x interval_seconds``, the deep probe must flag it stale + 503."""
     monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
     monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "true")
     # Floor at 10s is enforced by NewsPoller — pick the smallest legal value
@@ -134,11 +133,26 @@ def test_deep_health_news_poller_stale_detection(
     monkeypatch.setenv("CATCHEM_NEWS__POLL_INTERVAL_SECONDS", "10")
     reload_settings()
 
+    class _FakePoller:
+        interval_seconds = 10.0
+        last_run_at = None
+        started = False
+        stopped = False
+
+        def start(self) -> None:
+            self.started = True
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    fake_poller = _FakePoller()
+    monkeypatch.setattr(api_mod, "_build_news_poller", lambda *_args, **_kwargs: fake_poller)
+
     app = create_app(load_settings())
     c = TestClient(app)
     c.__enter__()
     try:
-        # Move the poller's last_run_at backwards by > 5 × interval.
+        # Move the poller's last_run_at backwards by > 5 x interval.
         poller = api_mod._NEWS_POLLER
         assert poller is not None, "poller must be active for this test"
         poller.last_run_at = datetime.now(UTC) - timedelta(seconds=10 * 6)
@@ -160,3 +174,40 @@ def test_simple_healthz_still_returns_minimal_status(client: TestClient) -> None
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+
+
+def test_healthz_requires_matching_boot_token_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Tauri shell appends a boot token to /healthz so it cannot
+    mistake an unrelated listener on the same port for the launched
+    sidecar. When the token is configured, missing or mismatched tokens
+    must be rejected."""
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_BOOT_TOKEN", "abc123")
+    reload_settings()
+    app = create_app(load_settings())
+    with TestClient(app) as c:
+        assert c.get("/healthz").status_code == 403
+        assert c.get("/healthz?boot_token=wrong").status_code == 403
+        r = c.get("/healthz?boot_token=abc123")
+        assert r.json() == {"status": "ok"}
+        assert r.headers["x-catchem-boot-token"] == "abc123"
+
+
+def test_healthz_exposes_boot_token_header_for_tauri_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The desktop webview must be able to read the echoed boot token
+    from a cross-origin fetch response; otherwise the boot shim can never
+    confirm that the /healthz response came from the launched sidecar."""
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_BOOT_TOKEN", "abc123")
+    reload_settings()
+    app = create_app(load_settings())
+    with TestClient(app) as c:
+        r = c.get("/healthz?boot_token=abc123", headers={"Origin": "tauri://localhost"})
+        assert r.status_code == 200
+        assert r.headers["x-catchem-boot-token"] == "abc123"
+        exposed = r.headers.get("access-control-expose-headers", "")
+        assert "X-Catchem-Boot-Token" in exposed

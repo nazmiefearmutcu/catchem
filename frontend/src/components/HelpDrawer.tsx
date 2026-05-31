@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useLocation } from "react-router-dom";
 import { matchHelp } from "@/lib/page-help";
 import { closeAllOverlays, useOverlaySurface } from "@/context/overlayCoordinator";
@@ -82,6 +88,28 @@ export function HelpDrawer() {
     setOpen(true);
   }, []);
   const close = useCallback(() => setOpen(false), []);
+  const handleKeyDownCapture = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  }, [close]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleDocumentKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    };
+    document.addEventListener("keydown", handleDocumentKeyDown, { capture: true });
+    return () => {
+      document.removeEventListener("keydown", handleDocumentKeyDown, {
+        capture: true,
+      });
+    };
+  }, [close, open]);
 
   return (
     <>
@@ -110,6 +138,8 @@ export function HelpDrawer() {
         role="dialog"
         aria-modal="false"
         aria-labelledby="help-drawer-title"
+        onKeyDownCapture={handleKeyDownCapture}
+        hidden={!open}
         // The `inert` attribute removes the subtree from the tab order AND
         // hides it from assistive tech. `aria-hidden` alone hides from SR
         // but interactive children stay focusable, which makes Tab vanish
@@ -119,9 +149,8 @@ export function HelpDrawer() {
         {...(!open ? { inert: "" as unknown as boolean } : {})}
         data-testid="help-drawer"
         data-state={open ? "open" : "closed"}
-        className={`fixed inset-y-0 right-0 z-30 w-[360px] border-l border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft transition-transform duration-220 ease-out flex flex-col ${
-          open ? "translate-x-0 pointer-events-auto" : "translate-x-full pointer-events-none"
-        }`}
+        className="fixed inset-y-0 right-0 z-30 flex w-[calc(100vw-1rem)] sm:w-[360px] flex-col border-l border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft transition-transform duration-220 ease-out max-w-[calc(100vw-1rem)]"
+        data-open={open ? "true" : "false"}
         style={{ transitionDuration: "220ms" }}
       >
         <header className="flex items-start justify-between gap-3 border-b border-[color:var(--border-subtle)] px-4 py-3">
@@ -141,11 +170,13 @@ export function HelpDrawer() {
           </div>
           <button
             type="button"
+            onPointerDown={close}
+            onMouseDown={close}
             onClick={close}
             aria-label="Close help drawer"
             ref={closeButtonRef}
             data-testid="help-drawer-close"
-            className="btn shrink-0"
+            className="btn h-8 w-8 shrink-0 items-center justify-center p-0 text-sm leading-none"
           >
             ×
           </button>

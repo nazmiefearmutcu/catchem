@@ -29,6 +29,9 @@ vi.mock("@/lib/api", async () => {
       config: vi.fn(),
       metrics: vi.fn(),
       guards: vi.fn(),
+      stats: vi.fn(),
+      healthDeep: vi.fn(),
+      dbStats: vi.fn(),
     },
   };
 });
@@ -125,6 +128,41 @@ function jsonDefaults() {
   apiMock.config.mockResolvedValue({});
   apiMock.metrics.mockResolvedValue({});
   apiMock.guards.mockResolvedValue(guard());
+  apiMock.stats.mockResolvedValue({
+    schema_version: 1,
+    generated_at: "2026-05-21T12:00:00+00:00",
+    uptime_seconds: 12,
+    total_requests: 0,
+    request_counts: {},
+    db: { records: 0, reviews: 0, dlq: 0 },
+    reviewers: { deepseek_usd_spent: 0, stub_active: true },
+    process: {
+      rss_mb: 42,
+      vms_mb: 128,
+      cpu_percent: 0,
+      num_threads: 4,
+      psutil_available: true,
+    },
+    version: "test",
+  });
+  apiMock.healthDeep.mockResolvedValue({
+    ok: true,
+    checks: {},
+    issues: [],
+    generated_at: "2026-05-21T12:00:00+00:00",
+    schema_version: 1,
+  });
+  apiMock.dbStats.mockResolvedValue({
+    schema_version: 1,
+    generated_at: "2026-05-21T12:00:00+00:00",
+    tables: [],
+    indexes: [],
+    total_tables: 0,
+    total_indexes: 0,
+    page_count: 0,
+    page_size_bytes: 4096,
+    estimated_size_bytes: 0,
+  });
 }
 
 beforeEach(() => {

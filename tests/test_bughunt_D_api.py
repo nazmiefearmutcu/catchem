@@ -77,6 +77,54 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     c.__exit__(None, None, None)
 
 
+def test_create_app_lifespan_uses_explicit_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller-provided Settings object must control startup side effects.
+
+    This pins the factory contract used by isolated smoke/tests: a cached
+    process config may allow background tasks, but ``create_app(explicit)``
+    must honor the explicit object rather than silently re-reading globals.
+    """
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "true")
+    reload_settings()
+    cached = load_settings()
+    assert cached.news.poller_enabled is True
+    assert cached.archive.enabled is True
+
+    explicit = cached.model_copy(deep=True)
+    explicit.news.poller_enabled = False
+    explicit.archive.enabled = False
+
+    from catchem import api as api_mod
+    from catchem.api import create_app
+
+    observed: dict[str, bool] = {}
+
+    def _fake_build_poller(supervisor, settings):  # type: ignore[no-untyped-def]
+        observed["poller_enabled"] = settings.news.poller_enabled
+        if settings.news.poller_enabled:
+            raise AssertionError("create_app ignored explicit news.poller_enabled=false")
+        return None
+
+    def _fake_build_archiver(supervisor, settings):  # type: ignore[no-untyped-def]
+        observed["archive_enabled"] = settings.archive.enabled
+        if settings.archive.enabled:
+            raise AssertionError("create_app ignored explicit archive.enabled=false")
+        return None
+
+    monkeypatch.setattr(api_mod, "_build_news_poller", _fake_build_poller)
+    monkeypatch.setattr(api_mod, "_build_archiver", _fake_build_archiver)
+
+    app = create_app(explicit)
+    with TestClient(app) as c:
+        assert c.get("/healthz").json() == {"status": "ok"}
+        assert api_mod._SETTINGS is explicit
+        assert observed == {"poller_enabled": False, "archive_enabled": False}
+
+
 # ── Finding 1 / 5: CSV formula injection in /api/export/records ─────────────
 
 

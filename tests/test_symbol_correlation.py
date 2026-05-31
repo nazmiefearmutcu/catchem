@@ -6,19 +6,17 @@ exactly one expectation.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from catchem.quant.symbol_correlation import (
-    SymbolPair,
     _parse_ts,
     _pearson,
     compute_pairs,
 )
 
-
-_BASE = datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)
+_BASE = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
 
 def _ts(minutes: int) -> str:
@@ -53,14 +51,14 @@ def test_pearson_perfect_negative_is_minus_one() -> None:
 
 
 def test_pearson_flat_input_returns_zero() -> None:
-    """A flat series has zero variance → result is undefined; we return 0.0."""
+    """A flat series has zero variance => result is undefined; we return 0.0."""
 
     assert _pearson([5.0, 5.0, 5.0], [1.0, 2.0, 3.0]) == 0.0
-    assert _pearson([1.0], [2.0]) == 0.0  # n<2 → 0.0 (not NaN, not exception)
+    assert _pearson([1.0], [2.0]) == 0.0  # n<2 => 0.0 (not NaN, not exception)
 
 
 def test_pearson_mismatched_length_returns_zero() -> None:
-    """``len(xs) != len(ys)`` is undefined → 0.0 (line 48 guard)."""
+    """``len(xs) != len(ys)`` is undefined => 0.0 (line 48 guard)."""
 
     assert _pearson([1.0, 2.0, 3.0], [1.0, 2.0]) == 0.0
 
@@ -103,11 +101,11 @@ def test_parse_ts_naive_iso_is_assumed_utc() -> None:
     """
 
     parsed = _parse_ts("2024-01-01T09:00:00")
-    assert parsed == datetime(2024, 1, 1, 9, 0, tzinfo=timezone.utc)
+    assert parsed == datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
 
 
 def test_parse_ts_whitespace_only_returns_none() -> None:
-    """A blank-after-strip string is unparseable → None (line 73-74)."""
+    """A blank-after-strip string is unparseable => None (line 73-74)."""
 
     assert _parse_ts("   ") is None
     assert _parse_ts("") is None
@@ -119,7 +117,7 @@ def test_parse_ts_offset_is_normalised_to_utc() -> None:
     """A non-UTC offset is converted to UTC (the ``astimezone`` branch)."""
 
     assert _parse_ts("2024-01-01T11:00:00+02:00") == datetime(
-        2024, 1, 1, 9, 0, tzinfo=timezone.utc
+        2024, 1, 1, 9, 0, tzinfo=UTC
     )
 
 
@@ -127,7 +125,7 @@ def test_parse_ts_offset_is_normalised_to_utc() -> None:
 
 
 def test_compute_pairs_empty_input_returns_empty_list() -> None:
-    """No records ⇒ no pairs — and crucially no exception."""
+    """No records => no pairs — and crucially no exception."""
 
     assert compute_pairs([]) == []
 
@@ -155,7 +153,7 @@ def test_compute_pairs_filters_by_min_mentions() -> None:
 def test_compute_pairs_top_n_caps_output() -> None:
     """Output length never exceeds top_n even with many eligible pairs.
 
-    Six symbols mentioned 3× each across 3 buckets ⇒ C(6,2)=15 pairs,
+    Six symbols mentioned 3x each across 3 buckets => C(6,2)=15 pairs,
     but top_n=5 must cap.
     """
 
@@ -217,7 +215,7 @@ def test_compute_pairs_pearson_r_is_clamped_in_range() -> None:
     records: list[dict] = []
     # Perfect correlation between BTC and ETH across many buckets.
     for bucket_idx in range(6):
-        # Identical counts in every bucket ⇒ ideal r = +1.0.
+        # Identical counts in every bucket => ideal r = +1.0.
         for _ in range(bucket_idx + 2):
             records.append(_rec(bucket_idx * 60, ["BTC", "ETH"]))
     pairs = compute_pairs(records, bucket_minutes=60, min_mentions=2, top_n=5)
@@ -261,9 +259,9 @@ def test_compute_pairs_skips_unparseable_and_non_string_symbols() -> None:
     """
 
     records: list[dict] = [
-        # Bad timestamp + no created_at fallback → row dropped at line 125.
+        # Bad timestamp + no created_at fallback => row dropped at line 125.
         {"published_ts": "not-a-date", "candidate_symbols": ["AAPL"]},
-        # candidate_symbols is a dict, not a list → row dropped at line 129.
+        # candidate_symbols is a dict, not a list => row dropped at line 129.
         {"published_ts": _ts(0), "candidate_symbols": {"AAPL": 1}},
         # Mixed real + non-string + empty + duplicate symbols across 2+ buckets
         # so AAPL passes min_mentions=3 but no second eligible symbol survives.

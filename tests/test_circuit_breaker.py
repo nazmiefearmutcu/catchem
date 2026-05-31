@@ -23,7 +23,6 @@ from catchem.news_poller import (
     _compute_cooldown_until,
 )
 
-
 # ── ladder + threshold contract ──────────────────────────────────────────────
 
 

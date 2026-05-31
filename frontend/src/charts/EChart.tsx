@@ -30,22 +30,55 @@ type ReactEChartsLike = ComponentType<{
 }>;
 
 // `React.lazy` requires a default-export shape, so we adapt the named export
-// (`echarts-for-react` ships ESM with `default` already, but importing
-// `echarts` alongside it inside the same dynamic import keeps both heavy
-// modules off the critical path — they end up in the same async chunk that
-// rollup splits out of `manualChunks.charts`).
+// from echarts-for-react's core build. The default wrapper imports the entire
+// ECharts registry; the core wrapper lets us register only the charts and
+// components this app actually renders.
 const LazyReactECharts = lazy<ReactEChartsLike>(async () => {
-  // Side-effect import to register echarts core before the wrapper mounts.
-  // Both modules live in the `charts` manual chunk, so this single dynamic
-  // import pulls the whole charting bundle on demand.
-  await import("echarts");
-  const mod = await import("echarts-for-react");
-  return { default: mod.default as ReactEChartsLike };
+  const [
+    { default: ReactEChartsCore },
+    echarts,
+    charts,
+    components,
+    renderers,
+  ] = await Promise.all([
+    import("echarts-for-react/lib/core"),
+    import("echarts/core"),
+    import("echarts/charts"),
+    import("echarts/components"),
+    import("echarts/renderers"),
+  ]);
+
+  echarts.use([
+    charts.BarChart,
+    charts.HeatmapChart,
+    charts.LineChart,
+    charts.RadarChart,
+    charts.SankeyChart,
+    charts.ScatterChart,
+    components.DataZoomComponent,
+    components.DatasetComponent,
+    components.GridComponent,
+    components.LegendComponent,
+    components.MarkAreaComponent,
+    components.MarkLineComponent,
+    components.MarkPointComponent,
+    components.RadarComponent,
+    components.TitleComponent,
+    components.TooltipComponent,
+    components.TransformComponent,
+    components.VisualMapComponent,
+    renderers.CanvasRenderer,
+  ]);
+
+  const RegisteredECharts: ReactEChartsLike = (props) => (
+    <ReactEChartsCore {...props} echarts={echarts} />
+  );
+  return { default: RegisteredECharts };
 });
 
 /**
- * Theme-aware ECharts wrapper. Avoids importing the heavy 'theme registry' from
- * echarts — we pass tokens via the option object directly so the bundle stays
+ * Theme-aware ECharts wrapper. Avoids importing the heavy default registry from
+ * echarts - we pass tokens via the option object directly so the bundle stays
  * lean and the chart respects the live theme toggle.
  *
  * The underlying `echarts` + `echarts-for-react` modules are loaded lazily via

@@ -68,7 +68,7 @@ def _fallback_metrics() -> ProcessMetrics:
         rss_raw = usage.ru_maxrss
         # macOS reports ru_maxrss in BYTES, Linux in KILOBYTES. Normalize
         # to KB before the /1024 conversion to MB below — otherwise macOS
-        # would over-report by 1024×.
+        # would over-report by 1024x.
         if sys.platform == "darwin":
             rss_kb = max(0, rss_raw) // 1024
         else:

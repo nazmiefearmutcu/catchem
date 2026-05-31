@@ -1,4 +1,4 @@
-"""News arrival heatmap — 24h × 7day grid showing volume per (hour, weekday).
+"""News arrival heatmap — 24h x 7day grid showing volume per (hour, weekday).
 
 Aggregates a rolling window of records into a fixed 168-cell grid indexed
 by ``(weekday, hour)``. Useful for:
@@ -14,7 +14,7 @@ Design notes
   schedule (matches ``market_time.py``). Callers can pass any tz name.
 * Records with malformed / missing ``published_ts`` (or ``created_at``)
   are silently skipped — no exceptions propagate to the signal layer.
-* Always returns a dense 24×7 = 168 cell grid in canonical order so the
+* Always returns a dense 24x7 = 168 cell grid in canonical order so the
   UI can render the ECharts heatmap without densifying client-side.
 * stdlib zoneinfo only (Python 3.9+ ships it).
 """
@@ -34,7 +34,7 @@ WEEKDAY_LABELS: tuple[str, ...] = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Su
 
 @dataclass(frozen=True)
 class HeatmapCell:
-    """One cell of the 24×7 grid."""
+    """One cell of the 24x7 grid."""
 
     weekday: int  # 0 = Monday, 6 = Sunday
     hour: int     # 0..23 (local hour in the requested timezone)
@@ -58,7 +58,7 @@ def compute_heatmap(
     records: list[dict],
     timezone: str = "America/New_York",
 ) -> dict:
-    """Return a 24×7 arrival-volume grid.
+    """Return a 24x7 arrival-volume grid.
 
     Parameters
     ----------
@@ -74,7 +74,7 @@ def compute_heatmap(
     -------
     dict:
         ``cells``         — 168 entries in canonical row-major order
-        (weekday outer, hour inner; weekday 0..6 → Mon..Sun).
+        (weekday outer, hour inner; weekday 0..6 => Mon..Sun).
         ``max_count``     — largest count across all cells (0 if empty).
         ``total_samples`` — sum of cell counts.
         ``peak_cells``    — up to 5 cells tied for ``max_count`` (>0).

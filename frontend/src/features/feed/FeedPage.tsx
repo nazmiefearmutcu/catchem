@@ -1014,7 +1014,7 @@ function FeedRow({
         aria-hidden
         className={`pointer-events-none absolute left-0 top-2 bottom-2 w-1 rounded-r ${accentBar}`}
       />
-      <div className="grid grid-cols-[20px_92px_1fr_auto] gap-3 items-start">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[20px_92px_1fr_auto] sm:gap-3 items-start">
         <div className="pl-1.5 pt-0.5">
           <input
             type="checkbox"

@@ -56,20 +56,20 @@ export function BenchmarkPage() {
   };
 
   return (
-    <div className="grid gap-5">
+    <div className="grid w-full min-w-0 gap-5">
       {/* Hero: outcome headline + 5 KPI tiles with run-over-run delta. */}
-      <section className="relative overflow-hidden rounded-xl border border-accent/40 hero-gradient p-6">
+      <section className="relative w-full min-w-0 overflow-hidden rounded-xl border border-accent/40 hero-gradient p-6">
         <div
           aria-hidden
           className="pointer-events-none absolute -top-20 -left-20 h-48 w-48 rounded-full bg-accent/20 blur-3xl"
         />
         <div className="relative flex flex-wrap items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
             </span>
-            <div>
+            <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">
                 {t("benchmark.eyebrow")}
               </div>
@@ -86,7 +86,7 @@ export function BenchmarkPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             <button
               type="button"
               className="chip text-[10px] no-print hover:bg-[color:var(--bg-elev2)]"
@@ -108,7 +108,7 @@ export function BenchmarkPage() {
             </button>
           </div>
         </div>
-        <div className="relative grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-5 text-[11px]">
+        <div className="relative grid w-full min-w-0 gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-5 text-[11px]">
           <BenchStat label="F1"
                      value={fmtPct(data.relevance.f1, 1)}
                      delta={deltaF1}
@@ -133,18 +133,18 @@ export function BenchmarkPage() {
         </div>
       </section>
 
-      <section className="grid lg:grid-cols-2 gap-3">
-        <div className="card">
+      <section className="grid w-full min-w-0 lg:grid-cols-2 gap-3">
+        <div className="card w-full min-w-0">
           <h2 className="label mb-2">asset-class F1</h2>
           <ScoreBars items={data.asset_class_f1} />
         </div>
-        <div className="card">
+        <div className="card w-full min-w-0">
           <h2 className="label mb-2">reason-code F1</h2>
           <ScoreBars items={data.reason_code_f1} />
         </div>
       </section>
 
-      <section className="card">
+      <section className="card w-full min-w-0">
         <h2 className="label mb-2">per-item</h2>
         <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -183,7 +183,7 @@ export function BenchmarkPage() {
       </section>
 
       {history.data && history.data.history.length > 0 && (
-        <section className="card">
+        <section className="card w-full min-w-0">
           <h2 className="label mb-2">history (last {history.data.history.length})</h2>
           <EChart
             height={180}
@@ -231,7 +231,7 @@ function BenchStat({
   const arrow =
     delta == null ? "·" : delta > 0.0005 ? "▲" : delta < -0.0005 ? "▼" : "→";
   return (
-    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
+    <div className="w-full min-w-0 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2">
       <div className="flex items-baseline justify-between gap-2">
         <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">{label}</div>
         <Sparkline points={trail} className="text-accent" />
@@ -250,11 +250,11 @@ function ScoreBars({ items }: { items: Record<string, number> }) {
   const entries = Object.entries(items).sort(([, a], [, b]) => b - a);
   if (entries.length === 0) return <p className="text-xs text-[color:var(--fg-dim)]">none</p>;
   return (
-    <ul className="grid gap-1.5">
+  <ul className="grid w-full min-w-0 gap-1.5">
       {entries.map(([k, v]) => (
-        <li key={k} className="grid grid-cols-[120px_1fr_50px] gap-2 items-center text-xs">
+        <li key={k} className="grid w-full min-w-0 grid-cols-[minmax(0,120px)_minmax(0,1fr)_minmax(0,50px)] gap-2 items-center text-xs">
           <span>{k}</span>
-          <span className="h-2 rounded bg-[color:var(--bg-elev2)] overflow-hidden">
+          <span className="h-2 min-w-0 rounded bg-[color:var(--bg-elev2)] overflow-hidden">
             <span className={`block h-full ${v >= 0.8 ? "bg-good" : v >= 0.5 ? "bg-warn" : "bg-bad"}`}
                   style={{ width: `${100 * v}%` }} />
           </span>

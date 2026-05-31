@@ -64,7 +64,7 @@ def _reset_logging_state() -> None:
 
 
 def test_rotation_constants_match_policy() -> None:
-    # The 5 MB × 3 backups policy is the published contract; if it ever
+    # The 5 MB x 3 backups policy is the published contract; if it ever
     # changes, the constants AND this test must move in lockstep so the
     # change is visible in code review.
     assert LOG_ROTATION_MAX_BYTES == 5 * 1024 * 1024

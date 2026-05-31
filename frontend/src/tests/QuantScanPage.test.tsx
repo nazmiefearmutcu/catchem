@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { QuantDashboard } from "@/lib/api";
 
 /**
  * SMOKE test for the QuantScan flagship page.
@@ -51,7 +52,7 @@ const {
   dashboardFixture: {
     n_records_window: 1234,
     n_clusters: 0,
-    clusters: [],
+    clusters: [] as QuantDashboard["clusters"],
     source_leaderboard: null,
     novelty_timeline: [],
     lead_lag: null,
@@ -61,7 +62,7 @@ const {
     anomalies: null,
     spillover: null,
     generated_at: "2026-05-28T12:00:00Z",
-  },
+  } satisfies QuantDashboard,
   liveReadFixture: {
     narrative: "The tape is quiet.",
     source: "local" as const,
@@ -162,6 +163,9 @@ beforeEach(() => {
   // implementation (the async fixture returns) intact, so the api mock
   // still resolves valid shapes after the clear.
   vi.clearAllMocks();
+  dashboardFixture.n_clusters = 0;
+  dashboardFixture.clusters = [];
+  vi.mocked(api.quantExplain).mockResolvedValue({ kind: "cluster", narrative: "—", source: "local" });
 });
 
 describe("QuantScanPage (smoke)", () => {
@@ -180,6 +184,47 @@ describe("QuantScanPage (smoke)", () => {
     for (const label of ["200", "500", "1,000", "2,000", "5,000"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("keeps local-fallback narrative controls source-neutral", async () => {
+    renderPage();
+    await screen.findByTestId("live-read-title");
+
+    expect(screen.getByTitle("re-run the live read")).toBeInTheDocument();
+    expect(screen.queryByTitle(/DeepSeek live read/i)).toBeNull();
+    expect(screen.getByText("narrative on click")).toBeInTheDocument();
+    expect(screen.getByText(/External narratives are budget-gated/i)).toBeInTheDocument();
+    expect(screen.queryByText("DeepSeek narrative on click")).toBeNull();
+  });
+
+  it("surfaces local fallback provenance for signal narratives", async () => {
+    dashboardFixture.n_clusters = 1;
+    dashboardFixture.clusters = [
+      {
+        cluster_id: "cluster-local-fallback-0001",
+        capture_ids: ["cap-1", "cap-2"],
+        first_seen_ts: "2026-05-28T12:00:00Z",
+        last_seen_ts: "2026-05-28T12:20:00Z",
+        dominant_symbols: ["AAPL"],
+        dominant_reasons: ["earnings"],
+        dominant_assets: ["equities"],
+        member_domains: ["reuters.com", "bloomberg.com"],
+        size: 2,
+        mean_relevance: 0.82,
+        coherence: 0.74,
+      },
+    ];
+    vi.mocked(api.quantExplain).mockResolvedValueOnce({
+      kind: "cluster",
+      narrative: "Local cluster interpretation.",
+      source: "local",
+      fallback_reason: "budget_exhausted",
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Local cluster interpretation.")).toBeInTheDocument();
+    expect(screen.getByText("fallback: budget_exhausted")).toBeInTheDocument();
   });
 
   it("clicking a window chip re-queries the dashboard and does not crash", async () => {

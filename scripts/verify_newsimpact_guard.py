@@ -16,7 +16,6 @@ import json
 import sys
 from pathlib import Path
 
-
 REL = "models/governance_index/governance_index.json"
 EXPECTED_QUARANTINE = "QUARANTINED_REGRESSIVE_MULTIMODAL"
 EXPECTED_VERDICT = "FUSION_REGRESSIVE"

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getBootToken } from "@/lib/bootToken";
 
 /**
  * Coarse-grained sidecar liveness, exposed via /healthz polling.
@@ -63,7 +64,11 @@ export function useSidecarHealth() {
     const check = async () => {
       if (cancelledRef.current) return;
       try {
-        const res = await fetch("/healthz", {
+        const bootToken = getBootToken();
+        const healthzUrl = bootToken
+          ? `/healthz?boot_token=${encodeURIComponent(bootToken)}`
+          : "/healthz";
+        const res = await fetch(healthzUrl, {
           method: "GET",
           signal: timeoutSignal(SIDECAR_PROBE_TIMEOUT_MS),
         });

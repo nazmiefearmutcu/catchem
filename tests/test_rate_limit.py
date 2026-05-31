@@ -15,7 +15,7 @@ Six tests:
   4. The 429 detail body contains the verbatim "Rate limit" substring
      the SPA's ErrorBox is looking for.
   5. /healthz is NOT rate-limited (must always answer liveness pings).
-  6. /api/db/import burns 5 tokens per call → ~one allowed per minute
+  6. /api/db/import burns 5 tokens per call => ~one allowed per minute
      given a capacity of 6.
 """
 
@@ -152,7 +152,7 @@ def test_healthz_never_rate_limited(client: TestClient) -> None:
 
 
 def test_db_import_cost_5_throttles_quickly() -> None:
-    """DB_IMPORT_BUCKET capacity is 6, cost per call is 5 → at most one
+    """DB_IMPORT_BUCKET capacity is 6, cost per call is 5 => at most one
     call drains the bucket below the refill threshold.
 
     Drives the bucket directly because actually POSTing 200MB blobs
@@ -164,7 +164,7 @@ def test_db_import_cost_5_throttles_quickly() -> None:
     # Second one with cost=5 must fail — only 1 token left, deficit 4.
     allowed_2, retry = DB_IMPORT_BUCKET.allow("test_client", cost=5)
     assert not allowed_2
-    # 6 tokens / 60s = 0.1 tok/s. Need 4 more tokens → 40s retry-after.
+    # 6 tokens / 60s = 0.1 tok/s. Need 4 more tokens => 40s retry-after.
     # Don't pin the exact number; just check the order of magnitude.
     assert retry > 10.0, f"retry_after too short to be useful: {retry}"
 
@@ -229,10 +229,10 @@ def test_bucket_blocks_over_limit_within_window(fake_clock: _FakeClock) -> None:
         allowed, retry = bucket.allow("ip-A")
         assert allowed, f"request {i} should be under limit"
         assert retry == 0.0
-    # Clock has NOT advanced → no refill → next request is over-limit.
+    # Clock has NOT advanced => no refill => next request is over-limit.
     allowed, retry = bucket.allow("ip-A")
     assert not allowed
-    # Deficit is 1 token at 1 tok/sec → retry_after == 1.0s exactly.
+    # Deficit is 1 token at 1 tok/sec => retry_after == 1.0s exactly.
     assert retry == pytest.approx(1.0)
 
 
@@ -248,7 +248,7 @@ def test_bucket_resets_after_window_elapses(fake_clock: _FakeClock) -> None:
         assert bucket.allow("ip-B")[0]
     assert not bucket.allow("ip-B")[0]
 
-    # Advance one second → exactly one token back → exactly one request.
+    # Advance one second => exactly one token back => exactly one request.
     fake_clock.advance(1.0)
     assert bucket.allow("ip-B")[0]
     assert not bucket.allow("ip-B")[0]
@@ -270,20 +270,20 @@ def test_bucket_partial_refill_is_proportional(fake_clock: _FakeClock) -> None:
     for _ in range(10):
         assert bucket.allow("ip-C")[0]
     assert not bucket.allow("ip-C")[0]
-    # 2.5 seconds × 2 tok/sec = 5 tokens refilled → exactly 5 more allowed.
+    # 2.5 seconds x 2 tok/sec = 5 tokens refilled => exactly 5 more allowed.
     fake_clock.advance(2.5)
     granted = sum(1 for _ in range(10) if bucket.allow("ip-C")[0])
     assert granted == 5, f"expected 5 refilled tokens, got {granted}"
 
 
 def test_constructor_rejects_bad_capacity() -> None:
-    """capacity < 1 is nonsensical (no request could ever pass) → ValueError."""
+    """capacity < 1 is nonsensical (no request could ever pass) => ValueError."""
     with pytest.raises(ValueError, match="capacity must be >= 1"):
         TokenBucket(capacity=0, rate_per_sec=1.0)
 
 
 def test_constructor_rejects_non_positive_rate() -> None:
-    """rate_per_sec <= 0 means the bucket would never refill → ValueError."""
+    """rate_per_sec <= 0 means the bucket would never refill => ValueError."""
     with pytest.raises(ValueError, match="rate_per_sec must be > 0"):
         TokenBucket(capacity=5, rate_per_sec=0.0)
     with pytest.raises(ValueError, match="rate_per_sec must be > 0"):
@@ -297,8 +297,8 @@ def test_cost_below_one_is_clamped_to_one(fake_clock: _FakeClock) -> None:
     forever — exactly the accidental-abuse case the limiter exists to stop.
     """
     bucket = TokenBucket(capacity=2, rate_per_sec=1.0)
-    assert bucket.allow("ip-D", cost=0)[0]   # clamped to 1 → 1 token left
-    assert bucket.allow("ip-D", cost=-5)[0]  # clamped to 1 → 0 tokens left
+    assert bucket.allow("ip-D", cost=0)[0]   # clamped to 1 => 1 token left
+    assert bucket.allow("ip-D", cost=-5)[0]  # clamped to 1 => 0 tokens left
     # Bucket is now empty; a third clamped call must be denied.
     allowed, retry = bucket.allow("ip-D", cost=0)
     assert not allowed
@@ -306,13 +306,13 @@ def test_cost_below_one_is_clamped_to_one(fake_clock: _FakeClock) -> None:
 
 
 def test_reset_restores_full_capacity(fake_clock: _FakeClock) -> None:
-    """`reset()` drops all per-key state → next request starts at full capacity."""
+    """`reset()` drops all per-key state => next request starts at full capacity."""
     bucket = TokenBucket(capacity=4, rate_per_sec=1.0)
     for _ in range(4):
         assert bucket.allow("ip-E")[0]
     assert not bucket.allow("ip-E")[0]
     bucket.reset()
-    # Fresh bucket for the same key → full capacity again.
+    # Fresh bucket for the same key => full capacity again.
     granted = sum(1 for _ in range(4) if bucket.allow("ip-E")[0])
     assert granted == 4
 

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import patch
 
-import httpx
 import pytest
 
 from catchem.api import _compute_agreement, _compute_compare_summary
@@ -15,15 +12,12 @@ from catchem.reviewers import (
     REVIEWER_STUB,
     DeepSeekReviewer,
     ReviewerError,
-    ReviewerRegistry,
     ReviewPayload,
 )
 from catchem.schemas import AwarenessCaptureView
 from catchem.settings import Settings
-from catchem.storage import Storage
 from catchem.supervisor import Supervisor
 from catchem.taxonomy import default_taxonomy_path, load_taxonomy
-
 
 # ── fixtures ──────────────────────────────────────────────────────────────
 
@@ -291,7 +285,7 @@ class _MockClient:
         self._queue = list(responses)
         self.calls: list[tuple[str, dict]] = []
 
-    def post(self, url, json=None, headers=None):  # noqa: A002 — httpx shape
+    def post(self, url, json=None, headers=None):
         self.calls.append((url, json or {}))
         if not self._queue:
             raise AssertionError("mock client received unexpected extra call")

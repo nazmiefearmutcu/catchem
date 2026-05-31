@@ -12,9 +12,9 @@
     "preview": "vite preview --port 4173",
     "typecheck": "tsc -b --noEmit",
     "lint": "echo 'no eslint configured — keep it simple'",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "cov": "vitest run --coverage"
+        "test": "node scripts/run-vitest.mjs run",
+        "test:watch": "node scripts/run-vitest.mjs",
+        "cov": "node scripts/run-vitest.mjs run --coverage"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

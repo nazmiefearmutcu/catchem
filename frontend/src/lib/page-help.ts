@@ -42,7 +42,7 @@ function normalizePath(pathname: string): string {
 export const PAGE_HELP: Record<string, HelpContent> = {
   "/": {
     quickTips: [
-      "The hero shows DeepSeek's live cross-asset narrative — auto-refreshes every 60s",
+      "The hero shows a live cross-asset narrative — DeepSeek when configured and signaled, otherwise local synthesis",
       "Click any 'recent relevant' record to open the full detail drawer",
       "5 KPI cards = your snapshot view; click distribution rows to filter Feed",
     ],
@@ -53,7 +53,7 @@ export const PAGE_HELP: Record<string, HelpContent> = {
       },
       {
         q: "Where does the live-read narrative come from?",
-        a: "DeepSeek synthesis if API key is set, else local stub synthesis. See Settings → DeepSeek reviewer.",
+        a: "DeepSeek synthesis when the API key, budget, and non-empty signal context are all available; otherwise local synthesis. See Settings → DeepSeek reviewer.",
       },
     ],
     shortcuts: [
@@ -213,7 +213,7 @@ export const PAGE_HELP: Record<string, HelpContent> = {
   },
   "/scan": {
     quickTips: [
-      "Hero = DeepSeek narrator over the last 1000 records, refreshes every 60s",
+      "Hero = live-read narrative over the selected window; empty windows stay local instead of spending external calls",
       "Each tab = different signal family: Events (clustering), Sentiment (momentum), Sources (lead/lag), Anomalies (z-score), Network (spillover)",
       "Watchlist = your monitored symbols; click + on any item to add",
     ],

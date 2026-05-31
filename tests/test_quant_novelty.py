@@ -1,9 +1,9 @@
 """Tests for ``catchem.quant.novelty``.
 
 Covers the contract listed in the spec:
-  * empty corpus → score 1.0, no neighbor
-  * exact-content twin → near-duplicate bucket
-  * unrelated record → high novelty
+  * empty corpus => score 1.0, no neighbor
+  * exact-content twin => near-duplicate bucket
+  * unrelated record => high novelty
   * self-exclusion when corpus contains the target's own id
   * ``score_corpus`` preserves input order
   * None title + empty fields don't crash
@@ -165,7 +165,7 @@ def test_score_corpus_preserves_order_and_size() -> None:
 
     assert [r.capture_id for r in results] == ["first", "second", "third"]
     assert len(results) == 3
-    # Three unrelated rows → each compared to two unrelated neighbors;
+    # Three unrelated rows => each compared to two unrelated neighbors;
     # similarity should be near zero.
     for r in results:
         assert r.max_similarity_to_corpus <= 0.2
@@ -239,7 +239,7 @@ def test_completely_empty_record_against_nonempty_corpus() -> None:
 
     result = compute_novelty(target, corpus=corpus)
 
-    # No features → all Jaccards are zero → max similarity is zero, but
+    # No features => all Jaccards are zero => max similarity is zero, but
     # corpus is non-empty so nearest neighbor is still reported.
     assert result.max_similarity_to_corpus == 0.0
     assert result.novelty_score == 1.0
@@ -336,7 +336,7 @@ def test_jaccard_identical_and_disjoint() -> None:
 
 
 def test_explain_low_overlap_band() -> None:
-    """A 0.10–0.50 similarity lands in the 'low overlap' bucket."""
+    """A 0.10-0.50 similarity lands in the 'low overlap' bucket."""
 
     from catchem.quant.novelty import _explain  # type: ignore[attr-defined]
 

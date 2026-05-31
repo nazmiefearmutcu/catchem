@@ -32,7 +32,6 @@ from catchem.news_poller import (
 from catchem.rate_limit import DB_IMPORT_BUCKET, reset_all_buckets
 from catchem.settings import load_settings, reload_settings
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -54,7 +53,7 @@ class _StubSupervisor:
 
 
 class _StubSettings:
-    class paths:  # noqa: D401
+    class paths:
         catchem_output_dir = Path("/tmp")
 
 
@@ -156,7 +155,7 @@ def test_probe_endpoint_happy_path_returns_updated_feed_health(
     spec = FeedSpec("ok", "https://ok.example.com/rss", "ok.example.com")
     poller = _make_poller([spec])
 
-    async def _stub_fetch(_client, fed_spec):  # noqa: ANN001
+    async def _stub_fetch(_client, fed_spec):
         return _ok_result(fed_spec)
 
     monkeypatch.setattr(news_poller_module, "fetch_feed_result", _stub_fetch)
@@ -209,7 +208,7 @@ def test_probe_bypasses_cooldown_and_can_close_circuit(
     }
 
     # Stub fetch returns a clean 200 — should reset consecutive_errors.
-    async def _stub_fetch(_client, fed_spec):  # noqa: ANN001
+    async def _stub_fetch(_client, fed_spec):
         return _ok_result(fed_spec)
 
     monkeypatch.setattr(news_poller_module, "fetch_feed_result", _stub_fetch)
@@ -250,7 +249,7 @@ def test_probe_failure_climbs_backoff_ladder(monkeypatch: pytest.MonkeyPatch) ->
         "last_failure_at": datetime.now(UTC).isoformat(),
     }
 
-    async def _stub_fetch(_client, fed_spec):  # noqa: ANN001
+    async def _stub_fetch(_client, fed_spec):
         return _err_result(fed_spec, status=502)
 
     monkeypatch.setattr(news_poller_module, "fetch_feed_result", _stub_fetch)
@@ -274,7 +273,7 @@ def test_probe_endpoint_rate_limit_blocks_after_burst(
     spec = FeedSpec("rate", "https://rate.example.com/rss", "rate.example.com")
     poller = _make_poller([spec])
 
-    async def _stub_fetch(_client, fed_spec):  # noqa: ANN001
+    async def _stub_fetch(_client, fed_spec):
         return _ok_result(fed_spec)
 
     monkeypatch.setattr(news_poller_module, "fetch_feed_result", _stub_fetch)

@@ -329,10 +329,10 @@ export function Shell() {
               /legacy
             </a>
           </nav>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <LiveDot status={liveDotStatus} stalenessSeconds={stalenessSeconds} />
             {summary && (
-              <span className="text-[10px] text-[color:var(--fg-dim)] tabular-nums">
+              <span className="hidden sm:inline text-[10px] text-[color:var(--fg-dim)] tabular-nums">
                 <span className="text-good">{summary.totals.finance_relevant}</span>
                 /{summary.totals.total} relevant
               </span>
@@ -373,7 +373,7 @@ export function Shell() {
             <button
               type="button"
               onClick={openCommandPalette}
-              className="btn"
+              className="btn hidden sm:inline-flex"
               title="Open command palette (nav + actions)"
               aria-label="Open command palette"
             >
@@ -382,7 +382,7 @@ export function Shell() {
             <button
               type="button"
               onClick={openSearchPalette}
-              className="btn"
+              className="btn hidden sm:inline-flex"
               title="Open search palette (records, symbols, clusters)"
               aria-label="Open search palette"
             >

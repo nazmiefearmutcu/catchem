@@ -20,7 +20,6 @@ from catchem.quant.intensity import (
 )
 from catchem.settings import load_settings, reload_settings
 
-
 # ---------------------------------------------------------------------------
 # _record_intensity
 # ---------------------------------------------------------------------------

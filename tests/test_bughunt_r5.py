@@ -73,7 +73,7 @@ def test_cli_export_csv_neutralizes_formula_injection(tmp_path: Path) -> None:
     # Stronger: no CSV field may start a line with a formula trigger.
     for line in text.splitlines()[1:]:
         first_cell = line.split(",")[0].strip().strip('"')
-        assert not first_cell[:1] in ("=", "+", "@") or first_cell.startswith("'"), line
+        assert first_cell[:1] not in ("=", "+", "@") or first_cell.startswith("'"), line
 
 
 # ── replay --path glob-metacharacter escaping ────────────────────────────────

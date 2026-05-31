@@ -2,7 +2,7 @@
 
 Three views fused into one report:
 
-  (a) ``asset_class`` × ``impact_reason_code`` — counts plus a *lift*
+  (a) ``asset_class`` x ``impact_reason_code`` — counts plus a *lift*
       score (observed / expected under independence). Lift > 1 means the
       pair shows up more often than independent margins would predict.
   (b) ``candidate_symbols`` ↔ ``candidate_symbols`` — undirected edges
@@ -40,7 +40,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class AssetReasonCell:
-    """One cell of the asset×reason contingency table."""
+    """One cell of the assetxreason contingency table."""
 
     asset_class: str
     reason_code: str
@@ -89,7 +89,7 @@ class CoOccurrenceReport:
 
 
 def _as_iter(value: Any) -> Iterable[Any]:
-    """Coerce list-ish fields into a safe iterable. None → empty."""
+    """Coerce list-ish fields into a safe iterable. None => empty."""
     if value is None:
         return ()
     if isinstance(value, (list, tuple, set, frozenset)):
@@ -132,7 +132,7 @@ def _capture_id(record: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# (a) asset × reason cells with lift
+# (a) asset x reason cells with lift
 # ---------------------------------------------------------------------------
 
 
@@ -143,7 +143,7 @@ def _build_asset_reason_cells(
     top_n: int,
 ) -> tuple[AssetReasonCell, ...]:
     """Tally (asset, reason) pairs and score each cell by lift."""
-    # Each record contributes the cartesian product of asset×reason,
+    # Each record contributes the cartesian product of assetxreason,
     # but only once per (record, asset, reason) — so duplicates inside a
     # single record's lists do not double-count.
     pair_counts: Counter[tuple[str, str]] = Counter()
@@ -349,7 +349,7 @@ def compute_co_occurrence(
     records:
         Sequence of FinancialImpactRecord-shaped dicts. Read-only.
     min_pair_count:
-        Drop asset×reason cells whose raw co-occurrence count is below
+        Drop assetxreason cells whose raw co-occurrence count is below
         this. Default 1 (keep everything).
     min_edge_weight:
         Drop symbol edges weaker than this. Default 2 (singletons hidden).

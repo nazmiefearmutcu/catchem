@@ -41,7 +41,7 @@ from typing import Any
 import uvicorn
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -80,7 +80,7 @@ _REQUEST_COUNTS: dict[str, int] = {}
 # under the lock too because GIL-atomicity does not guarantee that a
 # .get("payload") + .get("expires_at") pair observes the same write
 # generation. The lock window is well below 1 ms in the hit path and
-# well below 50 ms in the miss path (3× SQLite COUNT() against tables
+# well below 50 ms in the miss path (3x SQLite COUNT() against tables
 # typically <50k rows), so there is no realistic risk of starving
 # other handlers.
 _STATS_CACHE: dict[str, Any] = {"payload": None, "expires_at": 0.0}
@@ -134,6 +134,7 @@ _GLOBAL_TONE_TTL_SECONDS = 120.0
 # mislead the operator the first time they ever changed the bind.
 _BIND_HOST: str | None = None
 _BIND_PORT: int | None = None
+_UVICORN_LEVELS = {"critical", "error", "warning", "info", "debug", "trace"}
 
 
 def record_bind(host: str, port: int) -> None:
@@ -144,6 +145,14 @@ def record_bind(host: str, port: int) -> None:
     global _BIND_HOST, _BIND_PORT
     _BIND_HOST = host
     _BIND_PORT = int(port)
+
+
+def _normalize_uvicorn_log_level(level: str | None) -> str:
+    """Map Settings logging levels onto uvicorn's accepted level names."""
+    lvl = (level or "").strip().lower()
+    if lvl == "warn":
+        lvl = "warning"
+    return lvl if lvl in _UVICORN_LEVELS else "info"
 
 
 # ── Nonce-based CSP plumbing ────────────────────────────────────────────────
@@ -196,7 +205,7 @@ def _render_spa_with_nonce() -> tuple[str | None, str]:
 
     Returns `(html, nonce)`. When the bundle hasn't been built yet, `html`
     is None and the caller is expected to fall back to the placeholder page.
-    A fresh nonce is generated per call (16 random bytes → 22-char urlsafe
+    A fresh nonce is generated per call (16 random bytes => 22-char urlsafe
     base64) so that even a CDN that ignores `Cache-Control: no-store`
     cannot serve a stale page with a guessable token.
     """
@@ -322,7 +331,7 @@ def _domain_matches(domain: str, known: frozenset[str]) -> bool:
     """True when `domain` equals or is a subdomain of any entry in `known`.
 
     `www.sec.gov` and `sec.gov` both match a `sec.gov` entry; `notsec.gov`
-    does not (suffix is compared on a dot boundary). Empty domain → False.
+    does not (suffix is compared on a dot boundary). Empty domain => False.
     """
     d = (domain or "").strip().lower()
     if not d:
@@ -337,8 +346,8 @@ def _classify_feed_category(name: str, parser: str, domain: str) -> str:
     order is *most specific first*:
 
       1. Name prefixes that disambiguate Google News sub-streams
-         (``gnews-watch-`` → watchlist, ``gnews-tkr-`` → tickers) before the
-         generic ``gnews-`` → google_news catch.
+         (``gnews-watch-`` => watchlist, ``gnews-tkr-`` => tickers) before the
+         generic ``gnews-`` => google_news catch.
       2. Parser-driven social/firehose buckets (twitter, reddit, gdelt) and the
          matching ``x-`` / ``reddit-`` name prefixes.
       3. Remaining domain-flavored name prefixes (regional/macro/specialist/
@@ -551,7 +560,7 @@ def _local_explain(kind: str, payload: dict[str, Any]) -> str:
         src = payload.get("source_asset")
         tgt = payload.get("target_asset")
         score = payload.get("spillover_score", 0)
-        return f"Spillover detected: {src} → {tgt} (score {score:.2f})."
+        return f"Spillover detected: {src} => {tgt} (score {score:.2f})."
     return "Quant signal flagged; no specific local interpretation available."
 
 
@@ -838,7 +847,8 @@ def _build_archiver(supervisor: Supervisor, settings: Settings) -> DriveArchiver
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     global _SUPERVISOR, _SETTINGS, _NEWS_POLLER, _WS_CHANNEL, _ARCHIVER, _QUANT_ENGINE
-    _SETTINGS = load_settings()
+    pinned_settings = getattr(app.state, "catchem_settings", None)
+    _SETTINGS = pinned_settings if isinstance(pinned_settings, Settings) else load_settings()
     _SUPERVISOR = Supervisor(_SETTINGS)
     # Startup must be all-or-nothing: if a later `start()` raises (e.g. the
     # WS channel or archiver) we must tear down whatever already started —
@@ -909,7 +919,8 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Factory. Tests can pass a Settings instance; CLI uses lifespan loading."""
+    """Factory. Tests can pass a Settings instance; otherwise load current config."""
+    app_settings = settings or load_settings()
     # OpenAPI docs are mounted under /api/* so the SPA root ("/") and its
     # history-mode catch-all (`/{full_path:path}`) never shadow them.
     # FastAPI's defaults (/docs, /redoc, /openapi.json) would collide with
@@ -922,8 +933,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url="/api/redoc",
         openapi_url="/api/openapi.json",
     )
+    app.state.catchem_settings = app_settings
 
-    cors = (settings or Settings()).api.cors_origins
+    cors = app_settings.api.cors_origins
     if cors:
         app.add_middleware(
             CORSMiddleware,
@@ -931,6 +943,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_credentials=False,
             allow_methods=["GET", "POST"],
             allow_headers=["*"],
+            expose_headers=["X-Catchem-Boot-Token"],
         )
 
     # ── Per-request path counter ──────────────────────────────────────────
@@ -1011,16 +1024,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ── Legacy vanilla dashboard (kept until the premium app fully replaces it)
     @app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/legacy-dashboard", response_class=HTMLResponse, include_in_schema=False)
-    def legacy() -> HTMLResponse:
-        body = open_static_bytes("dashboard.html")
+    async def legacy() -> HTMLResponse:
+        body = await asyncio.to_thread(open_static_bytes, "dashboard.html")
         if body is None:
             return HTMLResponse("<h1>dashboard template missing</h1>", status_code=404)
         return HTMLResponse(body.decode("utf-8"))
 
     # ── Premium SPA bundle served at /
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    def root() -> HTMLResponse:
-        html, nonce = _render_spa_with_nonce()
+    async def root() -> HTMLResponse:
+        html, nonce = await asyncio.to_thread(_render_spa_with_nonce)
         if html is not None:
             return HTMLResponse(
                 html,
@@ -1058,8 +1071,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=204)
 
     @app.get("/healthz")
-    def healthz() -> dict[str, Any]:
-        return {"status": "ok"}
+    async def healthz(boot_token: str | None = Query(default=None)) -> JSONResponse:
+        expected_boot_token = os.environ.get("CATCHEM_BOOT_TOKEN")
+        if expected_boot_token:
+            if boot_token != expected_boot_token:
+                raise HTTPException(status_code=403, detail="invalid boot token")
+            return JSONResponse(
+                content={"status": "ok"},
+                headers={"X-Catchem-Boot-Token": expected_boot_token},
+            )
+        return JSONResponse(content={"status": "ok"})
 
     @app.get(
         "/api/health/deep",
@@ -1075,7 +1096,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           1. ``uptime_seconds`` — sidecar process clock is sane
           2. ``sqlite_ok``     — DB connection + ``SELECT 1`` returns
           3. ``news_poller``   — disabled is fine; if enabled, last_run must
-             be within ``5 × interval_seconds`` to be considered fresh
+             be within ``5 x interval_seconds`` to be considered fresh
           4. ``schema_ok``     — DB ``user_version`` matches the bundled
              max_known migration version
           5. ``disk_ok``       — at least 100 MB free on the SQLite parent
@@ -1616,7 +1637,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/ui/demo/paste", response_model=DemoRunResponse)
     def ui_demo_paste(body: dict = Body(...)) -> DemoRunResponse:
-        """Paste a news article → demo pipeline → typed record."""
+        """Paste a news article => demo pipeline => typed record."""
         title = str(body.get("title") or "").strip()
         text = str(body.get("text") or "").strip()
         domain = str(body.get("domain") or "demo.local").strip() or "demo.local"
@@ -1638,7 +1659,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         domain: str = Form("demo.local"),
         url: str | None = Form(None),
     ) -> DemoRunResponse:
-        """Upload .txt/.md/.html/.jsonl/.json → safe text extract → demo pipeline."""
+        """Upload .txt/.md/.html/.jsonl/.json => safe text extract => demo pipeline."""
         body = await file.read()
         try:
             title_hint, body_text = extract_text(file.filename or "upload", body)
@@ -1671,7 +1692,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def api_spend_history(days: int = Query(7, ge=1, le=30)) -> dict[str, Any]:
         """Aggregate DeepSeek review costs per day for the last N days.
 
-        Powers the spend sparkline in the Settings → DeepSeek reviewer card.
+        Powers the spend sparkline in the Settings => DeepSeek reviewer card.
         Uses parameterized SQL (no string concatenation), DATE() bucketing on
         created_at, and the same shared storage lock as the rest of the API
         so the read doesn't race the writer.
@@ -1844,11 +1865,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Quant backtest over the last `sample_size` paired (stub, deepseek) rows.
 
         Returns a stable envelope:
-          schema_version            → bump when the shape changes
-          ran_at                    → wall-clock at evaluation time
-          summary                   → headline metrics (always populated)
-          calibration_bins          → per-quintile predicted vs ground-truth
-          predictions_sample        → up to 50 raw (predicted, gt, delta) rows
+          schema_version            => bump when the shape changes
+          ran_at                    => wall-clock at evaluation time
+          summary                   => headline metrics (always populated)
+          calibration_bins          => per-quintile predicted vs ground-truth
+          predictions_sample        => up to 50 raw (predicted, gt, delta) rows
 
         Out-of-band errors do NOT raise — the BacktestRun zero-state lets
         the UI render an honest "no paired reviews yet" empty state.
@@ -2169,6 +2190,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "top_source": (sources[0] if sources else {}).get("domain"),
         }
 
+    def _live_read_has_signal(ctx: dict[str, Any]) -> bool:
+        """Return True when the snapshot is worth sending to a paid reviewer."""
+        for field in (
+            "window_records",
+            "clusters_active",
+            "regime_shifts_recent",
+            "volume_anomalies",
+            "sentiment_shocks",
+        ):
+            try:
+                if int(ctx.get(field) or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return any(
+            bool(ctx.get(field))
+            for field in (
+                "symbol_bursts",
+                "spillover_edges",
+                "top_tickers",
+                "top_clusters",
+                "top_source",
+            )
+        )
+
     # The system prompt is shared by the JSON and streaming endpoints; the
     # streaming path can't change it (the UI would render different text)
     # so it lives at module scope inside the closure.
@@ -2196,8 +2242,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         compact = _live_read_context(limit)
         local = _local_live_read(compact)
         client = sup.reviewers.deepseek()
-        if client is None or sup.reviewers.budget_state().exhausted:
-            return {"narrative": local, "source": "local", "context": compact, "generated_at": _dt.now(UTC).isoformat()}
+        has_signal = _live_read_has_signal(compact)
+        budget_exhausted = sup.reviewers.budget_state().exhausted
+        if not has_signal or client is None or budget_exhausted:
+            fallback_reason = (
+                "empty_context"
+                if not has_signal
+                else "deepseek_disabled"
+                if client is None
+                else "budget_exhausted"
+            )
+            return {
+                "narrative": local,
+                "source": "local",
+                "fallback_reason": fallback_reason,
+                "context": compact,
+                "generated_at": _dt.now(UTC).isoformat(),
+            }
         try:
             import json as _json
             req = {
@@ -2244,11 +2305,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         EventSource and renders the running buffer as a typing effect.
 
         Frames:
-            event: start  → {limit, source, generated_at}
-            event: chunk  → {text}     (one or more)
-            event: usage  → {usd_cost} (DeepSeek only, after last chunk)
-            event: done   → {ok, source, fallback_reason?}
-            event: error  → {error}    (terminal — wire-level failure)
+            event: start  => {limit, source, generated_at}
+            event: chunk  => {text}     (one or more)
+            event: usage  => {usd_cost} (DeepSeek only, after last chunk)
+            event: done   => {ok, source, fallback_reason?}
+            event: error  => {error}    (terminal — wire-level failure)
 
         When DeepSeek is unavailable (no key, disabled, budget exhausted,
         or transport failure), the endpoint streams the deterministic
@@ -2261,8 +2322,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         local = _local_live_read(compact)
         sup = _get_supervisor()
         client = sup.reviewers.deepseek()
+        has_signal = _live_read_has_signal(compact)
         budget_exhausted = sup.reviewers.budget_state().exhausted
-        use_deepseek = client is not None and not budget_exhausted
+        use_deepseek = has_signal and client is not None and not budget_exhausted
 
         async def gen() -> AsyncIterator[dict[str, Any]]:
             generated_at = _dt.now(UTC).isoformat()
@@ -2281,7 +2343,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # Stream the deterministic local narrative word-by-word so
                 # the UI animation still feels responsive when DeepSeek is
                 # unavailable. Tiny await keeps the loop yielding.
-                reason = "deepseek_disabled" if client is None else "budget_exhausted"
+                reason = (
+                    "empty_context"
+                    if not has_signal
+                    else "deepseek_disabled"
+                    if client is None
+                    else "budget_exhausted"
+                )
                 for token in _word_chunks(local):
                     yield {"event": "chunk", "data": json.dumps({"text": token})}
                     await asyncio.sleep(0)
@@ -2669,7 +2737,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Buckets recent records into ``bucket_minutes`` slots over the
         trailing ``window_minutes`` window, fills 0-arrival buckets,
-        and reports the per-minute rate, both EMAs (α=0.3 / α=0.05),
+        and reports the per-minute rate, both EMAs (alpha=0.3 / alpha=0.05),
         the median baseline + stdev, and a regime label keyed on the
         ``acceleration_z`` z-score.
         """
@@ -2739,9 +2807,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "America/New_York", min_length=3, max_length=64
         ),
     ) -> dict[str, Any]:
-        """24h × 7day news-arrival grid anchored to the given timezone.
+        """24h x 7day news-arrival grid anchored to the given timezone.
 
-        Returns a dense 168-cell grid (7 weekdays × 24 hours) the UI can
+        Returns a dense 168-cell grid (7 weekdays x 24 hours) the UI can
         render as an ECharts heatmap without densifying client-side.
         ``peak_cells`` lists up to 5 cells tied for the maximum count so
         the analyst can read the highest-flow buckets at a glance.
@@ -2823,8 +2891,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         ``cluster_id`` is a SHA-1 over the cluster's sorted member capture_ids,
         so it is a deterministic function of WHICH records were clustered. The
-        cluster the UI clicked came from ``/api/quant/dashboard`` →
-        ``dashboard_snapshot(limit=windowSize)`` → ``clusters(limit=windowSize)``.
+        cluster the UI clicked came from ``/api/quant/dashboard`` =>
+        ``dashboard_snapshot(limit=windowSize)`` => ``clusters(limit=windowSize)``.
         To recover that exact cluster_id we MUST re-cluster over the SAME corpus
         window; a hardcoded limit produces a different membership set (hence a
         different id) for every other window and 404s the drill-down. The UI
@@ -2870,7 +2938,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reason: str = Query(..., min_length=1),
         limit: int = Query(20, ge=1, le=200),
     ) -> dict[str, Any]:
-        """Records carrying a specific asset_class × reason_code combo.
+        """Records carrying a specific asset_class x reason_code combo.
 
         Used by the co-occurrence heatmap click handler — gives the analyst
         the actual stories sitting behind a lift cell.
@@ -3454,7 +3522,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         highest version declared in :mod:`catchem.migrations`.
         ``migrations_pending`` lists the migrations that would run
         on the next storage init — empty in steady state. The
-        Settings → Database card reads this to display a one-line
+        Settings => Database card reads this to display a one-line
         "Schema version: N" hint below the DB stats.
         """
         from .migrations import MIGRATIONS, current_version, max_known_version
@@ -3628,13 +3696,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/ui/app-info", response_model=AppInfoResponse)
-    def ui_app_info() -> AppInfoResponse:
+    async def ui_app_info() -> AppInfoResponse:
         from . import __version__ as _ver
         s = _SETTINGS or load_settings()
         sup = _get_supervisor()
-        commit = _git_sha_safe()
-        branch = _git_branch_safe()
-        bundle = get_static_path("app/index.html")
+        commit, branch, bundle = await asyncio.to_thread(
+            lambda: (_git_sha_safe(), _git_branch_safe(), get_static_path("app/index.html"))
+        )
         return AppInfoResponse(
             version=_ver,
             commit_sha=commit,
@@ -3648,10 +3716,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/ui/sidecar-status", response_model=SidecarStatusResponse)
-    def ui_sidecar_status() -> SidecarStatusResponse:
+    async def ui_sidecar_status() -> SidecarStatusResponse:
         sup = _get_supervisor()
         s = _SETTINGS or load_settings()
-        counts = sup.storage.count_records()
+        counts = await asyncio.to_thread(sup.storage.count_records)
+        dlq = await asyncio.to_thread(sup.storage.dlq_count)
         uptime = (_dt.now(UTC) - _PROCESS_STARTED_AT).total_seconds()
         return SidecarStatusResponse(
             healthy=True,
@@ -3663,13 +3732,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pid=_os_for_pid.getpid(),
             uptime_seconds=uptime,
             records=counts,
-            dlq=sup.storage.dlq_count(),
+            dlq=dlq,
             diagnostic_enabled=False if _is_production_safe() else s.diagnostic_allowed(),
             generated_at=_dt.now(UTC).isoformat(),
         )
 
     @app.get("/ui/log-tail", response_model=LogTailResponse)
-    def ui_log_tail(lines: int = Query(120, ge=1, le=2000)) -> LogTailResponse:
+    async def ui_log_tail(lines: int = Query(120, ge=1, le=2000)) -> LogTailResponse:
         s = _SETTINGS or load_settings()
         log_rel = s.logging.file
         # `file` is relative like "data/logs/catchem.log"; resolve under output dir
@@ -3680,7 +3749,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not log_path.exists():
             return LogTailResponse(lines=[], truncated=False)
         try:
-            text = log_path.read_text(encoding="utf-8", errors="replace")
+            text = await asyncio.to_thread(log_path.read_text, encoding="utf-8", errors="replace")
         except OSError:
             return LogTailResponse(lines=[], truncated=False)
         all_lines = text.splitlines()
@@ -3698,10 +3767,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ────────────────────────────────────────────────────────────────────────
 
     @app.get("/ui/summary")
-    def ui_summary() -> dict[str, Any]:
+    async def ui_summary() -> dict[str, Any]:
         """Compact landing payload. Single round-trip for the Overview page."""
         sup = _get_supervisor()
-        dash = overview(sup.storage, limit=50)
+        dash = await asyncio.to_thread(overview, sup.storage, limit=50)
         s = _SETTINGS or load_settings()
         guards = _guard_snapshot(s)
         prod_safe = s.is_production_safe()
@@ -3994,7 +4063,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/ui/news-status")
-    def news_status() -> dict[str, Any]:
+    async def news_status() -> dict[str, Any]:
         """Diagnostics for the background RSS poller. Surfaced in Live Feed UI."""
         if _NEWS_POLLER is None:
             return {
@@ -4314,7 +4383,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         *covered* (with freshness + mention count) or a *gap* — no in-window
         mention at all.
 
-        Degraded (supervisor not yet initialized) → 200 with empty
+        Degraded (supervisor not yet initialized) => 200 with empty
         ``covered`` / ``gaps`` so the UI renders a clean "no data" state
         instead of an opaque 503.
         """
@@ -4444,7 +4513,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Answers the analyst's single question: *given the poll cadence and
         the publisher-side RSS lag, roughly how far back does "now" reach?*
-        ``window_estimate_seconds`` ≈ ``poll_interval + median_publisher_lag``:
+        ``window_estimate_seconds`` ~= ``poll_interval + median_publisher_lag``:
         the effective span between an event happening and it surfacing here.
 
         ``sources_by_parser`` tallies the configured feeds by their ``.parser``
@@ -4500,7 +4569,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         median_lag = poller.last_median_publisher_lag_seconds
         avg_lag = poller.last_avg_publisher_lag_seconds
         # The effective window: poll cadence + publisher lag. Only computable
-        # when we have a fresh median (no new fresh items this tick → None,
+        # when we have a fresh median (no new fresh items this tick => None,
         # matching the poller's own "don't show stale lag" rule).
         window_estimate = (interval + median_lag) if median_lag is not None else None
         return {
@@ -4530,7 +4599,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         built during startup (mirrors the ``/api/news/sources`` degrade-to-200
         contract — the UI renders a dormant panel instead of hitting a 503).
         When enabled, returns the channel's full stats envelope: the resolved
-        WS client library (or null when none was importable → idle), per-source
+        WS client library (or null when none was importable => idle), per-source
         connection state + message/ingest counters, and the aggregate
         connected/messages/ingested totals.
         """
@@ -4637,13 +4706,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    def spa_fallback(full_path: str) -> HTMLResponse:
+    async def spa_fallback(full_path: str) -> HTMLResponse:
         # Reserved API/asset paths must NOT fall back to HTML — those that
         # don't match a real handler should return their natural 404/405.
         for prefix in _RESERVED_PATH_PREFIXES:
             if full_path == prefix.rstrip("/") or full_path.startswith(prefix):
                 raise HTTPException(status_code=404, detail="not_found")
-        html, nonce = _render_spa_with_nonce()
+        html, nonce = await asyncio.to_thread(_render_spa_with_nonce)
         if html is not None:
             return HTMLResponse(
                 html,
@@ -4651,13 +4720,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         raise HTTPException(status_code=404, detail="bundle_not_built")
 
-    # The Catchem nav routes /replay → ReplayUploadPage. The existing
+    # The Catchem nav routes /replay => ReplayUploadPage. The existing
     # POST /replay endpoint stays for API consumers, but a bookmarked GET
     # to /replay must serve the SPA shell. Explicit handler avoids the
     # 405-before-fallback case.
     @app.get("/replay", response_class=HTMLResponse, include_in_schema=False)
-    def replay_spa() -> HTMLResponse:
-        html, nonce = _render_spa_with_nonce()
+    async def replay_spa() -> HTMLResponse:
+        html, nonce = await asyncio.to_thread(_render_spa_with_nonce)
         if html is not None:
             return HTMLResponse(
                 html,
@@ -4700,7 +4769,7 @@ def run() -> None:
     """
     s = load_settings()
     app = create_app(s)
-    uvicorn.run(app, host=s.api.host, port=s.api.port, log_level=s.logging.level.lower())
+    uvicorn.run(app, host=s.api.host, port=s.api.port, log_level=_normalize_uvicorn_log_level(s.logging.level))
 
 
 # Module-level app for `uvicorn catchem.api:app`

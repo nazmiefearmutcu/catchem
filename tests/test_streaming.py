@@ -18,15 +18,17 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from catchem import api as api_mod
 from catchem.api import _word_chunks, create_app
+from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
 from catchem.settings import load_settings, reload_settings
-
 
 # ── small parsing helpers ───────────────────────────────────────────────
 
@@ -63,6 +65,41 @@ def _parse_sse_stream(raw: str) -> list[tuple[str, dict[str, Any]]]:
     return events
 
 
+def _make_signal_record(capture_id: str) -> FinancialImpactRecord:
+    now = datetime.now(UTC)
+    return FinancialImpactRecord(
+        capture_id=capture_id,
+        doc_id=f"d-{capture_id}",
+        title="Apple earnings surprise lifts megacap sentiment",
+        text_excerpt="Apple earnings surprise lifts megacap sentiment",
+        url=f"https://example.com/{capture_id}",
+        domain="example.com",
+        language="en",
+        is_finance_relevant=True,
+        finance_relevance_score=0.82,
+        asset_classes=["equities"],
+        impact_reason_codes=["earnings"],
+        candidate_symbols=["AAPL"],
+        candidate_entities=["Apple"],
+        impact_horizons=["one_day"],
+        sentiment_label=SentimentLabel.POSITIVE,
+        sentiment_score=0.7,
+        evidence_sentences=["Apple earnings surprise lifts megacap sentiment"],
+        reason_text="equities | earnings",
+        component_scores={"asset_class_max": 0.8, "raw_relevance_score": 0.82},
+        processing_mode=ProcessingMode.REPLAY_EXISTING,
+        model_versions={"zero_shot": "stub/v1"},
+        published_ts=now,
+        created_at=now,
+    )
+
+
+def _seed_signal_record(capture_id: str) -> None:
+    sup = api_mod._SUPERVISOR
+    assert sup is not None
+    assert sup.storage.insert_record(_make_signal_record(capture_id)) is True
+
+
 # ── fixtures ────────────────────────────────────────────────────────────
 
 
@@ -71,9 +108,10 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """Same shape as the test_catchem_endpoints fixture."""
     monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CATCHEM_MODE", "production_safe")
-    # DeepSeek OFF by default — tests opt in by patching the supervisor.
-    monkeypatch.delenv("CATCHEM_REVIEWERS__DEEPSEEK__ENABLED", raising=False)
-    monkeypatch.delenv("CATCHEM_REVIEWERS__DEEPSEEK__API_KEY", raising=False)
+    # DeepSeek OFF by default even when the developer's .env is keyed; tests
+    # that need the hosted path use keyed_client and mock the transport.
+    monkeypatch.setenv("CATCHEM_REVIEWERS__DEEPSEEK__ENABLED", "false")
+    monkeypatch.setenv("CATCHEM_REVIEWERS__DEEPSEEK__API_KEY", "")
     reload_settings()
     app = create_app(load_settings())
     c = TestClient(app)
@@ -156,7 +194,57 @@ def test_live_read_stream_start_envelope_shape(client: TestClient) -> None:
     assert done["source"] in {"deepseek", "local"}
 
 
-# ── 4. DeepSeek path uses mocked streaming helper ────────────────────────
+# ── 4. Empty context never spends external reviewer calls ────────────────
+
+
+def test_live_read_json_skips_deepseek_when_context_empty(
+    keyed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A keyed reviewer must still stay local when there is no signal to summarize."""
+    sup = api_mod._SUPERVISOR
+    assert sup is not None
+    client = sup.reviewers.deepseek()
+    assert client is not None
+
+    def fail_post(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("DeepSeek should not be called for empty context")
+
+    monkeypatch.setattr(client._client, "post", fail_post)
+
+    r = keyed_client.get("/api/quant/live-read?limit=200")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "local"
+    assert body["fallback_reason"] == "empty_context"
+    assert body["context"]["window_records"] == 0
+
+
+def test_live_read_stream_skips_deepseek_when_context_empty(
+    keyed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SSE hero path must not open DeepSeek streaming for a zero-row snapshot."""
+
+    async def fail_stream(**_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+        raise AssertionError("DeepSeek stream should not be called for empty context")
+        yield {}
+
+    monkeypatch.setattr(
+        "catchem.reviewers.deepseek.stream_chat_completion",
+        fail_stream,
+    )
+
+    with keyed_client.stream("GET", "/api/quant/live-read-stream?limit=200") as r:
+        assert r.status_code == 200
+        body = r.read().decode("utf-8")
+    events = _parse_sse_stream(body)
+    start = next(p for n, p in events if n == "start")
+    done = next(p for n, p in events if n == "done")
+    assert start["source"] == "local"
+    assert done["source"] == "local"
+    assert done["fallback_reason"] == "empty_context"
+
+
+# ── 5. DeepSeek path uses mocked streaming helper ────────────────────────
 
 
 def test_live_read_stream_deepseek_path_uses_streaming_helper(
@@ -165,6 +253,7 @@ def test_live_read_stream_deepseek_path_uses_streaming_helper(
     """When the key is set, the endpoint must consume `stream_chat_completion`
     envelopes and forward `delta` frames as `chunk` events."""
 
+    _seed_signal_record("stream-deepseek-signal")
     fake_chunks = [
         "**Dominant story:** ",
         "Tech rotation underway. ",
@@ -201,7 +290,7 @@ def test_live_read_stream_deepseek_path_uses_streaming_helper(
     assert done.get("usd_cost", 0) >= 0
 
 
-# ── 5. DeepSeek error → falls back to local narrative on the wire ────────
+# ── 6. DeepSeek error -> falls back to local narrative on the wire ───────
 
 
 def test_live_read_stream_deepseek_error_falls_back(
@@ -210,6 +299,8 @@ def test_live_read_stream_deepseek_error_falls_back(
     """If the streaming helper yields an error envelope, the endpoint
     must finish the stream with the local narrative AND a `fallback_reason`
     on the `done` event so the UI can surface a warning chip."""
+
+    _seed_signal_record("stream-deepseek-error-signal")
 
     async def fake_stream_error(**kwargs: Any) -> AsyncIterator[dict[str, Any]]:
         yield {"type": "error", "error": "http_503: upstream offline"}
@@ -233,7 +324,7 @@ def test_live_read_stream_deepseek_error_falls_back(
     assert "".join(chunks).strip(), "fallback text is empty"
 
 
-# ── 6. unit test for the word-chunk helper ──────────────────────────────
+# ── 7. unit test for the word-chunk helper ──────────────────────────────
 
 
 def test_word_chunks_preserves_text_round_trip() -> None:

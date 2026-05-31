@@ -19,7 +19,6 @@ from catchem.embeddings import VectorIndex
 from catchem.storage import Storage
 from catchem.symbol_mapper import SymbolMapper
 
-
 # ── symbol_mapper: fuzzy word-boundary ───────────────────────────────────────
 
 
@@ -78,12 +77,15 @@ def test_two_storage_instances_share_parquet_dir_without_collision(tmp_path: Pat
         # Distinct per-instance ids → distinct filenames even on identical
         # second/seq/row-count.
         assert a._instance_id != b._instance_id
-        a.insert_record(_mk_record("a1")); a.flush()
-        b.insert_record(_mk_record("b1")); b.flush()
+        a.insert_record(_mk_record("a1"))
+        a.flush()
+        b.insert_record(_mk_record("b1"))
+        b.flush()
         files = sorted(p.name for p in parquet.glob("*.parquet"))
         assert len(files) == 2 and len(set(files)) == 2, files
     finally:
-        a.close(); b.close()
+        a.close()
+        b.close()
 
 
 def test_two_storage_instances_same_db_both_write(tmp_path: Path) -> None:
@@ -97,7 +99,8 @@ def test_two_storage_instances_same_db_both_write(tmp_path: Path) -> None:
         assert b.insert_record(_mk_record("y")) is True  # must not raise "database is locked"
         assert a.count_records()["total"] == 2
     finally:
-        a.close(); b.close()
+        a.close()
+        b.close()
 
 
 # ── embeddings: nearest tolerates a vanished .npy ────────────────────────────

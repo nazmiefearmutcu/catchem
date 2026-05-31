@@ -8,12 +8,11 @@ exercises the FastAPI envelope shape end-to-end via the TestClient.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
-from collections import Counter
 
 from catchem.quant.sentiment_dispersion import (
     DispersionResult,
@@ -22,7 +21,6 @@ from catchem.quant.sentiment_dispersion import (
     compute_dispersion,
 )
 from catchem.settings import load_settings, reload_settings
-
 
 MAX_H = math.log2(3)  # ≈ 1.585
 

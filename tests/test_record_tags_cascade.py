@@ -25,11 +25,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from catchem.schemas import FinancialImpactRecord, ProcessingMode
 from catchem.storage import Storage
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

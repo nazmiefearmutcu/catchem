@@ -5,6 +5,7 @@ import {
   SIDECAR_OK_INTERVAL_MS,
   useSidecarHealth,
 } from "@/hooks/useSidecarHealth";
+import { resetBootTokenCacheForTests } from "@/lib/bootToken";
 
 /**
  * Pins the /healthz polling contract behind <SidecarBanner>:
@@ -25,11 +26,21 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+  window.history.replaceState({}, "", "/");
+  window.name = "";
+  window.sessionStorage.removeItem("catchem.boot_token");
+  delete (window as Window & { __CATCHEM_BOOT_TOKEN__?: string }).__CATCHEM_BOOT_TOKEN__;
+  resetBootTokenCacheForTests();
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  window.history.replaceState({}, "", "/");
+  window.name = "";
+  window.sessionStorage.removeItem("catchem.boot_token");
+  delete (window as Window & { __CATCHEM_BOOT_TOKEN__?: string }).__CATCHEM_BOOT_TOKEN__;
+  resetBootTokenCacheForTests();
   delete (globalThis as { fetch?: typeof fetch }).fetch;
 });
 
@@ -63,6 +74,60 @@ describe("useSidecarHealth", () => {
     await flush(SIDECAR_OK_INTERVAL_MS);
     expect(result.current.state).toBe("ok");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("includes the boot token from sessionStorage", async () => {
+    window.sessionStorage.setItem("catchem.boot_token", "abc123");
+    fetchMock.mockResolvedValue(okResponse());
+    renderHook(() => useSidecarHealth());
+
+    await flush(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("/healthz?boot_token=abc123");
+  });
+
+  it("falls back to the boot token in the current URL", async () => {
+    window.history.replaceState({}, "", "/?boot_token=abc123");
+    fetchMock.mockResolvedValue(okResponse());
+    renderHook(() => useSidecarHealth());
+
+    await flush(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("/healthz?boot_token=abc123");
+    expect(window.sessionStorage.getItem("catchem.boot_token")).toBe("abc123");
+  });
+
+  it("falls back to the boot token stored in window.name", async () => {
+    window.name = "catchem.boot_token=abc123";
+    fetchMock.mockResolvedValue(okResponse());
+    renderHook(() => useSidecarHealth());
+
+    await flush(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("/healthz?boot_token=abc123");
+    expect(window.sessionStorage.getItem("catchem.boot_token")).toBe("abc123");
+  });
+
+  it("prefers the current URL over stale sessionStorage and caches the token", async () => {
+    window.sessionStorage.setItem("catchem.boot_token", "stale");
+    window.history.replaceState({}, "", "/?boot_token=fresh");
+    fetchMock.mockResolvedValue(okResponse());
+    renderHook(() => useSidecarHealth());
+
+    await flush(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("/healthz?boot_token=fresh");
+    window.history.replaceState({}, "", "/");
+    window.name = "";
+    window.sessionStorage.removeItem("catchem.boot_token");
+    await flush(SIDECAR_OK_INTERVAL_MS);
+    expect(fetchMock.mock.calls[1][0]).toBe("/healthz?boot_token=fresh");
+  });
+
+  it("uses the bootstrap token captured before React mounts", async () => {
+    (window as Window & { __CATCHEM_BOOT_TOKEN__?: string }).__CATCHEM_BOOT_TOKEN__ = "abc123";
+    fetchMock.mockResolvedValue(okResponse());
+    renderHook(() => useSidecarHealth());
+
+    await flush(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("/healthz?boot_token=abc123");
+    expect(window.sessionStorage.getItem("catchem.boot_token")).toBe("abc123");
   });
 
   it("upgrades to reconnecting after one failure, down after two", async () => {

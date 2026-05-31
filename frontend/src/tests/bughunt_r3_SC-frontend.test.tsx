@@ -9,6 +9,11 @@ import { MemoryRouter } from "react-router-dom";
  * pre-fix code and PASSES after the minimal fix in this group.
  */
 
+// SymbolDetailPage renders ECharts through a lazy Suspense boundary. The
+// chart itself is covered elsewhere; keep this regression file focused on
+// data contracts and avoid async chart-module resolution leaking between tests.
+vi.mock("@/charts/EChart", () => ({ EChart: () => null }));
+
 // ── shared localStorage shim (jsdom ships none by default) ─────────────────
 function installLocalStorage(): Storage {
   const store = new Map<string, string>();

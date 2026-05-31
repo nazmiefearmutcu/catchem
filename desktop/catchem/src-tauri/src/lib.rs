@@ -11,15 +11,19 @@ mod sidecar;
 mod state;
 
 use std::fs::OpenOptions;
+use std::io::Read;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::Duration;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::sidecar::SidecarConfig;
 use crate::state::AppState;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8087;
+const BOOT_TOKEN_ENV: &str = "CATCHEM_BOOT_TOKEN";
 
 /// File-based boot breadcrumb — survives launchd-mediated stderr discard.
 ///
@@ -44,17 +48,33 @@ fn boot_log(stage: &str, msg: &str) {
     }
 }
 
+fn boot_token() -> String {
+    let mut bytes = [0_u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(&mut bytes).is_ok() {
+            let mut out = String::with_capacity(bytes.len() * 2);
+            for b in bytes {
+                out.push_str(&format!("{:02x}", b));
+            }
+            return out;
+        }
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}-{:x}", std::process::id())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     boot_log("run", "entered");
 
     tauri::Builder::default()
-        // No plugins registered — see Cargo.toml for the rationale. The
-        // capability set in `capabilities/default.json` is intentionally
-        // narrow (core:default, core:window:default, core:event:default)
-        // and JS doesn't call invoke() anywhere, so the plugin surface
-        // would be pure overhead.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // JS-facing plugins remain disabled; the only native shortcut
+        // bridge we keep here is the Esc fallback for overlay dismissal.
         .invoke_handler(tauri::generate_handler![
             commands::sidecar_status,
             commands::sidecar_start,
@@ -108,6 +128,18 @@ pub fn run() {
                 port: DEFAULT_PORT,
                 release_mode: resolved.release_mode,
             };
+            if let Err(e) = app.global_shortcut().on_shortcut("Esc", |handle, _shortcut, event| {
+                if event.state != ShortcutState::Pressed {
+                    return;
+                }
+                boot_log("shortcut", "global shortcut handler observed Esc");
+                let _ = menu::dispatch_frontend_menu(handle, "dismiss_overlay");
+            }) {
+                log::warn!("global shortcut registration failed for Esc: {e}");
+                boot_log("setup", &format!("global shortcut registration failed for Esc: {e}"));
+            }
+            let boot_token = boot_token();
+            std::env::set_var(BOOT_TOKEN_ENV, &boot_token);
 
             log::info!(
                 "catchem boot: python={} cwd={} endpoint={} release={}",
@@ -168,9 +200,10 @@ pub fn run() {
             // Build the main window pointing at the local boot-shim. The
             // shim shows the 5-stage startup state machine (checking →
             // spawning → waiting → bundle → ready) and, once /healthz
-            // returns 200, does `window.location.replace(<sidecar>/)` to
-            // hand the window to the React UI. The on_navigation guard
-            // below allows that cross-origin jump because the target is
+            // returns 200 for the matching boot token, does
+            // `window.location.replace(<sidecar>/)` to hand the window to
+            // the React UI. The on_navigation guard below allows that
+            // cross-origin jump because the target is
             // `is_allowed_internal_url(127.0.0.1:8087)`.
             //
             // The block_on(wait_for_health) above is still useful: even if
@@ -179,7 +212,12 @@ pub fn run() {
             // the time the shim's first fetch fires.
             let nav_host = DEFAULT_HOST.to_string();
             let nav_port = DEFAULT_PORT;
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let boot_url = format!("index.html?boot_token={boot_token}");
+            WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::App(PathBuf::from(boot_url)),
+            )
                 .title("Catchem")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(980.0, 640.0)
@@ -233,24 +271,11 @@ pub fn run() {
             // listener on the JS side — dead emits are just noise.
             let app_handle = app.handle().clone();
             let sidecar_endpoint = cfg.endpoint();
-            let go_to = move |handle: &tauri::AppHandle, route: &str| {
-                if let Some(win) = handle.get_webview_window("main") {
-                    let url_str = format!("{sidecar_endpoint}{route}");
-                    match tauri::Url::parse(&url_str) {
-                        Ok(url) => {
-                            if let Err(e) = win.navigate(url) {
-                                log::warn!("menu navigate failed: {e}");
-                            }
-                        }
-                        Err(e) => log::warn!("bad menu url {url_str}: {e}"),
-                    }
-                }
-            };
             app.on_menu_event(move |handle, ev| {
                 let id = ev.id().0.as_str();
                 // 1. Navigation entries -> webview.navigate().
                 if let Some(r) = menu::nav_route_for(id) {
-                    go_to(handle, r);
+                    menu::navigate_active_webview_to_route(handle, &sidecar_endpoint, r);
                     return;
                 }
                 // 2. Frontend-delegated entries -> CustomEvent into webview.
@@ -261,7 +286,7 @@ pub fn run() {
                 // 3. Rust-only entries -> sidecar lifecycle + webview reload
                 //    + secondary-window creation.
                 match id {
-                    "reload" => menu::reload_main_webview(handle),
+                    "reload" => menu::reload_active_webview(handle),
                     "sidecar_restart" => {
                         let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
                         let cfg = state.sidecar_config.read().unwrap().clone();
@@ -294,25 +319,29 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // Only stop the sidecar when the MAIN window closes —
-                // closing a secondary analyst dashboard (v30) used to
-                // kill the sidecar out from under the still-open main
-                // window. The sidecar is the FastAPI backend; tearing
-                // it down on every CloseRequested broke the main UI as
-                // soon as the user closed any secondary window.
-                if window.label() == "main" {
-                    let state: tauri::State<std::sync::Arc<AppState>> = window.app_handle().state();
-                    let _ = state.sidecar.stop();
+                // Stop the sidecar only when the last webview is closing.
+                // A hard "main window only" rule would kill the backend
+                // while secondary dashboards are still open, which leaves
+                // their content stranded. Counting live webviews is the
+                // right lifecycle gate: one remaining window means this
+                // close request would end the UI session.
+                if should_stop_sidecar_on_close(window.app_handle().webview_windows().len()) {
+                    stop_sidecar(window.app_handle());
                 }
             }
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|e| {
             // .expect would panic into stderr — which launchd discards for
             // bundled apps. Surface the error into boot.log so we can see
             // what went wrong on the next launch.
-            boot_log("run", &format!("tauri runtime ERROR: {e}"));
-            panic!("error while running tauri application: {e}");
+            boot_log("run", &format!("tauri build ERROR: {e}"));
+            panic!("error while building tauri application: {e}");
+        })
+        .run(|app_handle, event| {
+            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+                stop_sidecar(app_handle);
+            }
         });
     boot_log("run", "exited (normal)");
 }
@@ -320,3 +349,31 @@ pub fn run() {
 // Dev helper: how long to wait for sidecar /healthz before showing the
 // "sidecar unreachable" banner in the UI.
 pub const DEFAULT_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[cfg(test)]
+fn should_stop_sidecar_on_close(open_webviews: usize) -> bool {
+    open_webviews <= 1
+}
+
+fn stop_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
+    let state: tauri::State<std::sync::Arc<AppState>> = app_handle.state();
+    let _ = state.sidecar.stop();
+}
+
+#[cfg(not(test))]
+fn should_stop_sidecar_on_close(open_webviews: usize) -> bool {
+    open_webviews <= 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_stop_sidecar_on_close;
+
+    #[test]
+    fn stops_only_when_last_webview_is_closing() {
+        assert!(should_stop_sidecar_on_close(0));
+        assert!(should_stop_sidecar_on_close(1));
+        assert!(!should_stop_sidecar_on_close(2));
+        assert!(!should_stop_sidecar_on_close(3));
+    }
+}

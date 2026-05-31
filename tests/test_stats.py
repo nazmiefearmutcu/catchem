@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 from catchem.api import _REQUEST_COUNTS, _STATS_CACHE, create_app
 from catchem.settings import load_settings, reload_settings
 
-
 REQUIRED_TOP_KEYS = {
     "schema_version",
     "generated_at",
@@ -138,7 +137,7 @@ def test_api_stats_deepseek_spent_reflects_registry(client: TestClient) -> None:
     registry = sup.reviewers
     # Hydrate the cache (may read 0.0 from an empty reviews table).
     registry.budget_state()
-    registry._cached_spent_usd = 1.23  # noqa: SLF001 — test seam
+    registry._cached_spent_usd = 1.23
     # Bust the /api/stats response cache so the new value is observed.
     _STATS_CACHE["payload"] = None
     _STATS_CACHE["expires_at"] = 0.0

@@ -157,7 +157,7 @@ def serve(
     import uvicorn
 
     s = load_settings()
-    from .api import create_app, record_bind
+    from .api import create_app, record_bind, _normalize_uvicorn_log_level
 
     # Resolve the actual host/port FIRST, then record it so /ui/sidecar-status
     # reports the bind truth rather than the static settings value. Without
@@ -166,16 +166,9 @@ def serve(
     bind_port = int(port or s.api.port)
     record_bind(bind_host, bind_port)
 
-    # uvicorn accepts only a fixed set of level names — it rejects stdlib
-    # aliases like WARN / NOTSET that are perfectly valid in LoggingConfig and
-    # would otherwise crash serve() before it ever binds the port. Normalize to
-    # uvicorn's vocabulary, falling back to "info" for anything unrecognized.
-    _UVICORN_LEVELS = {"critical", "error", "warning", "info", "debug", "trace"}
-    lvl = s.logging.level.strip().lower()
-    if lvl in ("warn",):
-        lvl = "warning"
-    if lvl not in _UVICORN_LEVELS:
-        lvl = "info"
+    # uvicorn accepts only a fixed set of level names. Normalize stdlib-style
+    # aliases like WARN and fall back for unsupported values.
+    lvl = _normalize_uvicorn_log_level(s.logging.level)
 
     app_ = create_app(s)
     uvicorn.run(
@@ -1232,7 +1225,7 @@ def cli_awareness(
     With ``--live`` it instead asks the running sidecar what the awareness
     window actually looks like right now (publisher lag + effective window +
     items ingested this process). Same text/JSON shape contract as the HTTP
-    twin so scripts can pipe it through ``jq``. Unreachable sidecar → exit 2.
+    twin so scripts can pipe it through ``jq``. Unreachable sidecar => exit 2.
     """
     if live:
         _awareness_live(json_out)
@@ -1308,12 +1301,12 @@ def cli_signals(
         ("source_reliability", "/api/quant/sources", "Per-domain track record + composite reliability"),
         ("novelty", "/api/quant/novelty", "Cosine-distance from rolling baseline (new vs noise)"),
         ("lead_lag", "/api/quant/lead-lag", "Per-domain advance/delay vs cluster centroid"),
-        ("co_occurrence", "/api/quant/co-occurrence", "Asset×reason heatmap with χ² lift"),
+        ("co_occurrence", "/api/quant/co-occurrence", "Assetxreason heatmap with chi-square lift"),
         ("sentiment_momentum", "/api/quant/sentiment-momentum", "Fast/slow EMA divergence per ticker"),
         ("sentiment_dispersion", "/api/quant/sentiment-dispersion", "Shannon entropy over pos/neutral/neg"),
-        ("intensity", "/api/quant/intensity", "Relevance × |sentiment| weighted attention metric"),
+        ("intensity", "/api/quant/intensity", "Relevance x |sentiment| weighted attention metric"),
         ("market_time", "/api/quant/market-time", "NYSE-session bucketed volume + relevance"),
-        ("arrival_heatmap", "/api/quant/arrival-heatmap", "24h × 7day arrival volume heatmap"),
+        ("arrival_heatmap", "/api/quant/arrival-heatmap", "24h x 7day arrival volume heatmap"),
         ("news_velocity", "/api/quant/news-velocity", "Rate + EMA + acceleration regime classifier"),
         ("symbol_correlation", "/api/quant/symbol-correlation", "Pearson r of co-mention vectors per pair"),
         ("persistence", "/api/quant/persistence", "Days-covered ratio — long-running narratives"),
@@ -1495,7 +1488,7 @@ def cli_status(
     machine-parseable envelope for monitoring scripts.
 
     The sidecar probe is a 0.5s GET against /healthz on 127.0.0.1:8087; absent
-    or slow → reports ``sidecar: stopped`` rather than failing.
+    or slow => reports ``sidecar: stopped`` rather than failing.
     """
     from .migrations import current_version
 

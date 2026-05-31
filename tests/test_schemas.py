@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -94,7 +94,7 @@ def test_capture_view_naive_datetime_coerced_to_utc() -> None:
     for ts in (cap.fetch_ts, cap.observed_ts, cap.published_ts):
         assert ts is not None
         assert ts.tzinfo is not None
-        assert ts.utcoffset() == timezone.utc.utcoffset(None)
+        assert ts.utcoffset() == UTC.utcoffset(None)
 
 
 def test_capture_view_aware_datetime_preserved() -> None:

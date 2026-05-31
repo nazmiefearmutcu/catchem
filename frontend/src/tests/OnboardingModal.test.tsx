@@ -71,6 +71,11 @@ describe("onboarding modal", () => {
     expect(screen.getByTestId("onboarding-skip")).toBeInTheDocument();
   });
 
+  it("describes optional DeepSeek calls without promising zero cloud traffic", () => {
+    expect(ONBOARDING_STEPS[0].body).toContain("optional DeepSeek");
+    expect(ONBOARDING_STEPS[0].body).not.toMatch(/no cloud calls/i);
+  });
+
   it("stays hidden when the completed flag is already set", () => {
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
     render(<OnboardingModal />);

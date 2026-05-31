@@ -8,7 +8,7 @@ points to a single broken branch.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import log
 from typing import Any
 
@@ -16,16 +16,14 @@ import pytest
 
 from catchem.quant.source_reliability import (
     SourceLeaderboard,
-    SourceScore,
     compute_source_scores,
 )
-
 
 # ── fixtures / builders ────────────────────────────────────────────────────
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(dt: datetime) -> str:

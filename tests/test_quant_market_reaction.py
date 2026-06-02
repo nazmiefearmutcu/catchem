@@ -293,3 +293,42 @@ def test_safe_float_rejects_garbage_and_zero_prev_close_returns_none() -> None:
     assert report.fallback_reason == "quote_unavailable"
     for row in report.horizons:
         assert row.return_pct is None
+
+
+def test_market_reaction_coverage_gaps() -> None:
+    # 1. candidate symbol that strips to empty string (line 95->91)
+    # 2. None asset class (line 101)
+    # 3. Asset class not in _ASSET_CLASS_PROXY (line 103->99)
+    provider = FakeQuoteProvider()
+    record_strip_and_asset_fallback = {
+        "capture_id": "cap-gaps-1",
+        "published_ts": None,
+        "candidate_symbols": ["   ", ""],
+        "asset_classes": [None, "unsupported_class", "equities"],
+    }
+    report = compute_reaction(record_strip_and_asset_fallback, provider)
+    # SPY is the equity proxy (key 'equities' -> 'SPY')
+    assert all(row.symbol == "SPY" for row in report.horizons)
+
+    # 4. quote is None in _snapshot_return_pct and _extract_error_code (line 131 and 142)
+    class NoneQuoteProvider:
+        def get_quote(self, symbol: str) -> None:
+            return None
+
+    none_report = compute_reaction(_aapl_record(), NoneQuoteProvider())
+    assert none_report.fallback_reason == "quote_unavailable"
+    assert none_report.headline_excess_return_15m is None
+    for row in none_report.horizons:
+        assert row.last_at_t0 is None
+        assert row.last_at_t is None
+        assert row.return_pct is None
+
+    # 5. missing "15m" horizon for headline excess return (line 230->235)
+    missing_15m_report = compute_reaction(
+        _aapl_record(),
+        provider,
+        horizons=("5m", "1h"),
+    )
+    assert missing_15m_report.headline_excess_return_15m is None
+    assert tuple(row.horizon for row in missing_15m_report.horizons) == ("5m", "1h")
+

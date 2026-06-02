@@ -128,8 +128,8 @@ def test_unigram_repetition_in_body_increases_score(taxonomy) -> None:
                             text="The Fed met today. Markets reacted."))
     many = zs.classify(_cap(
         title="market wrap",
-        text=("The Fed met today. The Fed cut rates. The Fed surprised markets. "
-              "The Fed minutes were dovish. The Fed will meet again."),
+        text=("The Fed met today. The Fed talked. The Fed listened. "
+              "The Fed spoke. The Fed stood."),
     ))
     label = "central_bank"
     once_s = once.label_scores.get(label, 0.0)

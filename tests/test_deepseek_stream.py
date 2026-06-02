@@ -359,3 +359,39 @@ async def test_stream_additional_branches():
 
     assert envelopes == [{"type": "done"}]
 
+
+@pytest.mark.asyncio
+async def test_stream_200_empty_lines():
+    # 200 response but empty lines (covers 353->390 loop skip)
+    response = MockAsyncResponse(200, lines=[])
+    client = MockAsyncClient(response)
+    envelopes = []
+    async for env in stream_chat_completion(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        messages=[],
+        client=client,  # type: ignore
+    ):
+        envelopes.append(env)
+    assert envelopes == []
+
+
+def test_reviewer_injected_client_close_noop(taxonomy):
+    class InjectedClient:
+        def __init__(self):
+            self.closed = False
+        def close(self):
+            self.closed = True
+    client = InjectedClient()
+    reviewer = DeepSeekReviewer(api_key="key", taxonomy=taxonomy, client=client)  # type: ignore
+    assert not reviewer._owns_client
+    reviewer.close()
+    assert not client.closed
+
+
+def test_estimate_usd_public(taxonomy):
+    reviewer = DeepSeekReviewer(api_key="key", taxonomy=taxonomy)
+    assert reviewer.estimate_usd(input_tokens=1000, output_tokens=2000) == pytest.approx(0.00247)
+
+

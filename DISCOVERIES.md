@@ -24,6 +24,9 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_quant_event_clustering.py:456-563` — Missing coverage for helper edge cases, naive clock formats, empty/none lists, and sorting missing timestamps. Added tests covering Jaccard overlaps, naive ISO parses, empty dominants, coherence cache misses, sorting missing timestamps, and duplicate record cache hits. Reached **98.54%** coverage on `event_clustering.py` (with remaining lines unreachable due to sorting/greedy linking logic).
 - **[test-gap]** `tests/test_quant_global_tone.py:618-682` — Missing coverage for datetime parsing exceptions, float overflow timestamps, blank/empty string coercion, degenerate denominator slope fallback, and client closing failures in GDELT tone signal logic. Added unit tests for each pathway, raising `global_tone.py` coverage from 91.93% to 100.00%.
 - **[test-gap]** `tests/test_quant_market_reaction.py:297-340` — Uncovered pathways for candidate symbol stripping, None asset classes, unsupported proxies, None quotes, and custom horizons in market reaction calculations. Added unit tests for each edge case, raising `market_reaction.py` coverage from 93.23% to 100.00%.
+- **[test-gap]** `tests/test_reviewers_registry.py:1-98` — Untested budget caching, exception handlers, and initialization fallbacks in `ReviewerRegistry`. Created a dedicated unit test suite covering stub caching, missing keys, initialization errors, zero-amount spend cache bumping, and budget limit exhaustion error persistency, raising `registry.py` coverage from 86.84% to 100.00%.
+- **[test-gap]** `tests/test_deepseek_stream.py:363-398` — Uncovered pathways for empty stream responses, injected client closing, and public cost-estimation in `DeepSeekReviewer`. Expanded the test suite to cover these edges, raising `deepseek.py` coverage from 98.62% to 100.00%.
+
 
 
 

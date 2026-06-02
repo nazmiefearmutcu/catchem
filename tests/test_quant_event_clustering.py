@@ -562,3 +562,38 @@ def test_cluster_records_sim_cache_hit() -> None:
     clusters = cluster_records(records, window_seconds=100, similarity_threshold=0.0, min_cluster_size=1)
     assert len(clusters) > 0
 
+
+def test_record_similarity_exceeds_one(monkeypatch) -> None:
+    import catchem.quant.event_clustering as ec
+
+    monkeypatch.setattr(ec, "_W_TITLE", 2.0)
+    r1 = _rec("r1", title="exact matching title")
+    r2 = _rec("r2", title="exact matching title")
+    sim = ec.pairwise_similarity(r1, r2)
+    assert sim == 1.0
+
+
+def test_cluster_records_missing_member_ts(monkeypatch) -> None:
+    import catchem.quant.event_clustering as ec
+
+    base = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    r1 = _rec("r1", title="matching headline", published_ts=base)
+    r2 = _rec("r2", title="matching headline", published_ts=base + timedelta(seconds=10))
+
+    original_record_ts = ec._record_ts
+    call_count = 0
+
+    def mock_record_ts(rec):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 5:
+            return None
+        return original_record_ts(rec)
+
+    monkeypatch.setattr(ec, "_record_ts", mock_record_ts)
+
+    records = [r1, r2]
+    clusters = ec.cluster_records(records, window_seconds=100, similarity_threshold=0.0, min_cluster_size=1)
+    assert len(clusters) > 0
+
+

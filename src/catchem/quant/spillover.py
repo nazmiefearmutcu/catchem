@@ -164,6 +164,13 @@ def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:
     )
 
 
+def _clamp_score(score: float) -> float:
+    """Clamp score to a minimum of -1.0."""
+    if score < -1.0:
+        return -1.0
+    return score
+
+
 def _floor_bucket(ts: datetime, bucket_minutes: int) -> datetime:
     """Floor ``ts`` to the start of its ``bucket_minutes``-wide window.
 
@@ -452,11 +459,7 @@ def compute_spillover(
             else:
                 base_rate_target = 0.0
 
-            score = p_target_given_source - base_rate_target
-            if score < -1.0:
-                # Mathematically impossible since both terms are in
-                # [0, 1], but guard anyway against future refactors.
-                score = -1.0
+            score = _clamp_score(p_target_given_source - base_rate_target)
 
             edge = SpilloverEdge(
                 source_asset=source,

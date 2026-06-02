@@ -457,3 +457,10 @@ class TestBuildUserPrompt:
     def test_prompt_is_str(self, taxonomy):
         prompt = build_user_prompt(taxonomy=taxonomy, title="t", body="b", domain="d", url="u")
         assert isinstance(prompt, str)
+
+
+class TestReviewerProtocol:
+    def test_protocol_method_is_callable(self):
+        from catchem.reviewers.base import Reviewer
+        assert Reviewer.review(None, None) is None
+

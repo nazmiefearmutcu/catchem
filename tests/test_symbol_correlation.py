@@ -274,3 +274,17 @@ def test_compute_pairs_skips_unparseable_and_non_string_symbols() -> None:
 
     # Only AAPL is eligible — single-symbol universes have no pairs.
     assert pairs == []
+
+
+def test_compute_pairs_exceeds_max_grid_buckets() -> None:
+    # We pass records spanning 20005 hours (exceeding 20000 _MAX_GRID_BUCKETS limit)
+    records = [
+        _rec(0, ["AAPL", "MSFT"]),
+        _rec(0, ["AAPL", "MSFT"]),
+        _rec(1200300, ["AAPL", "MSFT"]),
+        _rec(1200300, ["AAPL", "MSFT"]),
+    ]
+    pairs = compute_pairs(records, bucket_minutes=60, min_mentions=2)
+    assert len(pairs) == 1
+    assert pairs[0].pearson_r == pytest.approx(1.0)
+

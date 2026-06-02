@@ -390,3 +390,22 @@ def test_low_overlap_band_end_to_end() -> None:
 
     assert 0.10 <= result.max_similarity_to_corpus < 0.50
     assert result.explanation == "low overlap with prior coverage"
+
+
+def test_jaccard_union_zero_coverage() -> None:
+    from catchem.quant.novelty import _jaccard
+
+    class FakeSet:
+        def __init__(self, is_empty: bool) -> None:
+            self.is_empty = is_empty
+        def __bool__(self) -> bool:
+            return not self.is_empty
+        def __and__(self, other: FakeSet) -> FakeSet:
+            return FakeSet(True)
+        def __or__(self, other: FakeSet) -> FakeSet:
+            return FakeSet(True)
+        def __len__(self) -> int:
+            return 0
+
+    assert _jaccard(FakeSet(False), FakeSet(False)) == 0.0
+

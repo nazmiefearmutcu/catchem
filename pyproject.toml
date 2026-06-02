@@ -1,6 +1,6 @@
 [project]
 name = "catchem"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sidecar workspace that fuses Awareness ingestion with a guarded finance-relevance layer. NewsImpact is consumed in read-only diagnostic mode only."
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -62,10 +62,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/catchem"]
-# Static files (dashboard.html, the built SPA bundle) are part of the package,
-# not "shared data". They must land alongside catchem/ inside the wheel so
-# importlib.resources can find them in a clean install.
-force-include = { "src/catchem/static" = "catchem/static" }
+
 
 [tool.hatch.build.targets.sdist]
 include = ["src/catchem/static/**/*", "scripts/**/*", "configs/**/*", "docs/**/*", "tests/**/*"]

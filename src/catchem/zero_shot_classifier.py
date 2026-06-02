@@ -77,20 +77,31 @@ class ZeroShotStub:
         title_l = (cap.title or "").lower()
         body_l = (cap.text or "")[:3000].lower()
 
-        # Set-based dedup intentional: prevents repetition spam from
-        # inflating a label's score. Title vs body weighting is applied
-        # via separate processing, not by string repetition.
-        title_words = {
+        # Multi-set frequency-based scoring via Counter: repeated mentions
+        # of a label-aliased token increase the score. Title-overlap is
+        # completely excluded from the body count so body mentions of a word
+        # in the title do not double-count (title weight already covers it).
+        from collections import Counter
+
+        title_words = Counter(
             w for w in _WORD_RE.findall(title_l)
             if w not in _STOP
-        }
-        body_words = {
+        )
+        body_words = Counter(
             w for w in _WORD_RE.findall(body_l)
             if w not in _STOP
-        } - title_words  # exclude title-overlap to avoid double-counting
+        )
+        # Exclude title unigram overlap from body
+        for w in title_words:
+            if w in body_words:
+                del body_words[w]
 
-        title_bigrams = set(_bigrams(title_l))
-        body_bigrams = set(_bigrams(body_l)) - title_bigrams
+        title_bigrams = Counter(_bigrams(title_l))
+        body_bigrams = Counter(_bigrams(body_l))
+        # Exclude title bigram overlap from body
+        for b in title_bigrams:
+            if b in body_bigrams:
+                del body_bigrams[b]
 
         scores: dict[str, float] = {}
 
@@ -99,15 +110,15 @@ class ZeroShotStub:
                 scores[label_id] = scores.get(label_id, 0.0) + weight
 
         # Unigrams — title tokens carry _TITLE_WEIGHT, body tokens carry 1.0.
-        for w in title_words:
-            _add(w, self._TITLE_WEIGHT)
-        for w in body_words:
-            _add(w, 1.0)
+        for w, count in title_words.items():
+            _add(w, self._TITLE_WEIGHT * count)
+        for w, count in body_words.items():
+            _add(w, 1.0 * count)
         # Bigrams (multi-word aliases) — same title boost; base weight 1.5.
-        for b in title_bigrams:
-            _add(b, self._BIGRAM_WEIGHT * self._TITLE_WEIGHT)
-        for b in body_bigrams:
-            _add(b, self._BIGRAM_WEIGHT)
+        for b, count in title_bigrams.items():
+            _add(b, self._BIGRAM_WEIGHT * self._TITLE_WEIGHT * count)
+        for b, count in body_bigrams.items():
+            _add(b, self._BIGRAM_WEIGHT * count)
 
         if not scores:
             return ZeroShotResult(label_scores={}, model_version=self.model_version)

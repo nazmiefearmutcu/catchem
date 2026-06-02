@@ -154,3 +154,29 @@ def test_feeds_appear_in_assemble_feeds() -> None:
     assert any(f.name.startswith("gdelt-") for f in gdelt_feeds)
     # The named markets feed specifically should be present.
     assert any(f.name == "gdelt-markets" for f in feeds)
+
+
+def test_gdelt_edge_cases() -> None:
+    from catchem.news_sources.gdelt import _parse_gdelt
+
+    # 1. urlparse throws exception & empty hostname
+    body1 = json.dumps({"articles": [
+        {"url": "http://[::1]abc", "title": "Corrupt Hostname"},
+        {"url": "/foo/bar", "title": "Empty Hostname"},
+    ]}).encode("utf-8")
+
+    items1 = _parse_gdelt(body1, fallback_domain="gdelt_fallback.org")
+    assert len(items1) == 2
+    assert items1[0].domain == "gdelt_fallback.org"
+    assert items1[1].domain == "gdelt_fallback.org"
+
+    # 2. Title-less article: fallback to using URL as title
+    body2 = json.dumps({"articles": [
+        {"url": "https://ok.example.com/x", "title": "  "}, # empty/blank
+        {"url": "https://ok.example.com/y"}, # missing title key
+    ]}).encode("utf-8")
+    items2 = _parse_gdelt(body2, fallback_domain="gdelt.org")
+    assert len(items2) == 2
+    assert items2[0].title == "https://ok.example.com/x"
+    assert items2[1].title == "https://ok.example.com/y"
+

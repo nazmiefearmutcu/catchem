@@ -49,6 +49,10 @@ def test_record_intensity_missing_fields_are_zero() -> None:
     # Bools must NOT silently coerce to 1.0 — guards against
     # sentiment flags accidentally becoming intensity inputs.
     assert _record_intensity({"finance_relevance_score": True, "sentiment_score": True}) == 0.0
+    # Non-finite values must coerce to 0.0
+    assert _record_intensity({"finance_relevance_score": float("nan"), "sentiment_score": 0.8}) == 0.0
+    assert _record_intensity({"finance_relevance_score": 0.8, "sentiment_score": float("inf")}) == 0.0
+
 
 
 # ---------------------------------------------------------------------------
@@ -290,3 +294,37 @@ def test_endpoint_rejects_unknown_scope(client: TestClient) -> None:
 
     res = client.get("/api/quant/intensity?scope=garbage")
     assert res.status_code == 422
+
+
+def test_finite_or_none_coverage() -> None:
+    from catchem.quant.intensity import _finite_or_none
+
+    assert _finite_or_none(None) is None
+    assert _finite_or_none(True) is None
+    assert _finite_or_none(False) is None
+    assert _finite_or_none("not-a-float") is None
+    assert _finite_or_none([1.2]) is None
+    assert _finite_or_none(float("inf")) is None
+    assert _finite_or_none(float("-inf")) is None
+    assert _finite_or_none(float("nan")) is None
+    assert _finite_or_none(1.23) == pytest.approx(1.23)
+
+
+def test_compute_scope_buckets_empty_item_continue(monkeypatch) -> None:
+    from collections import defaultdict
+    import catchem.quant.intensity as intensity_mod
+
+    def mock_defaultdict(*args, **kwargs):
+        d = defaultdict(*args, **kwargs)
+        d["empty_key"] = []
+        return d
+
+    monkeypatch.setattr(intensity_mod, "defaultdict", mock_defaultdict)
+
+    records = [{"asset_classes": ["equities"], "finance_relevance_score": 0.5, "sentiment_score": 0.8}]
+    buckets = intensity_mod.compute_by_scope(records, "asset_classes")
+    scopes = [b.scope for b in buckets]
+    assert "asset_class:empty_key" not in scopes
+    assert "asset_class:equities" in scopes
+
+

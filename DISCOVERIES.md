@@ -34,3 +34,7 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_news_sources_discovery.py:36-41` — Reached 100% coverage on `news_sources/__init__.py` by mocking `pkgutil.iter_modules` to return a private underscore helper module.
 - **[test-gap]** `tests/test_news_sources_reddit.py:75-81` — Reached 100% coverage on `reddit.py` by adding a completely malformed non-dict child to the test fixture.
 - **[test-gap]** `tests/test_quant_co_occurrence.py:608-615` — Reached 100% coverage on `co_occurrence.py` by implementing margin check overrides and patching `builtins.sum` for the HHI generator expression.
+- **[test-gap]** `tests/test_intensity.py:294-327` — Reached 100% coverage on `intensity.py` by covering non-finite inputs to `_coerce_float` and testing empty scope bucket continue cases.
+- **[test-gap]** `tests/test_quant_novelty.py:394-412` — Reached 100% coverage on `novelty.py` by using a custom `FakeSet` mockup to test the Jaccard union-is-zero branch.
+- **[test-gap]** `tests/test_symbol_correlation.py:278-291` — Reached 100% coverage on `symbol_correlation.py` by creating an end-to-end integration test spanning 20,000+ hours to trigger the defensive grid bucket limit check.
+- **[test-gap]** `tests/test_quant_topic_regime.py:572-588` — Reached 100% coverage on `topic_regime.py` by testing negative values in `_smooth_pair` and zero-probability cases in `_kl_divergence`.

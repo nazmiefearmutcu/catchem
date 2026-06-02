@@ -568,3 +568,19 @@ def test_sparse_buckets_report_kl_but_do_not_fire_shift() -> None:
     assert second.kl_divergence_from_prev > 0.4
     assert second.is_regime_shift is False
     assert report.detected_shifts == ()
+
+
+def test_topic_regime_internal_helpers_coverage() -> None:
+    from catchem.quant.topic_regime import _smooth_pair, _kl_divergence
+
+    # 1. _smooth_pair with negative values to cause total_p <= 0.0
+    sp_p, sp_q = _smooth_pair({"a": -1.0}, {"b": -1.0})
+    assert sp_p == {}
+    assert sp_q == {}
+
+    # 2. _kl_divergence with p_i <= 0.0
+    assert _kl_divergence({"a": -0.5}, {"a": 0.5}) == 0.0
+
+    # 3. _kl_divergence with q_i <= 0.0
+    assert _kl_divergence({"a": 0.5}, {"a": -0.5}) == 0.0
+

@@ -38,3 +38,6 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_quant_novelty.py:394-412` — Reached 100% coverage on `novelty.py` by using a custom `FakeSet` mockup to test the Jaccard union-is-zero branch.
 - **[test-gap]** `tests/test_symbol_correlation.py:278-291` — Reached 100% coverage on `symbol_correlation.py` by creating an end-to-end integration test spanning 20,000+ hours to trigger the defensive grid bucket limit check.
 - **[test-gap]** `tests/test_quant_topic_regime.py:572-588` — Reached 100% coverage on `topic_regime.py` by testing negative values in `_smooth_pair` and zero-probability cases in `_kl_divergence`.
+- **[test-gap]** `tests/test_webhook.py:228-232` — Reached 100% coverage on `webhook.py` by covering invalid IP shorthand tokens (`127..1`, `0x.1`, `0xzz.1`), `socket.inet_aton` OSError (`999.999.999.999`), and `urlparse` ValueError via mocking.
+- **[test-gap]** `tests/test_storage_and_api.py:265-345` — Reached 100% coverage on `storage.py` by testing type validation checks, custom in-memory schema migrations, `rotate_parquet_records` auto-flushing, `recent_reviews`, mocked `fetchone` returning `None` in `review_token_totals`, empty symbol value error, invalid float conversions, and corrupt JSON decode error in `_row_to_review`.
+

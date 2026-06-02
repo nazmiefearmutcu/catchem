@@ -191,3 +191,44 @@ def test_feeds_appear_in_assemble_feeds() -> None:
     assert any(f.name.startswith("hn-algolia-") for f in hn_feeds)
     # The named stocks feed specifically should be present.
     assert any(f.name == "hn-algolia-stocks" for f in feeds)
+
+
+def test_hn_algolia_edge_cases() -> None:
+    from catchem.news_sources.hn_algolia import _parse_hn, _resolve_domain
+
+    # 1. created_at_i is a boolean (must fall back to created_at or now())
+    items1 = _parse_hn(
+        json.dumps({"hits": [{"title": "Test Boolean", "url": "https://foo.com", "created_at_i": True, "created_at": "2025-05-28T14:30:00Z"}]}).encode("utf-8"),
+        "fallback"
+    )
+    assert len(items1) == 1
+    assert items1[0].published_ts == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # 2. created_at_i is integer overflowing (must fall back to ISO or now())
+    items2 = _parse_hn(
+        json.dumps({"hits": [{"title": "Test Overflow", "url": "https://foo.com", "created_at_i": 999999999999999, "created_at": "2025-05-28T14:30:00Z"}]}).encode("utf-8"),
+        "fallback"
+    )
+    assert len(items2) == 1
+    assert items2[0].published_ts == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # 3. Hostname parsing exception & empty hostname
+    domain1 = _resolve_domain("http://[::1]abc", is_item_page=False)
+    assert domain1 == "news.ycombinator.com"
+
+    domain2 = _resolve_domain("/foo/bar", is_item_page=False)
+    assert domain2 == "news.ycombinator.com"
+
+    # 4. objectID is missing/empty/None when url is absent
+    items3 = _parse_hn(
+        json.dumps({"hits": [
+            {"title": "Missing ID and URL"}, # skips
+            {"title": "Empty ID and URL", "objectID": "   "}, # skips
+            {"title": "Null ID and URL", "objectID": None}, # skips
+            {"title": "Valid ID", "objectID": "123"}, # parses
+        ]}).encode("utf-8"),
+        "fallback"
+    )
+    assert len(items3) == 1
+    assert items3[0].title == "Valid ID"
+

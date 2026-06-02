@@ -18,6 +18,9 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_taxonomy_unit.py:1-93` — Completely untested taxonomy loading & property methods. Created dedicated unit test suite covering default load pathways, missing file errors, and malformed content structures, raising `taxonomy.py` coverage to 100.00%.
 - **[test-gap]** `tests/test_zero_shot_taxonomy.py:142-208` — Missing coverage for ZeroShotModel classification and bigram overlaps. Added tests covering BART-MNLI pipeline mock classifications, top_above filtering, and bigram overlap deduplication, raising `zero_shot_classifier.py` coverage from 79.23% to 99.23%.
 - **[test-gap]** `tests/test_text_extract_unit.py:1-105` — Untested branches in safe text extraction. Created unit tests covering HTML heading collapse, multiple blank lines collapse, missing title/JSON formatting edge cases, and empty text/invalid payloads, raising `text_extract.py` coverage from 85.25% to 100.00%.
+- **[test-gap]** `tests/test_news_sources_hn_algolia.py:195-236` — Uncovered error-handling pathways in HN Algolia parser. Added tests covering boolean epoch fields, timestamp integer overflow handling, empty host names, host resolution exceptions, and missing ID/URL records, raising `hn_algolia.py` coverage from 90.83% to 100.00%.
+- **[test-gap]** `tests/test_portfolio.py:216-276` — Uncovered pathways in read-only portfolio enrichment. Added tests covering empty symbol matching, invalid sentiment label normalizations, naive clock inputs, invalid horizon seconds conversion, duplicate symbol holdings, and completely empty records, raising `portfolio.py` coverage from 92.22% to 100.00%.
+
 
 
 

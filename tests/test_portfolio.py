@@ -212,3 +212,63 @@ def test_coerce_float_rejects_non_finite() -> None:
     assert _coerce_float(2) == 2.0
     assert _coerce_float(None) is None
     assert _coerce_float("not a number") is None
+
+
+def test_symbol_matches_empty() -> None:
+    from catchem.portfolio import _symbol_matches
+    assert _symbol_matches("", "some text", set()) is False
+
+
+def test_record_sentiment_normalization() -> None:
+    records = [
+        _rec(title="AAPL surges", symbols=["AAPL"], age_seconds=120, score=0.9),
+    ]
+    # Set valid sentiment label with whitespace and casing
+    records[0]["sentiment_label"] = "  POSITIVE  "
+    out = enrich_holdings(
+        [{"symbol": "AAPL"}],
+        records=records,
+        quote_fn=lambda s: None,
+        now=NOW,
+    )
+    assert out[0]["sentiment_label"] == "positive"
+
+    # Invalid sentiment label
+    records[0]["sentiment_label"] = "invalid_label"
+    out2 = enrich_holdings(
+        [{"symbol": "AAPL"}],
+        records=records,
+        quote_fn=lambda s: None,
+        now=NOW,
+    )
+    assert out2[0]["sentiment_label"] is None
+
+
+def test_enrich_holdings_now_handling() -> None:
+    # 1. now is None
+    out = enrich_holdings([{"symbol": "AAPL"}], records=[], quote_fn=lambda s: None)
+    assert len(out) == 1
+
+    # 2. now is naive (no timezone)
+    naive_now = datetime(2024, 1, 2, 21, 0)
+    out2 = enrich_holdings([{"symbol": "AAPL"}], records=[], quote_fn=lambda s: None, now=naive_now)
+    assert len(out2) == 1
+
+
+def test_enrich_holdings_window_fallback() -> None:
+    out = enrich_holdings([{"symbol": "AAPL"}], records=[], quote_fn=lambda s: None, window_seconds="invalid")
+    assert len(out) == 1
+
+
+def test_enrich_holdings_duplicate_symbols() -> None:
+    out = enrich_holdings([{"symbol": "AAPL"}, {"symbol": "aapl"}], records=[], quote_fn=lambda s: None)
+    assert len(out) == 2
+
+
+def test_enrich_holdings_empty_record() -> None:
+    # A record with no title, text, or symbols
+    records = [{"published_ts": NOW.isoformat()}]
+    out = enrich_holdings([{"symbol": "AAPL"}], records=records, quote_fn=lambda s: None, now=NOW)
+    assert len(out) == 1
+    assert out[0]["recent_news_count"] == 0
+

@@ -38,3 +38,22 @@ def test_discover_returns_name_sorted_order(monkeypatch) -> None:
     assert loaded == sorted(loaded), "discovery order must be deterministic (name-sorted)"
     # Private/underscore modules are not source packs and must be excluded.
     assert not any(name.startswith("_") for name in loaded)
+
+
+def test_discover_skips_private_modules(monkeypatch) -> None:
+    import pkgutil
+    from collections import namedtuple
+
+    MockModuleInfo = namedtuple("ModuleInfo", ["module_finder", "name", "ispkg"])
+
+    mock_modules = [
+        MockModuleInfo(None, "_private_helper", False),
+        MockModuleInfo(None, "reddit", False)
+    ]
+
+    monkeypatch.setattr(pkgutil, "iter_modules", lambda *args, **kwargs: mock_modules)
+
+    loaded = ns._discover()
+    assert "_private_helper" not in loaded
+    assert "reddit" in loaded
+

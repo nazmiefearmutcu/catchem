@@ -579,3 +579,20 @@ def test_symbols_in_drops_non_strings_blanks_and_dupes() -> None:
 
     rec = {"candidate_symbols": ["AAPL", 7, None, "  ", "AAPL", " MSFT "]}
     assert _symbols_in(rec) == ["AAPL", "MSFT"]
+
+
+def test_mean_std_statistics_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import statistics
+    from catchem.quant.anomaly import _rolling_stats
+
+    def mock_stdev(*args, **kwargs):
+        raise statistics.StatisticsError("mocked stdev error")
+
+    monkeypatch.setattr(statistics, "stdev", mock_stdev)
+
+    res = _rolling_stats([1.0, 2.0, 3.0])
+    assert res is not None
+    mean, std = res
+    assert mean == pytest.approx(2.0)
+    assert std == 0.0
+

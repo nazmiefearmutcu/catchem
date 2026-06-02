@@ -228,3 +228,26 @@ def test_snapshot_guard_state_missing_file(tmp_path: Path) -> None:
         snapshot_guard_state(tmp_path)
 
 
+@pytest.mark.guard
+def test_guard_snapshot_as_dict(tmp_path: Path) -> None:
+    from catchem.newsimpact_guarded_adapter import GuardSnapshot
+    snap = GuardSnapshot(
+        governance_index_path=tmp_path / "index.json",
+        governance_index_sha256="abc",
+        release_gate_passed=True,
+        quarantine_state="SAFE",
+        safe_to_publish=True,
+        safe_to_promote=True,
+        fusion_verdict_class="CLASS_A",
+    )
+    d = snap.as_dict()
+    assert d["governance_index_path"] == str(tmp_path / "index.json")
+    assert d["governance_index_sha256"] == "abc"
+    assert d["release_gate_passed"] is True
+    assert d["quarantine_state"] == "SAFE"
+    assert d["safe_to_publish"] is True
+    assert d["safe_to_promote"] is True
+    assert d["fusion_verdict_class"] == "CLASS_A"
+
+
+

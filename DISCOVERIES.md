@@ -29,3 +29,8 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_schemas.py:263-305` — Uncovered validation pathways for invalid ISO dates, naive string timestamps, non-finite sentiment values, and naive record timestamps in `schemas.py`. Expanded the test suite to cover these edges, raising `schemas.py` coverage from 93.28% to 100.00%.
 - **[test-gap]** `tests/test_reranker.py:125-142` — Missing coverage for Reranker protocol signature body methods. Added explicit mock getters/invocations to target protocol default body statements, raising `reranker.py` coverage from 95.74% to 100.00%.
 - **[test-gap]** `tests/test_runtime_metrics.py:1-213` — Verified and hardened POSIX getrusage RSS/VMS/threads metrics fallbacks, raising `runtime_metrics.py` coverage to 100.00%.
+- **[test-gap]** `tests/test_newsimpact_guard.py:225-231` — Reached 100% coverage on `newsimpact_guarded_adapter.py` by covering `GuardSnapshot.as_dict()`.
+- **[test-gap]** `tests/test_quant_anomaly.py:575-582` — Reached 100% coverage on `anomaly.py` by mocking `statistics.stdev` to raise `StatisticsError` in `_mean_std()`.
+- **[test-gap]** `tests/test_news_sources_discovery.py:36-41` — Reached 100% coverage on `news_sources/__init__.py` by mocking `pkgutil.iter_modules` to return a private underscore helper module.
+- **[test-gap]** `tests/test_news_sources_reddit.py:75-81` — Reached 100% coverage on `reddit.py` by adding a completely malformed non-dict child to the test fixture.
+- **[test-gap]** `tests/test_quant_co_occurrence.py:608-615` — Reached 100% coverage on `co_occurrence.py` by implementing margin check overrides and patching `builtins.sum` for the HHI generator expression.

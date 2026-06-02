@@ -163,3 +163,85 @@ def test_sentiment_stub_tie_returns_neutral() -> None:
     # Equal-tie or imbalanced — at minimum the score must stay in [0,1].
     assert 0.0 <= res.score <= 1.0
     assert res.label in {SentimentLabel.NEUTRAL, SentimentLabel.POSITIVE, SentimentLabel.NEGATIVE}
+
+
+def test_sentiment_model_happy_path() -> None:
+    import sys
+    from unittest.mock import MagicMock, patch
+    from catchem.sentiment import SentimentModel
+    from catchem.schemas import SentimentLabel
+
+    mock_transformers = MagicMock()
+    mock_pipeline = MagicMock()
+    mock_transformers.pipeline = mock_pipeline
+    mock_pipe = MagicMock()
+    mock_pipeline.return_value = mock_pipe
+    # Mock pipe returns a list of list of dicts or list of dicts
+    mock_pipe.return_value = [[{"label": "POSITIVE", "score": 0.95}]]
+
+    with patch.dict("sys.modules", {"transformers": mock_transformers}):
+        model = SentimentModel("ProsusAI/finbert")
+        assert model.model_name == "ProsusAI/finbert"
+        assert model.model_version == "hf:ProsusAI/finbert"
+
+        mock_pipeline.assert_called_once_with("text-classification", model="ProsusAI/finbert", device=-1, top_k=None)
+
+        # Test basic classification
+        cap = _bare_cap(title="Profit grows", text="Revenue surged!")
+        res = model.classify(cap)
+        assert res.label == SentimentLabel.POSITIVE
+        assert res.score == 0.95
+        assert res.model_version == "hf:ProsusAI/finbert"
+
+        # Test negative matching (not in list)
+        mock_pipe.return_value = [{"label": "negative", "score": 0.88}]
+        res = model.classify(cap)
+        assert res.label == SentimentLabel.NEGATIVE
+        assert res.score == 0.88
+
+        # Test list of dicts sorted by score
+        mock_pipe.return_value = [[
+            {"label": "neutral", "score": 0.1},
+            {"label": "positive", "score": 0.8},
+            {"label": "negative", "score": 0.1}
+        ]]
+        res = model.classify(cap)
+        assert res.label == SentimentLabel.POSITIVE
+        assert res.score == 0.8
+
+        # Test neutral/other matching
+        mock_pipe.return_value = [{"label": "neutral", "score": 0.7}]
+        res = model.classify(cap)
+        assert res.label == SentimentLabel.NEUTRAL
+        assert res.score == 0.7
+
+        # Test empty or whitespace only text
+        cap_empty = _bare_cap(title="   ", text="   ")
+        res_empty = model.classify(cap_empty)
+        assert res_empty.label == SentimentLabel.UNKNOWN
+        assert res_empty.score == 0.0
+
+        # Test empty pipeline output
+        mock_pipe.return_value = []
+        res_empty_out = model.classify(cap)
+        assert res_empty_out.label == SentimentLabel.NEUTRAL
+        assert res_empty_out.score == 0.5
+
+
+def test_make_sentiment_success() -> None:
+    import sys
+    from unittest.mock import MagicMock, patch
+    from catchem.sentiment import SentimentModel, make_sentiment
+
+    mock_transformers = MagicMock()
+    mock_pipeline = MagicMock()
+    mock_transformers.pipeline = mock_pipeline
+    mock_pipe = MagicMock()
+    mock_pipeline.return_value = mock_pipe
+
+    with patch.dict("sys.modules", {"transformers": mock_transformers}):
+        s = make_sentiment(model_name="ProsusAI/finbert", use_stub=False)
+        assert isinstance(s, SentimentModel)
+
+
+

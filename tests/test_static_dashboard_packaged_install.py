@@ -133,3 +133,75 @@ def test_wheel_install_smoke_serves_dashboard(tmp_path: Path) -> None:
     assert any(
         n == "catchem/static/dashboard.html" for n in names
     ), f"dashboard.html missing from wheel package payload: {sorted(n for n in names if 'static' in n)}"
+
+
+def test_env_override_invalid_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fake_file = tmp_path / "not_a_dir.txt"
+    fake_file.write_text("hello", encoding="utf-8")
+    monkeypatch.setenv("CATCHEM_STATIC_DIR", str(fake_file))
+    # Override is not a dir, so it should return None or fallback.
+    # Since "dashboard.html" isn't in that fake file (which is not a dir anyway),
+    # it resolves via packaged static assets.
+    p = static_assets.get_static_path("dashboard.html")
+    assert p is not None
+    assert p.is_file()
+
+
+def test_env_override_escaped_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CATCHEM_STATIC_DIR", str(tmp_path))
+    # Directly invoke private _env_override with a traversal pattern name
+    p = static_assets._env_override("../escape")
+    assert p is None
+
+
+def test_static_dir_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CATCHEM_STATIC_DIR", str(tmp_path))
+    p = static_assets.static_dir()
+    assert p == tmp_path.resolve()
+
+
+def test_static_dir_env_override_invalid(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fake_file = tmp_path / "not_a_dir.txt"
+    fake_file.write_text("hello", encoding="utf-8")
+    monkeypatch.setenv("CATCHEM_STATIC_DIR", str(fake_file))
+    static_assets._RESOLVED_PATHS.pop(static_assets._STATIC_DIR_KEY, None)
+    p = static_assets.static_dir()
+    assert p.is_dir()
+    assert p.name == "static"
+
+
+
+def test_static_dir_default_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CATCHEM_STATIC_DIR", raising=False)
+    # Clear cache first to force lookup
+    static_assets._RESOLVED_PATHS.pop(static_assets._STATIC_DIR_KEY, None)
+
+    p1 = static_assets.static_dir()
+    assert p1.is_dir()
+    assert p1.name == "static"
+
+    # Second call should return cached path
+    p2 = static_assets.static_dir()
+    assert p1 == p2
+
+
+def test_get_static_path_module_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import patch
+    static_assets._RESOLVED_PATHS.clear()
+    with patch("catchem.static_assets.files", side_effect=ModuleNotFoundError("mock error")):
+        p = static_assets.get_static_path("dashboard.html")
+        assert p is None
+
+
+
+def test_open_static_bytes_existing() -> None:
+    b = static_assets.open_static_bytes("dashboard.html")
+    assert b is not None
+    assert len(b) > 0
+    assert b"catchem" in b.lower()
+
+
+def test_open_static_bytes_missing() -> None:
+    b = static_assets.open_static_bytes("definitely-missing-file.html")
+    assert b is None
+

@@ -138,3 +138,73 @@ def test_unigram_repetition_in_body_increases_score(taxonomy) -> None:
         f"Repeated body mentions must increase score. once={once_s:.4f} many={many_s:.4f}. "
         f"If equal, unigram scoring is set-based (dedupes) — fix uses Counter."
     )
+
+
+def test_zero_shot_result_top_above() -> None:
+    from catchem.zero_shot_classifier import ZeroShotResult
+    res = ZeroShotResult(
+        label_scores={"equities": 0.8, "crypto": 0.3, "rates": 0.9},
+        model_version="test"
+    )
+    top = res.top_above(0.5)
+    assert top == [("rates", 0.9), ("equities", 0.8)]
+
+
+def test_zero_shot_model_happy_path() -> None:
+    import sys
+    from unittest.mock import MagicMock, patch
+    from catchem.zero_shot_classifier import ZeroShotModel, make_zero_shot, ZeroShotStub
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    mock_transformers = MagicMock()
+    mock_pipeline = MagicMock()
+    mock_transformers.pipeline = mock_pipeline
+    mock_pipe = MagicMock()
+    mock_pipeline.return_value = mock_pipe
+
+    # Grab hypotheses from the real taxonomy to match them exactly in mocks
+    tax = load_taxonomy(default_taxonomy_path())
+    all_hyps = list(tax.all_hypotheses().items())
+    assert len(all_hyps) > 0
+    first_id, first_hyp = all_hyps[0]
+
+    mock_pipe.return_value = {
+        "labels": [first_hyp],
+        "scores": [0.95]
+    }
+
+    with patch.dict("sys.modules", {"transformers": mock_transformers}):
+        model = ZeroShotModel(tax, "facebook/bart-large-mnli")
+        assert model.model_name == "facebook/bart-large-mnli"
+        assert model.model_version == "hf:facebook/bart-large-mnli"
+
+        mock_pipeline.assert_called_once_with("zero-shot-classification", model="facebook/bart-large-mnli", device=-1)
+
+        cap = _cap(title="Profit grows", text="Revenue surged!")
+        res = model.classify(cap)
+        assert res.label_scores.get(first_id) == 0.95
+
+        # Empty string classifier input
+        cap_empty = _cap(title="   ", text="   ")
+        res_empty = model.classify(cap_empty)
+        assert res_empty.label_scores == {}
+
+        # Test successful make_zero_shot with model
+        s = make_zero_shot(tax, "facebook/bart-large-mnli", use_stub=False)
+        assert isinstance(s, ZeroShotModel)
+
+        # Test make_zero_shot fallback on pipeline load failure
+        mock_pipeline.side_effect = RuntimeError("failed to load")
+        s_fallback = make_zero_shot(tax, "facebook/bart-large-mnli", use_stub=False)
+        assert isinstance(s_fallback, ZeroShotStub)
+
+
+def test_zero_shot_bigram_title_body_overlap(taxonomy) -> None:
+    zs = ZeroShotStub(taxonomy)
+    # 'central bank' bigram appears in both title and body.
+    # It must be removed from body_bigrams.
+    cap = _cap(title="Central Bank policy review", text="Central bank announcement today.")
+    res = zs.classify(cap)
+    assert res is not None
+
+

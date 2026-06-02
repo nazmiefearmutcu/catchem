@@ -115,3 +115,29 @@ def test_configured_feeds_appear_in_assemble_feeds(
     # Globally-unique names across the whole assembled bag.
     all_names = [f.name for f in assembled]
     assert len(all_names) == len(set(all_names))
+
+
+def test_watchlist_dynamic_degrades_on_settings_exception(monkeypatch) -> None:
+    import catchem.settings as settings_mod
+
+    def mock_load_settings():
+        raise RuntimeError("simulated settings load error")
+
+    monkeypatch.setattr(settings_mod, "load_settings", mock_load_settings)
+    # Fails to load settings → falls back to _DEFAULT_TICKERS
+    feeds = list(_gnews_watchlist_feeds())
+    assert len(feeds) == len(_DEFAULT_TICKERS)
+
+
+def test_watchlist_normalization_drops_blanks_and_duplicates(
+    monkeypatch: pytest.MonkeyPatch, clean_settings_cache: None
+) -> None:
+    # Sloppy priority list with blanks and duplicates (case-insensitive)
+    monkeypatch.setenv("CATCHEM_NEWS__PRIORITY_TICKERS", '["AAPL", "", "  ", "AAPL", "aapl", "MSFT"]')
+    reload_settings()
+
+    feeds = list(_gnews_watchlist_feeds())
+    names = [f.name for f in feeds]
+    # AAPL (deduped) and MSFT
+    assert names == ["gnews-watch-aapl", "gnews-watch-msft"]
+

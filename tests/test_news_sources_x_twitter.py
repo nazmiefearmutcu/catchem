@@ -165,3 +165,20 @@ def test_provider_returns_twelve_unique_feeds() -> None:
         assert spec.parser == "twitter"
         assert spec.fallback_domain == "x.com"
         assert spec.url.startswith("https://")
+
+
+def test_rewrite_to_x_handles_invalid_url_gracefully() -> None:
+    # A URL that is invalid and causes urlsplit to raise ValueError.
+    bad_url = "http://[::1/status/123"
+    assert _rewrite_to_x(bad_url) == bad_url
+
+
+def test_parse_twitter_handles_parse_feed_exception(monkeypatch) -> None:
+    import catchem.news_sources.x_twitter as xt
+
+    def mock_parse_feed(body, fallback_domain):
+        raise RuntimeError("simulated parse feed exception")
+
+    monkeypatch.setattr(xt, "parse_feed", mock_parse_feed)
+    assert _parse_twitter(b"dummy_rss", "x.com") == []
+

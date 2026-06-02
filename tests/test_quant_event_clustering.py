@@ -452,3 +452,113 @@ def test_pairwise_similarity_identical_dict_reference_is_one():
     )
     # Pass the SAME object on both sides — branch only fires on identity.
     assert pairwise_similarity(rec, rec) == 1.0
+
+
+def test_as_iter_single_value() -> None:
+    from catchem.quant.event_clustering import _as_iter
+    assert list(_as_iter("hello")) == ["hello"]
+
+
+def test_normalize_set_none_element() -> None:
+    from catchem.quant.event_clustering import _normalize_set
+    assert _normalize_set(["val", None, "   ", "val2"]) == frozenset({"val", "val2"})
+
+
+def test_parse_ts_edge_cases() -> None:
+    from catchem.quant.event_clustering import _parse_ts
+    # Naive datetime
+    naive = datetime(2026, 5, 27, 12, 0)
+    assert _parse_ts(naive).tzinfo == UTC
+
+    # Non-string
+    assert _parse_ts(12345) is None
+
+    # Empty string
+    assert _parse_ts("   ") is None
+
+    # Invalid ISO string
+    assert _parse_ts("invalid date format") is None
+
+    # Naive string ISO
+    assert _parse_ts("2026-05-27T12:00:00").tzinfo == UTC
+
+
+def test_record_ts_iso_missing() -> None:
+    from catchem.quant.event_clustering import _record_ts_iso
+    assert _record_ts_iso({"published_ts": "invalid", "created_at": "invalid"}) is None
+
+
+def test_ranked_dominant_none_or_empty() -> None:
+    from catchem.quant.event_clustering import _ranked_dominant
+    members = [
+        {"symbols": [None, "AAPL", "   ", "AAPL"]},
+        {"symbols": ["AAPL", "MSFT"]}
+    ]
+    res = _ranked_dominant(members, "symbols", top_n=5)
+    assert res == ("AAPL",)
+
+
+def test_member_domains_none_or_empty() -> None:
+    from catchem.quant.event_clustering import _member_domains
+    members = [
+        {"domain": "bloomberg.com"},
+        {"domain": None},
+        {"domain": "   "}
+    ]
+    assert _member_domains(members) == ("bloomberg.com",)
+
+
+def test_mean_relevance_invalid() -> None:
+    from catchem.quant.event_clustering import _mean_relevance
+    assert _mean_relevance([]) == 0.0
+    members = [
+        {"finance_relevance_score": "not a float"},
+        {"finance_relevance_score": None},
+        {"finance_relevance_score": 0.5}
+    ]
+    assert _mean_relevance(members) == 0.5 / 3
+
+
+def test_coherence_cache_miss() -> None:
+    from catchem.quant.event_clustering import _coherence
+    members = [
+        {"title": "title one"},
+        {"title": "title two"}
+    ]
+    coh = _coherence(members, {})
+    assert coh == pairwise_similarity(members[0], members[1])
+
+
+def test_first_last_ts_empty() -> None:
+    from catchem.quant.event_clustering import _first_last_ts
+    assert _first_last_ts([]) == ("", "")
+    assert _first_last_ts([{"published_ts": None, "created_at": None}]) == ("", "")
+
+
+def test_cluster_records_time_window_and_sort() -> None:
+    # 1. Record without timestamp (explicitly missing keys)
+    r_no_ts = {"capture_id": "no-ts", "title": "matching headline"}
+    # 2. Record with timestamp
+    base = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    r1 = _rec("r1", title="matching headline", published_ts=base)
+    r2 = _rec("r2", title="matching headline", published_ts=base + timedelta(seconds=10))
+    # 3. Record that is outside window
+    r_outside = _rec("outside", title="matching headline", published_ts=base + timedelta(seconds=5000))
+    # 4. Record with one timestamp and one missing to trigger member_ts is None in cluster window check
+    r_member_no_ts = {"capture_id": "member-no-ts", "title": "matching headline"}
+
+    records = [r_no_ts, r1, r2, r_outside, r_member_no_ts]
+    clusters = cluster_records(records, window_seconds=100, similarity_threshold=0.0, min_cluster_size=1)
+    assert len(clusters) >= 2
+
+
+
+def test_cluster_records_sim_cache_hit() -> None:
+    base = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    r1 = _rec("r1", title="matching headline", published_ts=base)
+    r2 = _rec("r2", title="matching headline", published_ts=base + timedelta(seconds=10))
+    # Pass duplicate dict reference to hit cache logic
+    records = [r1, r2, r1]
+    clusters = cluster_records(records, window_seconds=100, similarity_threshold=0.0, min_cluster_size=1)
+    assert len(clusters) > 0
+

@@ -74,8 +74,9 @@ _SAMPLE: dict = {
             },
             {
                 "kind": "t3",
-                "data": "not-a-dict",  # malformed child → must be skipped
+                "data": "not-a-dict",  # malformed child data -> must be skipped
             },
+            "completely-malformed-child-not-even-a-dict",
         ],
     },
 }

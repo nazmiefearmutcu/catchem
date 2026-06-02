@@ -612,3 +612,58 @@ def test_asset_with_no_reasons_among_reasoned_assets() -> None:
     assert by_asset["commodities"].top_reasons == ()
     # The reasoned asset is unaffected.
     assert by_asset["equities"].herfindahl_index == pytest.approx(1.0)
+
+
+def test_lift_calculation_empty_margin(monkeypatch) -> None:
+    from collections import Counter
+    import catchem.quant.co_occurrence as co_occ
+
+    class BadCounter(Counter):
+        def get(self, key, default=0):
+            return 0
+
+    monkeypatch.setattr(co_occ, "Counter", BadCounter)
+    records = [_rec("c1", assets=["equities"], reasons=["earnings"])]
+    report = co_occ.compute_co_occurrence(records)
+    assert len(report.asset_reason_cells) == 1
+    assert report.asset_reason_cells[0].lift == 1.0
+
+
+def test_hhi_clamped_greater_than_one(monkeypatch) -> None:
+    import builtins
+    import types
+    import catchem.quant.co_occurrence as co_occ
+
+    real_sum = builtins.sum
+    def mock_sum(iterable, *args, **kwargs):
+        if isinstance(iterable, types.GeneratorType) and "co_occurrence.py" in iterable.gi_code.co_filename:
+            return 1.5
+        return real_sum(iterable, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "sum", mock_sum)
+    records = [_rec("c1", assets=["equities"], reasons=["earnings", "news"])]
+    report = co_occ.compute_co_occurrence(records)
+    conc = report.asset_concentration[0]
+    assert conc.herfindahl_index == 1.0
+
+
+def test_hhi_clamped_less_than_zero(monkeypatch) -> None:
+    import builtins
+    import types
+    import catchem.quant.co_occurrence as co_occ
+
+    real_sum = builtins.sum
+    def mock_sum(iterable, *args, **kwargs):
+        if isinstance(iterable, types.GeneratorType) and "co_occurrence.py" in iterable.gi_code.co_filename:
+            return -0.5
+        return real_sum(iterable, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "sum", mock_sum)
+    records = [_rec("c1", assets=["equities"], reasons=["earnings", "news"])]
+    report = co_occ.compute_co_occurrence(records)
+    conc = report.asset_concentration[0]
+    assert conc.herfindahl_index == 0.0
+
+
+
+

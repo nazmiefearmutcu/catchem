@@ -26,6 +26,8 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_quant_market_reaction.py:297-340` — Uncovered pathways for candidate symbol stripping, None asset classes, unsupported proxies, None quotes, and custom horizons in market reaction calculations. Added unit tests for each edge case, raising `market_reaction.py` coverage from 93.23% to 100.00%.
 - **[test-gap]** `tests/test_reviewers_registry.py:1-98` — Untested budget caching, exception handlers, and initialization fallbacks in `ReviewerRegistry`. Created a dedicated unit test suite covering stub caching, missing keys, initialization errors, zero-amount spend cache bumping, and budget limit exhaustion error persistency, raising `registry.py` coverage from 86.84% to 100.00%.
 - **[test-gap]** `tests/test_deepseek_stream.py:363-398` — Uncovered pathways for empty stream responses, injected client closing, and public cost-estimation in `DeepSeekReviewer`. Expanded the test suite to cover these edges, raising `deepseek.py` coverage from 98.62% to 100.00%.
+- **[test-gap]** `tests/test_schemas.py:263-305` — Uncovered validation pathways for invalid ISO dates, naive string timestamps, non-finite sentiment values, and naive record timestamps in `schemas.py`. Expanded the test suite to cover these edges, raising `schemas.py` coverage from 93.28% to 100.00%.
+
 
 
 

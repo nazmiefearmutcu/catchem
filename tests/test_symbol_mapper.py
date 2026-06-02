@@ -108,3 +108,60 @@ def test_aliases_do_not_match_inside_words() -> None:
     syms = {x.symbol for x in matches}
     assert "F" not in syms
     assert "GC=F" not in syms
+
+
+def test_merge_yaml_valid_and_invalid(tmp_path: Path) -> None:
+    # 1. Valid YAML with aliases
+    yaml_file = tmp_path / "extra_aliases.yaml"
+    yaml_file.write_text("aliases:\n  MyCustomAlias: MY_SYM\n", encoding="utf-8")
+    m = SymbolMapper(config_path=yaml_file)
+    assert m.alias_dict().get("MyCustomAlias") == "MY_SYM"
+
+    # 2. Invalid YAML (triggers warning block)
+    bad_yaml = tmp_path / "bad.yaml"
+    bad_yaml.write_text("aliases:\n  [unbalanced bracket", encoding="utf-8")
+    m2 = SymbolMapper(config_path=bad_yaml)
+    assert "MyCustomAlias" not in m2.alias_dict()
+
+
+def test_maybe_merge_newsimpact(tmp_path: Path) -> None:
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir(parents=True)
+
+    # Write a valid JSON manifest
+    valid_json = manifests_dir / "valid.json"
+    import json as _json
+    valid_json.write_text(_json.dumps({"aliases": {"NewsimpactCompany": "NIMP"}}), encoding="utf-8")
+
+    # Write a corrupt JSON manifest
+    corrupt_json = manifests_dir / "corrupt.json"
+    corrupt_json.write_text("invalid json {", encoding="utf-8")
+
+    # Write a non-dict JSON manifest
+    nondict_json = manifests_dir / "nondict.json"
+    nondict_json.write_text("123", encoding="utf-8")
+
+    # Write a manifest using symbol_aliases key
+    alt_json = manifests_dir / "alt.json"
+    alt_json.write_text(_json.dumps({"symbol_aliases": {"AltCompany": "ALT"}}), encoding="utf-8")
+
+    # Let's merge them
+    m = SymbolMapper(newsimpact_root=tmp_path)
+    aliases = m.alias_dict()
+    assert aliases.get("NewsimpactCompany") == "NIMP"
+    assert aliases.get("AltCompany") == "ALT"
+
+    # Test manifest limit (12 scanned max)
+    # Create 15 manifest files
+    limit_root = tmp_path / "limit_test"
+    limit_manifests = limit_root / "manifests"
+    limit_manifests.mkdir(parents=True)
+    for i in range(15):
+        (limit_manifests / f"m_{i}.json").write_text(
+            _json.dumps({"aliases": {f"Company_{i}": f"SYM_{i}"}}), encoding="utf-8"
+        )
+    m_limit = SymbolMapper(newsimpact_root=limit_root)
+    # We should have successfully scanned some but exactly 12 (or stopped at 12)
+    scanned_count = sum(1 for i in range(15) if f"Company_{i}" in m_limit.alias_dict())
+    assert scanned_count <= 12
+

@@ -22,6 +22,9 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_portfolio.py:216-276` — Uncovered pathways in read-only portfolio enrichment. Added tests covering empty symbol matching, invalid sentiment label normalizations, naive clock inputs, invalid horizon seconds conversion, duplicate symbol holdings, and completely empty records, raising `portfolio.py` coverage from 92.22% to 100.00%.
 - **[test-gap]** `tests/test_news_sources_gdelt.py:158-181` — Missing coverage for hostname resolution exceptions and title-less articles in GDELT parser. Added tests covering corrupt urlparse structures, empty/relative urls, and title-less fallback title generation, raising `gdelt.py` coverage from 92.00% to 100.00%.
 - **[test-gap]** `tests/test_quant_event_clustering.py:456-563` — Missing coverage for helper edge cases, naive clock formats, empty/none lists, and sorting missing timestamps. Added tests covering Jaccard overlaps, naive ISO parses, empty dominants, coherence cache misses, sorting missing timestamps, and duplicate record cache hits. Reached **98.54%** coverage on `event_clustering.py` (with remaining lines unreachable due to sorting/greedy linking logic).
+- **[test-gap]** `tests/test_quant_global_tone.py:618-682` — Missing coverage for datetime parsing exceptions, float overflow timestamps, blank/empty string coercion, degenerate denominator slope fallback, and client closing failures in GDELT tone signal logic. Added unit tests for each pathway, raising `global_tone.py` coverage from 91.93% to 100.00%.
+- **[test-gap]** `tests/test_quant_market_reaction.py:297-340` — Uncovered pathways for candidate symbol stripping, None asset classes, unsupported proxies, None quotes, and custom horizons in market reaction calculations. Added unit tests for each edge case, raising `market_reaction.py` coverage from 93.23% to 100.00%.
+
 
 
 

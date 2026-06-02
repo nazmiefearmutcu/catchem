@@ -614,3 +614,70 @@ def test_parse_point_date_returns_none_on_junk() -> None:
     assert gt._parse_point_date("   ") is None
     assert gt._parse_point_date("not a date") is None
     assert gt._parse_point_date([1, 2]) is None      # wrong type entirely
+
+
+def test_parse_point_date_overflow_and_exceptions() -> None:
+    # Large numbers causing float overflow in fromtimestamp (lines 97-98)
+    assert gt._parse_point_date(1e25) is None
+    assert gt._parse_point_date(-1e25) is None
+
+    # All-digit string causing overflow in fromtimestamp (lines 113-114)
+    assert gt._parse_point_date("999999999999999999999999") is None
+
+
+def test_coerce_value_empty_string() -> None:
+    # Blank/empty string value coerced to float (line 140)
+    assert gt._coerce_value("   ") is None
+    assert gt._coerce_value("") is None
+
+
+def test_calc_slope_degenerate_denominator(monkeypatch: pytest.MonkeyPatch) -> None:
+    # den == 0 path (line 313)
+    monkeypatch.setattr(gt, "sum", lambda *a, **kw: 0, raising=False)
+    # We need to pass at least two values so n >= 2 check passes
+    assert gt._least_squares_slope([1.0, 2.0]) == 0.0
+
+
+def test_extract_timeline_data_unexpected_shapes() -> None:
+    # Line 325: payload is not dict
+    assert gt._extract_timeline_data("not-a-dict") == []
+
+    # Line 331: first timeline element is not dict
+    assert gt._extract_timeline_data({"timeline": ["not-a-dict"]}) == []
+
+    # Line 334: data is not list
+    assert gt._extract_timeline_data({"timeline": [{"data": "not-a-list"}]}) == []
+
+
+@pytest.mark.asyncio
+async def test_compute_global_tone_close_exception_and_deteriorating(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Test httpx.AsyncClient close exception path (lines 439-440)
+    from unittest.mock import patch
+    import httpx
+
+    # Mock AsyncClient.aclose to raise an exception
+    async def mock_aclose(*args, **kwargs):
+        raise RuntimeError("close error")
+
+    # Mock fetch_tone to return a deteriorating tone timeline
+    # mean_trend will be < -_STATE_THRESHOLD (e.g. -1.0)
+    async def mock_fetch_tone(client, query, *args, **kwargs):
+        print(f"MOCK FETCH QUERY: {repr(query)}")
+        if "stock market" in query:
+            # deteriorating timeline:
+            return _pts(5.0, 4.0, 3.0, 2.0, 1.0)
+        return _pts(0.0, 0.0, 0.0)
+
+    monkeypatch.setattr(gt, "fetch_tone", mock_fetch_tone)
+
+    with patch.object(httpx.AsyncClient, "aclose", mock_aclose):
+        res = await gt.compute_global_tone()
+        print(f"MOCK RESULT: {res}")
+        # Test that we successfully processed even if aclose failed,
+        # and that deteriorating state is correctly classified (line 462)
+        assert res["overall_state"] == "deteriorating"
+
+
+

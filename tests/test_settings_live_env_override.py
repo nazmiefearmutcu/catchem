@@ -303,3 +303,65 @@ def test_catchem_release_mode_both_paths_together(
     assert s.mode == "production_safe"
     assert s.diagnostic_allowed() is False
     assert s.use_ml_stubs is True
+
+
+def test_settings_coverage_gaps(tmp_path) -> None:
+    # 1. output_path() (line 362)
+    s = load_settings()
+    out = s.output_path("subdir", "file.txt")
+    assert out == s.paths.catchem_output_dir / "subdir" / "file.txt"
+
+    # 2. is_production_safe() when False (line 376)
+    from catchem.settings import CatchemMode
+    s_replay = load_settings()
+    s_replay.mode = CatchemMode.REPLAY_EXISTING
+    assert s_replay.is_production_safe() is False
+
+    # 3. ReplayConfig.replay_pattern() variants (lines 91-99)
+    from catchem.settings import ReplayConfig
+    cfg = ReplayConfig(awareness_jsonl_glob="")
+    assert cfg.replay_pattern() == "**/*.jsonl"
+
+    cfg2 = ReplayConfig(awareness_jsonl_glob="my-glob/jsonl/")
+    assert cfg2.replay_pattern() == "**/*.jsonl"
+
+    cfg3 = ReplayConfig(awareness_jsonl_glob="my-glob/jsonl/sub/*.jsonl")
+    assert cfg3.replay_pattern() == "sub/*.jsonl"
+
+    cfg4 = ReplayConfig(awareness_jsonl_glob="simple/*.jsonl")
+    assert cfg4.replay_pattern() == "simple/*.jsonl"
+
+    # 4. _yaml_overrides path does not exist & invalid YAML dict (lines 37-45)
+    from catchem.settings import _yaml_overrides
+    assert _yaml_overrides(tmp_path / "non_existent.yaml") == {}
+
+    bad_yaml = tmp_path / "bad.yaml"
+    bad_yaml.write_text("- item1\n- item2", encoding="utf-8")
+    with pytest.raises(ValueError, match="did not parse to a mapping"):
+        _yaml_overrides(bad_yaml)
+
+    res_none = _yaml_overrides(None)
+    assert isinstance(res_none, dict)
+
+    # 5. sqlite_path() variants (lines 365-373)
+    db_path = tmp_path / "absolute" / "path" / "db.sqlite"
+    s.storage.sqlite_url = f"sqlite:///{db_path}"
+    assert s.sqlite_path() == db_path
+
+    s.storage.sqlite_url = "sqlite:///data/my_db.sqlite"
+    assert s.sqlite_path() == s.paths.catchem_output_dir / "my_db.sqlite"
+
+    s.storage.sqlite_url = "sqlite:///other/path/db.sqlite"
+    assert s.sqlite_path() == s.paths.catchem_output_dir.parent / "other" / "path" / "db.sqlite"
+
+    s.storage.sqlite_url = "postgresql://localhost/db"
+    with pytest.raises(ValueError, match="unsupported sqlite_url"):
+        s.sqlite_path()
+
+    # 6. _deep_merge() variants (lines 389-395)
+    from catchem.settings import _deep_merge
+    base = {"a": 1, "b": {"c": 2}}
+    over = {"b": {"d": 3}, "e": 4}
+    res = _deep_merge(base, over)
+    assert res == {"a": 1, "b": {"c": 2, "d": 3}, "e": 4}
+

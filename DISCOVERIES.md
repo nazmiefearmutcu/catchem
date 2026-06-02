@@ -27,12 +27,5 @@ Each line: `[type-id] file:line — title. explanation. evidence. next-action.`
 - **[test-gap]** `tests/test_reviewers_registry.py:1-98` — Untested budget caching, exception handlers, and initialization fallbacks in `ReviewerRegistry`. Created a dedicated unit test suite covering stub caching, missing keys, initialization errors, zero-amount spend cache bumping, and budget limit exhaustion error persistency, raising `registry.py` coverage from 86.84% to 100.00%.
 - **[test-gap]** `tests/test_deepseek_stream.py:363-398` — Uncovered pathways for empty stream responses, injected client closing, and public cost-estimation in `DeepSeekReviewer`. Expanded the test suite to cover these edges, raising `deepseek.py` coverage from 98.62% to 100.00%.
 - **[test-gap]** `tests/test_schemas.py:263-305` — Uncovered validation pathways for invalid ISO dates, naive string timestamps, non-finite sentiment values, and naive record timestamps in `schemas.py`. Expanded the test suite to cover these edges, raising `schemas.py` coverage from 93.28% to 100.00%.
-
-
-
-
-
-
-
-
-
+- **[test-gap]** `tests/test_reranker.py:125-142` — Missing coverage for Reranker protocol signature body methods. Added explicit mock getters/invocations to target protocol default body statements, raising `reranker.py` coverage from 95.74% to 100.00%.
+- **[test-gap]** `tests/test_runtime_metrics.py:1-213` — Verified and hardened POSIX getrusage RSS/VMS/threads metrics fallbacks, raising `runtime_metrics.py` coverage to 100.00%.

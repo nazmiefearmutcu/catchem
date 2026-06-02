@@ -259,3 +259,45 @@ def test_replay_offset_round_trip() -> None:
     off = ReplayOffset(source_path="/x/y.jsonl", line_offset=12, last_capture_id="c-9")
     restored = ReplayOffset.model_validate_json(off.model_dump_json())
     assert restored == off
+
+
+def test_schemas_coverage_gaps() -> None:
+    # 1. ValueError exception in date string parsing (lines 81-82)
+    with pytest.raises(ValidationError):
+        AwarenessCaptureView(
+            capture_id="c",
+            doc_id="d",
+            text="x",
+            fetch_ts="not-a-valid-date"
+        )
+
+    # 2. String timestamp without offset is naive, gets tzinfo=UTC (line 84)
+    cap = AwarenessCaptureView(
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts="2026-05-16T12:00:00"
+    )
+    assert cap.fetch_ts is not None
+    assert cap.fetch_ts.tzinfo == UTC
+
+    # 3. Non-finite sentiment score maps to None (line 150)
+    rec_nan = FinancialImpactRecord(
+        **_valid_record_kwargs(sentiment_score=float("nan"))  # type: ignore[arg-type]
+    )
+    assert rec_nan.sentiment_score is None
+
+    rec_inf = FinancialImpactRecord(
+        **_valid_record_kwargs(sentiment_score=float("inf"))  # type: ignore[arg-type]
+    )
+    assert rec_inf.sentiment_score is None
+
+    # 4. Naive datetime for published_ts or created_at coerced to UTC (line 171)
+    naive = datetime(2026, 6, 2, 23, 0, 0)
+    rec_tz = FinancialImpactRecord(
+        **_valid_record_kwargs(published_ts=naive, created_at=naive)  # type: ignore[arg-type]
+    )
+    assert rec_tz.published_ts is not None
+    assert rec_tz.published_ts.tzinfo == UTC
+    assert rec_tz.created_at.tzinfo == UTC
+

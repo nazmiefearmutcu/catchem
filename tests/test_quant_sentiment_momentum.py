@@ -674,3 +674,28 @@ def test_created_at_fallback_when_published_ts_unparseable() -> None:
     aapl = _find(report, "AAPL")
     assert aapl is not None
     assert aapl.mention_count == 4
+
+
+def test_sentiment_momentum_edge_cases(monkeypatch) -> None:
+    # 1. _floor_bucket with ts < anchor
+    from datetime import datetime
+    from catchem.quant.sentiment_momentum import _floor_bucket
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    ts = datetime(2024, 1, 1, 11, 0, tzinfo=UTC)
+    # This should trigger delta_seconds < 0 -> delta_seconds = 0
+    res = _floor_bucket(ts, anchor, bucket_minutes=60)
+    assert res == anchor
+
+    # 2. _detect_flip with head_size < 1
+    import math
+    original_ceil = math.ceil
+
+    def mock_ceil(x):
+        return 5
+
+    monkeypatch.setattr(math, "ceil", mock_ceil)
+
+    # We call _detect_flip with nets of length 5
+    from catchem.quant.sentiment_momentum import _detect_flip
+    assert _detect_flip([1.0, 2.0, 3.0, 4.0, 5.0]) is False
+

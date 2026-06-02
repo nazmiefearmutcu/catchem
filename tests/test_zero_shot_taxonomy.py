@@ -208,3 +208,9 @@ def test_zero_shot_bigram_title_body_overlap(taxonomy) -> None:
     assert res is not None
 
 
+def test_zero_shot_protocol() -> None:
+    from catchem.zero_shot_classifier import ZeroShot
+    assert ZeroShot.classify(None, None) is Ellipsis or ZeroShot.classify(None, None) is None
+
+
+

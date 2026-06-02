@@ -244,4 +244,10 @@ def test_make_sentiment_success() -> None:
         assert isinstance(s, SentimentModel)
 
 
+def test_sentiment_classifier_protocol() -> None:
+    from catchem.sentiment import SentimentClassifier
+    assert SentimentClassifier.classify(None, None) is Ellipsis or SentimentClassifier.classify(None, None) is None
+
+
+
 

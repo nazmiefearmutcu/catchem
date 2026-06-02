@@ -260,3 +260,92 @@ def test_api_process_one_accepts_extra_fields(
         payload["unknown_future_field"] = "still allowed"
         r = client.post("/process-one", json=payload)
         assert r.status_code == 200, r.text
+
+
+def test_storage_extra_coverage(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock, patch
+    from catchem.storage import _validate_tag
+    import sqlite3
+
+    # 1. validate_tag type check
+    with pytest.raises(ValueError, match="tag must be a string"):
+        _validate_tag(123)  # type: ignore
+
+    # 2. Storage instance setup
+    s = Storage(
+        db_path=tmp_path / "catchem.sqlite3",
+        parquet_dir=tmp_path / "parq",
+        dlq_dir=tmp_path / "dlq",
+    )
+
+    # 3. _migrate_records_table missing column
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE records (capture_id TEXT PRIMARY KEY, title TEXT)")
+    s._migrate_records_table(conn)
+
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(records)").fetchall()}
+    assert "text_excerpt" in columns
+    conn.close()
+
+    # 4. rotate_parquet_records auto-flush
+    s.rotate_parquet_records = 1
+    s.insert_record(_record("c-parq"))
+    assert len(s._pending_rows) == 0
+
+    # 5. recent_reviews
+    s.upsert_review({
+        "capture_id": "c-parq",
+        "reviewer_id": "rev-1",
+        "reviewer_version": "v1.0",
+        "payload_json": {"some": "json"},
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "usd_cost": 0.01,
+        "latency_ms": 100,
+        "created_at": "2026-06-03T00:00:00",
+        "error_code": None,
+    })
+    revs = s.recent_reviews("rev-1")
+
+    assert len(revs) == 1
+    assert revs[0]["reviewer_id"] == "rev-1"
+
+    # 6. review_token_totals with None row (unreachable branch in sqlite covered via mock)
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchone.return_value = None
+    class DummyCM:
+        def __enter__(self):
+            return mock_conn
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+    with patch.object(s, "_connection", return_value=DummyCM()):
+        totals = s.review_token_totals("dummy-rev")
+        assert totals == {"input": 0, "output": 0, "calls": 0, "errors": 0}
+
+    # 7. add_holding empty symbol raises ValueError
+    with pytest.raises(ValueError, match="symbol must not be empty"):
+        s.add_holding("")
+
+    # 8. get_holding and _coerce_float with invalid type/value
+    h = s.add_holding("AAPL", shares="invalid-float")
+    assert h["shares"] is None
+    holding_id = h["id"]
+    h_fetched = s.get_holding(holding_id)
+    assert h_fetched is not None
+    assert h_fetched["symbol"] == "AAPL"
+    assert s.get_holding(holding_id + 999) is None
+
+    # 9. except json.JSONDecodeError inside _row_to_review
+    with s._connection() as conn:
+        conn.execute(
+            """INSERT INTO reviews (capture_id, reviewer_id, reviewer_version, payload_json, input_tokens, output_tokens, usd_cost, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("c-invalid-json", "rev-2", "v1.0", "invalid json string", 0, 0, 0.0, 0, "2026-06-03T00:00:00")
+        )
+    revs_invalid = s.get_reviews_for_capture("c-invalid-json")
+    assert len(revs_invalid) == 1
+    assert revs_invalid[0]["payload"] == {}
+
+    s.close()
+

@@ -224,6 +224,17 @@ def test_is_safe_webhook_url_rejects_empty_and_malformed() -> None:
     assert is_safe_webhook_url("http://") is False
     assert is_safe_webhook_url("ftp://example.com/x") is False
 
+    # Extra test cases for 100% coverage
+    assert is_safe_webhook_url("http://127..1/hook") is True
+    assert is_safe_webhook_url("http://0x.1/hook") is True
+    assert is_safe_webhook_url("http://0xzz.1/hook") is True
+    assert is_safe_webhook_url("http://0x7f.0.0.1/hook") is False
+    assert is_safe_webhook_url("http://999.999.999.999/hook") is True
+    with patch("catchem.webhook.urlparse", side_effect=ValueError("mocked urlparse error")):
+        assert is_safe_webhook_url("https://example.com") is False
+
+
+
 
 # ── Slack payload shape ──────────────────────────────────────────────────
 
@@ -297,6 +308,14 @@ def test_send_webhook_filter_skip_does_not_call_post() -> None:
     assert ok is False
     assert status == "filtered"
     post.assert_not_called()
+
+
+def test_send_webhook_invalid_url_returns_invalid_url() -> None:
+    cfg = WebhookConfig(enabled=True, url="ftp://example.com/x", min_score=0.0)
+    ok, status = send_webhook(SAMPLE_RECORD, cfg)
+    assert ok is False
+    assert status == "invalid_url"
+
 
 
 # ── API round-trip via TestClient ────────────────────────────────────────

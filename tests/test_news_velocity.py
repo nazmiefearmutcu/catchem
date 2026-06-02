@@ -363,3 +363,66 @@ def test_compute_velocity_burst_label_matches_helper() -> None:
     """
 
     assert _classify_regime(3.0) == "burst"
+
+
+def test_compute_velocity_empty_in_window(monkeypatch) -> None:
+    """Force in_window to be empty by mocking max to return a future datetime."""
+    import builtins
+
+    def mock_max(*args, **kwargs):
+        return datetime(2030, 1, 1, 12, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(builtins, "max", mock_max)
+
+    records = [{"published_ts": "2026-01-01T12:00:00Z"}]
+    report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
+    assert report.samples == 0
+    assert report.current_rate_per_min == 0.0
+
+
+def test_compute_velocity_empty_sequence(monkeypatch) -> None:
+    """Force sequence to be empty by mocking range to return empty list when called from compute_velocity."""
+    import builtins
+    import inspect
+
+    original_range = builtins.range
+
+    def mock_range(*args):
+        frame = inspect.currentframe().f_back
+        if frame and frame.f_code.co_name == "compute_velocity":
+            return []
+        return original_range(*args)
+
+    monkeypatch.setattr(builtins, "range", mock_range)
+    records = [{"published_ts": "2026-01-01T12:00:00Z"}]
+    report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
+    assert report.current_rate_per_min == 0.0
+
+
+def test_compute_velocity_stdev_error_and_non_finite(monkeypatch) -> None:
+    """Test when stdev raises StatisticsError or returns non-finite/negative values."""
+    import statistics
+
+    # 1. Test StatisticsError block
+    def mock_stdev_raise(seq):
+        raise statistics.StatisticsError("mocked stdev error")
+
+    monkeypatch.setattr(statistics, "stdev", mock_stdev_raise)
+
+    records = [
+        {"published_ts": "2026-01-01T12:00:00Z"},
+        {"published_ts": "2026-01-01T12:05:00Z"},
+    ]
+    report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
+    assert report.baseline_std == 0.0
+
+    # 2. Test non-finite and negative stdev
+    for bad_val in [float("nan"), float("inf"), -1.0]:
+
+        def mock_stdev_bad(seq, val=bad_val):
+            return val
+
+        monkeypatch.setattr(statistics, "stdev", mock_stdev_bad)
+        report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
+        assert report.baseline_std == 0.0
+

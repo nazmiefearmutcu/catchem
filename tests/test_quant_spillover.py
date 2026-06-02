@@ -656,3 +656,42 @@ def test_duplicate_asset_in_record_counts_once_per_bucket() -> None:
     # space stripped → also "rates"), so exactly one asset key survives.
     loop_assets = {e.source_asset for e in report.self_loops}
     assert loop_assets == {"rates"}
+
+
+def test_spillover_edge_cases(monkeypatch) -> None:
+    # 1. _clamp_score (returns -1.0 for values < -1.0)
+    from catchem.quant.spillover import _clamp_score
+    assert _clamp_score(-2.0) == -1.0
+    assert _clamp_score(-0.5) == -0.5
+    assert _clamp_score(0.5) == 0.5
+
+    # 2. len(history) < _MIN_HISTORY (line 237-238)
+    import catchem.quant.spillover as sp
+    monkeypatch.setattr(sp, "_MIN_HISTORY", 5)
+    res = sp._rolling_z_score([1, 2, 3, 4, 5, 6, 7], window=2)
+    assert res[5] is None
+
+    # 3. StatisticsError in statistics.stdev (line 244-245)
+    import statistics
+    def mock_stdev_raise(history):
+        raise statistics.StatisticsError("mocked stdev error")
+    monkeypatch.setattr(statistics, "stdev", mock_stdev_raise)
+    monkeypatch.setattr(sp, "_MIN_HISTORY", 3)
+    res_err = sp._rolling_z_score([1, 2, 3, 4, 5], window=4)
+    assert res_err[3] == 0.0
+
+    # 4. Empty timed in _build_bucket_grid (line 276)
+    starts, counts = sp._build_bucket_grid([], bucket_minutes=5)
+    assert starts == []
+    assert counts == {}
+
+    # 5. total_buckets == 0 or empty asset_counts in compute_spillover (line 372)
+    def mock_build_grid(*args, **kwargs):
+        return [datetime.now(UTC)], {}
+    monkeypatch.setattr(sp, "_build_bucket_grid", mock_build_grid)
+    records = [_record("2024-01-01T09:05:00Z", asset_classes=["rates"])]
+    report = compute_spillover(records, bucket_minutes=30, lag_buckets=1)
+    assert report.total_buckets == 1
+    assert report.edges == ()
+    assert report.self_loops == ()
+

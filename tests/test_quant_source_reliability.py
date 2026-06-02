@@ -321,3 +321,88 @@ def test_normalized_entropy_two_balanced_classes_equals_one() -> None:
     assert lb.sources[0].asset_diversity == pytest.approx(1.0)
     # Sanity: log(2) > 0 (catches an accidental sign flip).
     assert log(2) > 0
+
+
+def test_source_reliability_edge_cases(monkeypatch) -> None:
+    # 1. ValueError in _parse_ts (line 89-90), naive ts (line 92), trailing Z (line 86)
+    now_dt = _now()
+    records = [
+        {
+            "domain": "a.com",
+            "published_ts": "garbage_ts",
+            "created_at": now_dt.strftime("%Y-%m-%dT%H:%M:%S"),  # naive
+            "is_finance_relevant": True,
+            "finance_relevance_score": 0.9,
+            "asset_classes": ["equity"],
+            "impact_reason_codes": ["earnings"],
+            "candidate_symbols": ["AAPL"],
+        },
+        {
+            "domain": "a.com",
+            "published_ts": now_dt.strftime("%Y-%m-%dT%H:%M:%S"),  # naive
+            "created_at": "garbage_ts",
+            "is_finance_relevant": True,
+            "finance_relevance_score": 0.9,
+            "asset_classes": ["equity"],
+            "impact_reason_codes": ["earnings"],
+            "candidate_symbols": ["AAPL"],
+        },
+        {
+            "domain": "a.com",
+            "published_ts": "garbage_ts",
+            "created_at": "garbage_ts",
+            "is_finance_relevant": True,
+            "finance_relevance_score": 0.9,
+        },
+        # Trailing Z timestamp (line 86) and invalid/empty candidate_symbols (line 199)
+        {
+            "domain": "a.com",
+            "published_ts": now_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),  # trailing Z
+            "created_at": None,
+            "is_finance_relevant": True,
+            "finance_relevance_score": 0.9,
+            "asset_classes": ["equity"],
+            "impact_reason_codes": ["earnings"],
+            "candidate_symbols": [123, "", None, "AAPL"],  # triggers branch 199 false
+        },
+    ]
+    lb = compute_source_scores(records, min_records=1)
+    assert len(lb.sources) == 1
+    assert lb.sources[0].record_count == 3  # 3rd was dropped because ts is None, 4th has Z
+
+
+    # 2. if not in_window (line 180)
+    stale_rec = _rec(published_ts=now_dt - timedelta(days=100))
+    lb_stale = compute_source_scores([stale_rec], window_days=30, min_records=1)
+    assert lb_stale.total_records == 0
+    assert lb_stale.sources == ()
+
+    # 3. NaN guard in _clamp01 (line 128)
+    import math
+    nan_rec = _rec(domain="nan.com", finance_relevance_score=float("nan"))
+    lb_nan = compute_source_scores([nan_rec], min_records=1)
+    assert len(lb_nan.sources) == 1
+    assert math.isnan(lb_nan.sources[0].mean_relevance_score)
+    assert not math.isnan(lb_nan.sources[0].composite_score)
+
+
+    # 4. max_entropy == 0.0 inside _normalized_entropy (line 121)
+    import catchem.quant.source_reliability as sr
+
+    original_log = sr.log
+
+    def mock_log(*args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], int):
+            return 0.0
+        return original_log(*args, **kwargs)
+
+    monkeypatch.setattr(sr, "log", mock_log)
+    entropy_rec = [
+        _rec(domain="entropy.com", asset_classes=["equity"]),
+        _rec(domain="entropy.com", asset_classes=["fx"]),
+        _rec(domain="entropy.com", asset_classes=["crypto"]),
+    ]
+    lb_entropy = compute_source_scores(entropy_rec, min_records=1)
+    assert len(lb_entropy.sources) == 1
+    assert lb_entropy.sources[0].asset_diversity == 0.0
+

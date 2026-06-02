@@ -165,3 +165,53 @@ def test_maybe_merge_newsimpact(tmp_path: Path) -> None:
     scanned_count = sum(1 for i in range(15) if f"Company_{i}" in m_limit.alias_dict())
     assert scanned_count <= 12
 
+
+def test_symbol_mapper_missing_branches(tmp_path: Path) -> None:
+    m = SymbolMapper()
+
+    # 1. not text
+    assert m.map_text("") == []
+    assert m.map_text(None) == []
+
+    # 2. _TICKER_DENYLIST in cashtag
+    matches_deny = m.map_text("Check out this $IPO")
+    assert not any(x.symbol == "IPO" for x in matches_deny)
+
+    # 3. sym in seen for duplicate cashtags
+    matches_dup = m.map_text("$AAPL and $AAPL")
+    aapl_matches = [x for x in matches_dup if x.symbol == "AAPL"]
+    assert len(aapl_matches) == 1
+
+    # 4. sym in seen for duplicate paren/cashtag
+    matches_dup_paren = m.map_text("$AAPL and (AAPL)")
+    aapl_matches_p = [x for x in matches_dup_paren if x.symbol == "AAPL"]
+    assert len(aapl_matches_p) == 1
+
+    # 5. Fuzzy match continue: score >= 100.0 and no word-boundary match
+    yaml_file = tmp_path / "fuzzy_test.yaml"
+    yaml_file.write_text("aliases:\n  Brent: BRNT\n", encoding="utf-8")
+    m_fuzzy = SymbolMapper(config_path=yaml_file)
+    matches_fuzzy = m_fuzzy.map_text("We visited Brentwood today")
+    assert not any(x.symbol == "BRNT" for x in matches_fuzzy)
+
+    # 5b. Fuzzy match accepted: score < 100.0 (e.g. Microsft vs Microsoft)
+    matches_fuzzy_ok = m.map_text("We love Microsft")
+    assert any(x.symbol == "MSFT" for x in matches_fuzzy_ok)
+
+    # 6. extra is not a dict in _merge_yaml
+    yaml_file_nondict = tmp_path / "nondict_aliases.yaml"
+    yaml_file_nondict.write_text("aliases: not-a-dict\n", encoding="utf-8")
+    m_nondict = SymbolMapper(config_path=yaml_file_nondict)
+    assert len(m_nondict.map_text("not-a-dict")) == 0
+
+    # 7. aliases is not a dict in _maybe_merge_newsimpact
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    nondict_json = manifests_dir / "nondict_aliases.json"
+    import json as _json
+
+    nondict_json.write_text(_json.dumps({"aliases": "not-a-dict"}), encoding="utf-8")
+    m_json_nondict = SymbolMapper(newsimpact_root=tmp_path)
+    assert len(m_json_nondict.map_text("not-a-dict")) == 0
+
+

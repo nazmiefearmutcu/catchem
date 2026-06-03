@@ -583,6 +583,7 @@ def test_symbols_in_drops_non_strings_blanks_and_dupes() -> None:
 
 def test_mean_std_statistics_error(monkeypatch: pytest.MonkeyPatch) -> None:
     import statistics
+
     from catchem.quant.anomaly import _rolling_stats
 
     def mock_stdev(*args, **kwargs):

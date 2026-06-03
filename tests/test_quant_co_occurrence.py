@@ -616,6 +616,7 @@ def test_asset_with_no_reasons_among_reasoned_assets() -> None:
 
 def test_lift_calculation_empty_margin(monkeypatch) -> None:
     from collections import Counter
+
     import catchem.quant.co_occurrence as co_occ
 
     class BadCounter(Counter):
@@ -632,6 +633,7 @@ def test_lift_calculation_empty_margin(monkeypatch) -> None:
 def test_hhi_clamped_greater_than_one(monkeypatch) -> None:
     import builtins
     import types
+
     import catchem.quant.co_occurrence as co_occ
 
     real_sum = builtins.sum
@@ -650,6 +652,7 @@ def test_hhi_clamped_greater_than_one(monkeypatch) -> None:
 def test_hhi_clamped_less_than_zero(monkeypatch) -> None:
     import builtins
     import types
+
     import catchem.quant.co_occurrence as co_occ
 
     real_sum = builtins.sum

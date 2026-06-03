@@ -8,6 +8,7 @@ and the drain semantics (write CSV, then delete from local).
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 from datetime import UTC, datetime, timedelta
@@ -391,7 +392,6 @@ def test_row_to_csv_dict_leaves_ordinary_values_untouched() -> None:
 # Extra Coverage / Branch Target Tests
 # ──────────────────────────────────────────────────────────────────────────────
 
-import asyncio
 
 def test_detect_drive_dir_various_cloud_providers(monkeypatch) -> None:
     # Set up basic fake home path

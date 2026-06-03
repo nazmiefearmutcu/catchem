@@ -655,6 +655,7 @@ async def test_compute_global_tone_close_exception_and_deteriorating(
 ) -> None:
     # Test httpx.AsyncClient close exception path (lines 439-440)
     from unittest.mock import patch
+
     import httpx
 
     # Mock AsyncClient.aclose to raise an exception
@@ -664,7 +665,7 @@ async def test_compute_global_tone_close_exception_and_deteriorating(
     # Mock fetch_tone to return a deteriorating tone timeline
     # mean_trend will be < -_STATE_THRESHOLD (e.g. -1.0)
     async def mock_fetch_tone(client, query, *args, **kwargs):
-        print(f"MOCK FETCH QUERY: {repr(query)}")
+        print(f"MOCK FETCH QUERY: {query!r}")
         if "stock market" in query:
             # deteriorating timeline:
             return _pts(5.0, 4.0, 3.0, 2.0, 1.0)

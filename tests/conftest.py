@@ -33,8 +33,8 @@ if VENV_SITE_PACKAGES is not None and str(VENV_SITE_PACKAGES) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from catchem.schemas import AwarenessCaptureView
-from catchem.settings import Settings, load_settings, reload_settings
+from catchem.schemas import AwarenessCaptureView  # noqa: E402
+from catchem.settings import Settings, load_settings, reload_settings  # noqa: E402
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 NEWSIMPACT_DEFAULT = Path("/Users/nazmi/Desktop/Projeler/proje/merged_news")

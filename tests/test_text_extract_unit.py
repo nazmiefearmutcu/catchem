@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from catchem.text_extract import extract_text, MAX_UPLOAD_BYTES
+
+from catchem.text_extract import MAX_UPLOAD_BYTES, extract_text
 
 
 def test_extract_text_empty_and_large() -> None:

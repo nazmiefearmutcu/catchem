@@ -120,6 +120,8 @@ def _global_tone_lock() -> asyncio.Lock:
         lock = asyncio.Lock()
         _GLOBAL_TONE_LOCKS[loop] = lock
     return lock
+
+
 _GLOBAL_TONE_TTL_SECONDS = 120.0
 
 # Actual bind host/port observed at uvicorn startup, OR None if create_app
@@ -185,7 +187,7 @@ _FALLBACK_SPA_HTML = (
     "<p>The premium UI bundle has not been built yet.</p>"
     "<p>Run <code>bash scripts/catchem_bootstrap_and_run.sh</code> "
     "or <code>(cd frontend && npm install && npm run build)</code>.</p>"
-    "<p>Legacy dashboard meanwhile: <a href=\"/legacy\">/legacy</a></p>"
+    '<p>Legacy dashboard meanwhile: <a href="/legacy">/legacy</a></p>'
 )
 
 
@@ -315,7 +317,7 @@ def _display_path(p: Path | str | None) -> str | None:
     if home and text == home:
         return "~"
     if home and text.startswith(home + "/"):
-        return "~" + text[len(home):]
+        return "~" + text[len(home) :]
     return text
 
 
@@ -373,7 +375,6 @@ def _sanitize_routing_path(path: str) -> str:
     if any(c not in allowed_chars for c in path):
         raise HTTPException(status_code=400, detail="Path contains invalid characters")
     return path
-
 
 
 # Regulator / official-source domains. A feed whose fallback_domain matches one
@@ -516,6 +517,7 @@ def _compute_agreement(stub_payload: dict[str, Any], ds_payload: dict[str, Any])
       * `sentiment_match`   — bool, same sentiment_label?
       * `overall`           — equal-weight mean of the bounded fields
     """
+
     def _jaccard(a: list[str] | None, b: list[str] | None) -> float:
         sa, sb = set(a or []), set(b or [])
         if not sa and not sb:
@@ -534,16 +536,11 @@ def _compute_agreement(stub_payload: dict[str, Any], ds_payload: dict[str, Any])
         4,
     )
     asset_jaccard = _jaccard(stub_payload.get("asset_classes"), ds_payload.get("asset_classes"))
-    reason_jaccard = _jaccard(
-        stub_payload.get("impact_reason_codes"), ds_payload.get("impact_reason_codes")
-    )
-    symbol_jaccard = _jaccard(
-        stub_payload.get("candidate_symbols"), ds_payload.get("candidate_symbols")
-    )
-    sentiment_match = (
-        stub_payload.get("sentiment_label") is not None
-        and stub_payload.get("sentiment_label") == ds_payload.get("sentiment_label")
-    )
+    reason_jaccard = _jaccard(stub_payload.get("impact_reason_codes"), ds_payload.get("impact_reason_codes"))
+    symbol_jaccard = _jaccard(stub_payload.get("candidate_symbols"), ds_payload.get("candidate_symbols"))
+    sentiment_match = stub_payload.get("sentiment_label") is not None and stub_payload.get(
+        "sentiment_label"
+    ) == ds_payload.get("sentiment_label")
     # Equal-weight aggregate so the compare page's lead number isn't
     # dominated by any one field. Score-delta inverted because lower is
     # better. All six bounded fields participate (docstring says "the
@@ -630,11 +627,20 @@ def _local_explain(kind: str, payload: dict[str, Any]) -> str:
         kl = payload.get("kl_divergence_from_prev")
         ts = payload.get("bucket_start", "")
         top_assets = (payload.get("asset_distribution") or [])[:2]
-        a_str = ", ".join(f"{k} {v:.0%}" if isinstance(v, (int, float)) else str(k) for k, v in top_assets) if top_assets else ""
+        a_str = (
+            ", ".join(f"{k} {v:.0%}" if isinstance(v, (int, float)) else str(k) for k, v in top_assets)
+            if top_assets
+            else ""
+        )
         return (
-            f"Topic mix shifted at {ts} (KL={kl:.2f})" if isinstance(kl, (int, float))
-            else f"Topic mix shifted at {ts}"
-        ) + (f"; now dominated by {a_str}" if a_str else "") + "."
+            (
+                f"Topic mix shifted at {ts} (KL={kl:.2f})"
+                if isinstance(kl, (int, float))
+                else f"Topic mix shifted at {ts}"
+            )
+            + (f"; now dominated by {a_str}" if a_str else "")
+            + "."
+        )
     if kind == "anomaly":
         z = payload.get("z_score", 0)
         observed = payload.get("observed")
@@ -733,7 +739,9 @@ def _git_sha_safe() -> str | None:
         repo = Path(__file__).resolve().parents[2]
         res = _subproc.run(
             ["git", "-C", str(repo), "rev-parse", "--short=12", "HEAD"],
-            capture_output=True, text=True, timeout=2,
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
@@ -747,7 +755,9 @@ def _git_branch_safe() -> str | None:
         repo = Path(__file__).resolve().parents[2]
         res = _subproc.run(
             ["git", "-C", str(repo), "branch", "--show-current"],
-            capture_output=True, text=True, timeout=2,
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
@@ -770,6 +780,7 @@ _MARKET_DATA = LocalFixtureMarketDataProvider()
 # Raising 429 inside the shim short-circuits the route before the handler
 # body runs, which is what we want: heavy handlers (DB import, DeepSeek)
 # never even start when the bucket is empty.
+
 
 def _rate_limit_search(request: Request) -> None:
     check_rate(request, SEARCH_BUCKET)
@@ -1399,15 +1410,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # by the schema bootstrap; no `IF EXISTS` check needed.
         storage = sup.storage
         with storage._lock, storage._connection() as conn:
-            records_count = int(
-                conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
-            )
-            reviews_count = int(
-                conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
-            )
-            dlq_count = int(
-                conn.execute("SELECT COUNT(*) FROM dlq").fetchone()[0]
-            )
+            records_count = int(conn.execute("SELECT COUNT(*) FROM records").fetchone()[0])
+            reviews_count = int(conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0])
+            dlq_count = int(conn.execute("SELECT COUNT(*) FROM dlq").fetchone()[0])
 
         # DeepSeek cumulative spend — only meaningful when the registry
         # exposes the cached budget state. Falls back to 0.0 cleanly when
@@ -1580,9 +1585,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"items": sup.storage.top_tags(limit)}
 
     @app.get("/api/tags/{tag}/records", response_model=RecordListResponse)
-    def api_records_by_tag(
-        tag: str, limit: int = Query(50, ge=1, le=500)
-    ) -> RecordListResponse:
+    def api_records_by_tag(tag: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
         tag = _sanitize_slug(tag, "tag")
         sup = _get_supervisor()
         try:
@@ -1983,9 +1986,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         s = _SETTINGS or load_settings()
         cfg = s.webhook
         sup = _SUPERVISOR  # may be None during early lifespan
-        stats = sup.webhook_stats_snapshot() if sup is not None else {
-            "attempted": 0, "sent": 0, "filtered": 0, "failed": 0,
-        }
+        stats = (
+            sup.webhook_stats_snapshot()
+            if sup is not None
+            else {
+                "attempted": 0,
+                "sent": 0,
+                "filtered": 0,
+                "failed": 0,
+            }
+        )
         return {
             "enabled": cfg.enabled,
             "url_configured": bool(cfg.url),
@@ -2155,6 +2165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         min_cluster_size: int = Query(2, ge=1, le=20),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         cs = engine.clusters(
             limit=limit,
@@ -2171,15 +2182,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         min_records: int = Query(3, ge=1, le=100),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
-        lb = engine.source_leaderboard(
-            limit=limit, window_days=window_days, min_records=min_records
+        lb = engine.source_leaderboard(limit=limit, window_days=window_days, min_records=min_records)
+        return (
+            asdict(lb)
+            if lb
+            else {"window_days": window_days, "total_records": 0, "total_domains": 0, "sources": []}
         )
-        return asdict(lb) if lb else {"window_days": window_days, "total_records": 0, "total_domains": 0, "sources": []}
 
     @app.get("/api/quant/novelty")
     def quant_novelty(limit: int = Query(200, ge=10, le=1000)) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         items = engine.novelty_timeline(limit=limit)
         return {"items": [asdict(n) for n in items], "total": len(items)}
@@ -2188,6 +2203,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def quant_novelty_one(capture_id: str) -> dict[str, Any]:
         capture_id = _sanitize_capture_id(capture_id)
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         result = engine.novelty_for(capture_id)
         if result is None:
@@ -2197,6 +2213,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/quant/lead-lag")
     def quant_lead_lag(limit: int = Query(500, ge=10, le=5000)) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         report = engine.lead_lag(limit=limit)
         if report is None:
@@ -2210,18 +2227,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shift_threshold: float = Query(0.40, ge=0.0, le=10.0),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
-        report = engine.regime(
-            limit=limit, bucket_minutes=bucket_minutes, shift_threshold=shift_threshold
-        )
+        report = engine.regime(limit=limit, bucket_minutes=bucket_minutes, shift_threshold=shift_threshold)
         if report is None:
-            return {"bucket_minutes": bucket_minutes, "shift_threshold": shift_threshold, "buckets": [], "detected_shifts": []}
+            return {
+                "bucket_minutes": bucket_minutes,
+                "shift_threshold": shift_threshold,
+                "buckets": [],
+                "detected_shifts": [],
+            }
         return asdict(report)
 
     @app.get("/api/quant/reaction/{capture_id}")
     def quant_reaction(capture_id: str) -> dict[str, Any]:
         capture_id = _sanitize_capture_id(capture_id)
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         report = engine.reaction_for(capture_id)
         if report is None:
@@ -2257,7 +2279,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for b in (anomalies.get("symbol_bursts") or [])[:3]
             ],
             "spillover_edges": [
-                {"src": e.get("source_asset"), "dst": e.get("target_asset"), "score": e.get("spillover_score")}
+                {
+                    "src": e.get("source_asset"),
+                    "dst": e.get("target_asset"),
+                    "score": e.get("spillover_score"),
+                }
                 for e in (spillover.get("edges") or [])[:3]
             ],
             "top_tickers": [
@@ -2348,6 +2374,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         try:
             import json as _json
+
             req = {
                 "model": client.model,
                 "messages": [
@@ -2363,7 +2390,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 headers={"Authorization": f"Bearer {client._api_key}", "Content-Type": "application/json"},
             )
             if response.status_code != 200:
-                return {"narrative": local, "source": "local", "fallback_reason": f"http_{response.status_code}", "context": compact, "generated_at": _dt.now(UTC).isoformat()}
+                return {
+                    "narrative": local,
+                    "source": "local",
+                    "fallback_reason": f"http_{response.status_code}",
+                    "context": compact,
+                    "generated_at": _dt.now(UTC).isoformat(),
+                }
             envelope = response.json()
             content = (envelope.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
             usage = envelope.get("usage") or {}
@@ -2380,7 +2413,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "generated_at": _dt.now(UTC).isoformat(),
             }
         except Exception as exc:
-            return {"narrative": local, "source": "local", "fallback_reason": str(exc)[:120], "context": compact, "generated_at": _dt.now(UTC).isoformat()}
+            return {
+                "narrative": local,
+                "source": "local",
+                "fallback_reason": str(exc)[:120],
+                "context": compact,
+                "generated_at": _dt.now(UTC).isoformat(),
+            }
 
     @app.get("/api/quant/live-read-stream", dependencies=[Depends(_rate_limit_live_read)])
     async def quant_live_read_stream(limit: int = Query(1000, ge=100, le=5000)) -> EventSourceResponse:
@@ -2468,14 +2507,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             usage_payload: dict[str, Any] | None = None
             error_msg: str | None = None
             try:
-                async for envelope in stream_chat_completion(
+                # Manual iteration to avoid compiler-generated async for branch issues
+                # with Coverage.py tracking under Python 3.14.
+                iterator = stream_chat_completion(
                     api_key=client._api_key,
                     base_url=client._base_url,
                     model=client.model,
                     messages=messages,
                     temperature=0.35,
                     max_tokens=320,
-                ):
+                )
+                while True:
+                    try:
+                        envelope = await anext(iterator)
+                    except StopAsyncIteration:
+                        break
                     kind = envelope.get("type")
                     if kind == "delta":
                         text = envelope.get("text") or ""
@@ -2489,7 +2535,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         break
                     elif kind == "done":
                         break
-            except Exception as exc:  # pragma: no cover — defensive
+            except Exception as exc:
                 error_msg = f"generator: {exc}"[:200]
 
             # Resolve the final cost / source / fallback signals, mirror
@@ -2566,6 +2612,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_tickers: int = Query(25, ge=1, le=200),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         report = engine.sentiment_momentum(
             limit=limit,
@@ -2713,6 +2760,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         top_n_edges: int = Query(60, ge=1, le=500),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         report = engine.co_occurrence(
             limit=limit,
@@ -2722,8 +2770,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if report is None:
             return {
-                "total_records": 0, "distinct_assets": 0, "distinct_reasons": 0, "distinct_symbols": 0,
-                "asset_reason_cells": [], "strong_edges": [], "asset_concentration": [],
+                "total_records": 0,
+                "distinct_assets": 0,
+                "distinct_reasons": 0,
+                "distinct_symbols": 0,
+                "asset_reason_cells": [],
+                "strong_edges": [],
+                "asset_concentration": [],
             }
         return asdict(report)
 
@@ -2735,6 +2788,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         z_threshold: float = Query(2.0, ge=0.5, le=10.0),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         report = engine.anomalies(
             limit=limit,
@@ -2744,8 +2798,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if report is None:
             return {
-                "bucket_minutes": bucket_minutes, "window_buckets": window_buckets, "z_threshold": z_threshold,
-                "volume_anomalies": [], "sentiment_shocks": [], "symbol_bursts": [],
+                "bucket_minutes": bucket_minutes,
+                "window_buckets": window_buckets,
+                "z_threshold": z_threshold,
+                "volume_anomalies": [],
+                "sentiment_shocks": [],
+                "symbol_bursts": [],
             }
         return asdict(report)
 
@@ -2757,6 +2815,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         surge_z_threshold: float = Query(1.5, ge=0.5, le=10.0),
     ) -> dict[str, Any]:
         from dataclasses import asdict
+
         engine = _get_quant_engine()
         report = engine.spillover(
             limit=limit,
@@ -2766,8 +2825,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if report is None:
             return {
-                "bucket_minutes": bucket_minutes, "lag_buckets": lag_buckets,
-                "surge_z_threshold": surge_z_threshold, "edges": [], "self_loops": [], "total_buckets": 0,
+                "bucket_minutes": bucket_minutes,
+                "lag_buckets": lag_buckets,
+                "surge_z_threshold": surge_z_threshold,
+                "edges": [],
+                "self_loops": [],
+                "total_buckets": 0,
             }
         return asdict(report)
 
@@ -2890,9 +2953,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/quant/arrival-heatmap")
     def quant_arrival_heatmap(
         limit: int = Query(2000, ge=10, le=10000),
-        timezone: str = Query(
-            "America/New_York", min_length=3, max_length=64
-        ),
+        timezone: str = Query("America/New_York", min_length=3, max_length=64),
     ) -> dict[str, Any]:
         """24h x 7day news-arrival grid anchored to the given timezone.
 
@@ -3108,7 +3169,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 headers={"Authorization": f"Bearer {client._api_key}", "Content-Type": "application/json"},
             )
             if response.status_code != 200:
-                return {"kind": kind, "narrative": local, "source": "local", "fallback_reason": f"http_{response.status_code}"}
+                return {
+                    "kind": kind,
+                    "narrative": local,
+                    "source": "local",
+                    "fallback_reason": f"http_{response.status_code}",
+                }
             envelope = response.json()
             content = (envelope.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
             usage = envelope.get("usage") or {}
@@ -3162,13 +3228,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             title = (r.get("title") or "").lower()
             domain = (r.get("domain") or "").lower()
             if q_lower in title or q_lower in domain:
-                matched_records.append({
-                    "capture_id": r.get("capture_id"),
-                    "title": r.get("title"),
-                    "domain": r.get("domain"),
-                    "score": r.get("finance_relevance_score"),
-                    "published_ts": r.get("published_ts"),
-                })
+                matched_records.append(
+                    {
+                        "capture_id": r.get("capture_id"),
+                        "title": r.get("title"),
+                        "domain": r.get("domain"),
+                        "score": r.get("finance_relevance_score"),
+                        "published_ts": r.get("published_ts"),
+                    }
+                )
                 if len(matched_records) >= limit:
                     break
 
@@ -3195,11 +3263,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             cid = (c.cluster_id or "").lower()
             symbols = tuple(c.dominant_symbols or ())
             if q_lower in cid or any(q_lower in (s or "").lower() for s in symbols):
-                matched_clusters.append({
-                    "cluster_id": c.cluster_id,
-                    "size": int(c.size),
-                    "symbols": list(symbols),
-                })
+                matched_clusters.append(
+                    {
+                        "cluster_id": c.cluster_id,
+                        "size": int(c.size),
+                        "symbols": list(symbols),
+                    }
+                )
                 if len(matched_clusters) >= limit:
                     break
 
@@ -3219,10 +3289,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Fields surfaced in the records CSV. Order is load-bearing — analysts
     # eyeball the column header so the most-scanned columns come first.
     _EXPORT_RECORD_FIELDS = (
-        "capture_id", "title", "domain", "url", "published_ts", "created_at",
-        "is_finance_relevant", "finance_relevance_score",
-        "sentiment_label", "sentiment_score",
-        "asset_classes", "impact_reason_codes", "candidate_symbols",
+        "capture_id",
+        "title",
+        "domain",
+        "url",
+        "published_ts",
+        "created_at",
+        "is_finance_relevant",
+        "finance_relevance_score",
+        "sentiment_label",
+        "sentiment_score",
+        "asset_classes",
+        "impact_reason_codes",
+        "candidate_symbols",
         "processing_mode",
     )
 
@@ -3257,8 +3336,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # begin with a formula trigger ("=HYPERLINK(...)", "+cmd|'/C calc'!A0").
     # System-generated id/date/flag/numeric columns are left untouched.
     _EXPORT_RECORD_TEXT_FIELDS = (
-        "title", "domain", "url",
-        "asset_classes", "impact_reason_codes", "candidate_symbols",
+        "title",
+        "domain",
+        "url",
+        "asset_classes",
+        "impact_reason_codes",
+        "candidate_symbols",
     )
 
     def _records_csv(records: list[dict[str, Any]]) -> str:
@@ -3271,6 +3354,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         import csv
         from io import StringIO
+
         buf = StringIO()
         writer = csv.DictWriter(buf, fieldnames=list(_EXPORT_RECORD_FIELDS), extrasaction="ignore")
         writer.writeheader()
@@ -3336,16 +3420,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     _EXPORT_REVIEW_FIELDS = (
-        "capture_id", "title", "domain", "url",
-        "stub_relevance", "stub_score", "stub_sentiment",
-        "stub_assets", "stub_reasons", "stub_symbols",
-        "ds_relevance", "ds_score", "ds_sentiment",
-        "ds_assets", "ds_reasons", "ds_symbols",
-        "ds_error_code", "ds_usd_cost", "ds_latency_ms",
+        "capture_id",
+        "title",
+        "domain",
+        "url",
+        "stub_relevance",
+        "stub_score",
+        "stub_sentiment",
+        "stub_assets",
+        "stub_reasons",
+        "stub_symbols",
+        "ds_relevance",
+        "ds_score",
+        "ds_sentiment",
+        "ds_assets",
+        "ds_reasons",
+        "ds_symbols",
+        "ds_error_code",
+        "ds_usd_cost",
+        "ds_latency_ms",
         "ds_created_at",
-        "agreement_overall", "agreement_relevance_match",
-        "agreement_sentiment_match", "agreement_score_delta",
-        "agreement_asset_jaccard", "agreement_reason_jaccard",
+        "agreement_overall",
+        "agreement_relevance_match",
+        "agreement_sentiment_match",
+        "agreement_score_delta",
+        "agreement_asset_jaccard",
+        "agreement_reason_jaccard",
         "agreement_symbol_jaccard",
     )
 
@@ -3444,7 +3544,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if symbol:
             items = [it for it in items if symbol in (_stub_view(it).get("candidate_symbols") or [])]
         if min_score is not None:
-            items = [it for it in items if (_stub_view(it).get("finance_relevance_score") or 0.0) >= min_score]
+            items = [
+                it for it in items if (_stub_view(it).get("finance_relevance_score") or 0.0) >= min_score
+            ]
 
         stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         if format == "json":
@@ -3468,6 +3570,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # CSV flattens both reviewer payloads + agreement onto one row.
         import csv
         from io import StringIO
+
         buf = StringIO()
         writer = csv.DictWriter(buf, fieldnames=list(_EXPORT_REVIEW_FIELDS), extrasaction="ignore")
         writer.writeheader()
@@ -3573,7 +3676,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # (e.g. `tbl"; DROP TABLE records; --`) can't escape the
                 # quoted identifier. Names from sqlite_master are usually
                 # clean but defense-in-depth beats trust.
-                safe_name = name.replace('"', '')
+                safe_name = name.replace('"', "")
                 try:
                     count = conn.execute(f'SELECT COUNT(*) FROM "{safe_name}"').fetchone()[0]
                 except Exception:
@@ -3722,6 +3825,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         backup_path: Path | None = None
         if db_path.exists():
             import shutil
+
             # Checkpoint first so the pre-import safety backup captures the
             # newest committed rows (the main file lags the live DB in WAL
             # mode). Without this the backup is incomplete — and combined with
@@ -3787,6 +3891,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ui/app-info", response_model=AppInfoResponse)
     async def ui_app_info() -> AppInfoResponse:
         from . import __version__ as _ver
+
         s = _SETTINGS or load_settings()
         sup = _get_supervisor()
         commit, branch, bundle = await asyncio.to_thread(
@@ -3914,8 +4019,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/ui/timeline", response_model=UiTimelineResponse)
-    def ui_timeline(bucket_minutes: int = Query(60, ge=5, le=1440),
-                    limit: int = Query(500, ge=10, le=5000)) -> UiTimelineResponse:
+    def ui_timeline(
+        bucket_minutes: int = Query(60, ge=5, le=1440), limit: int = Query(500, ge=10, le=5000)
+    ) -> UiTimelineResponse:
         """Timestamp-bucketed counts for trend charts."""
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=limit, relevant_only=False)
@@ -3955,7 +4061,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for r in rows:
             for s in r.get("candidate_symbols", []):
                 c[s] += 1
-        return UiTopSymbolsResponse(items=[TopSymbolEntry(symbol=k, count=n) for k, n in c.most_common(limit)])
+        return UiTopSymbolsResponse(
+            items=[TopSymbolEntry(symbol=k, count=n) for k, n in c.most_common(limit)]
+        )
 
     @app.get("/ui/top-reasons", response_model=UiTopReasonsResponse)
     def ui_top_reasons(limit: int = Query(20, ge=1, le=100)) -> UiTopReasonsResponse:
@@ -3965,10 +4073,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for r in rows:
             for s in r.get("impact_reason_codes", []):
                 c[s] += 1
-        return UiTopReasonsResponse(items=[TopReasonEntry(reason=k, count=n) for k, n in c.most_common(limit)])
+        return UiTopReasonsResponse(
+            items=[TopReasonEntry(reason=k, count=n) for k, n in c.most_common(limit)]
+        )
 
     @app.get("/ui/quotes", response_model=MarketQuoteBatchResponse)
-    def ui_quotes(symbols: str = Query("", description="Comma-separated symbols")) -> MarketQuoteBatchResponse:
+    def ui_quotes(
+        symbols: str = Query("", description="Comma-separated symbols"),
+    ) -> MarketQuoteBatchResponse:
         """Batch quote contract.
 
         Current provider is local fixture-only. Known fixtures return stale
@@ -4007,10 +4119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 row[ac_] += 1
         keys = sorted(ts_ac.keys())
         asset_classes = sorted({k for v in ts_ac.values() for k in v.keys()})
-        series = {
-            ac_: [ts_ac[k].get(ac_, 0) for k in keys]
-            for ac_ in asset_classes
-        }
+        series = {ac_: [ts_ac[k].get(ac_, 0) for k in keys] for ac_ in asset_classes}
         return UiTrendsResponse(buckets=keys, asset_classes=asset_classes, series=series)
 
     @app.get("/ui/matrix", response_model=UiMatrixResponse)
@@ -4043,6 +4152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         This is intentionally synchronous and cheap (12 items, CPU stubs).
         """
         from .golden import SYNTHETIC, run_benchmark
+
         sup = _get_supervisor()
         rep = run_benchmark(sup.service, SYNTHETIC)
         return UiBenchmarkLatestResponse(**{**rep.to_dict(), "ran_at": datetime.now(UTC).isoformat()})
@@ -4050,7 +4160,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ui/benchmark/history", response_model=UiBenchmarkHistoryResponse)
     def ui_benchmark_history() -> UiBenchmarkHistoryResponse:
         """Return the persisted benchmark history (if any). Empty for v1."""
-        history_path = (_SETTINGS or load_settings()).paths.catchem_output_dir / "results" / "benchmark_history.jsonl"
+        history_path = (
+            (_SETTINGS or load_settings()).paths.catchem_output_dir / "results" / "benchmark_history.jsonl"
+        )
         items: list[dict] = []
         if history_path.exists():
             for line in history_path.read_text(encoding="utf-8").splitlines():
@@ -4116,9 +4228,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # fold to UTC, so both the day key and the cutoff filter reference the
         # same timezone. (Stored UTC datetimes are '+00:00'; naive ones are
         # forced to UTC by the schema validator — both parse correctly.)
-        cutoff_sql = datetime.combine(
-            window_days[0], datetime.min.time(), tzinfo=UTC
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_sql = datetime.combine(window_days[0], datetime.min.time(), tzinfo=UTC).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         with storage._lock, storage._connection() as conn:
             rows = conn.execute(
                 """
@@ -4142,8 +4254,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # day so the stacked area renders a contiguous time axis even when
         # the symbol has no mentions on a given day.
         by_day: dict[str, dict[str, int]] = {
-            d.isoformat(): {"positive": 0, "neutral": 0, "negative": 0}
-            for d in window_days
+            d.isoformat(): {"positive": 0, "neutral": 0, "negative": 0} for d in window_days
         }
         for row in rows:
             day = row["day"]
@@ -4291,6 +4402,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sup = _get_supervisor()
         records = sup.storage.recent_records(limit, relevant_only=False)
         from .quant.persistence import compute_persistence
+
         buckets = compute_persistence(
             records,
             window_days=window_days,
@@ -4396,9 +4508,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Degraded when no theme produced a single usable point — either the
             # whole fan-out failed or GDELT returned empty series for everything.
             by_theme = result.get("by_theme") or {}
-            degraded = not by_theme or all(
-                (s.get("n_points") or 0) == 0 for s in by_theme.values()
-            )
+            degraded = not by_theme or all((s.get("n_points") or 0) == 0 for s in by_theme.values())
 
             payload: dict[str, Any] = {
                 "schema_version": 1,
@@ -4425,10 +4535,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         sup = _get_supervisor()
         records = sup.storage.recent_records(200, relevant_only=False)
-        filtered = [
-            r for r in records
-            if (r.get("finance_relevance_score") or 0.0) >= min_score
-        ]
+        filtered = [r for r in records if (r.get("finance_relevance_score") or 0.0) >= min_score]
         filtered.sort(
             key=lambda r: float(r.get("finance_relevance_score") or 0.0),
             reverse=True,
@@ -4460,7 +4567,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # watchlist yet — gives the blind-spot detector something meaningful to
     # answer against out of the box rather than an empty result.
     _DEFAULT_WATCH_TERMS: tuple[str, ...] = (
-        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA",
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "GOOGL",
+        "AMZN",
+        "META",
+        "TSLA",
     )
 
     @app.get("/api/news/coverage-gaps")
@@ -4559,27 +4672,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 last_status = "unknown"
             else:
                 last_status = "ok" if entry.get("ok") else "error"
-            sources.append({
-                "name": entry.get("name") or "",
-                "url": entry.get("url") or "",
-                "fallback_domain": entry.get("fallback_domain") or "",
-                "polls": polls,
-                "successes": successes,
-                "failures": failures,
-                "success_rate": success_rate,
-                "items_total": int(entry.get("items_total") or 0),
-                "item_count": int(entry.get("item_count") or 0),
-                "last_status": last_status,
-                "last_status_code": entry.get("status_code"),
-                "last_error": entry.get("last_error") if "last_error" in entry else entry.get("error"),
-                "last_status_at": entry.get("last_fetch_at"),
-                "last_success_at": entry.get("last_success_at"),
-                "last_failure_at": entry.get("last_failure_at"),
-                "consecutive_errors": int(entry.get("consecutive_errors") or 0),
-                "elapsed_ms": entry.get("elapsed_ms"),
-                "cooldown_until": entry.get("cooldown_until"),
-                "backed_off": backed_off,
-            })
+            sources.append(
+                {
+                    "name": entry.get("name") or "",
+                    "url": entry.get("url") or "",
+                    "fallback_domain": entry.get("fallback_domain") or "",
+                    "polls": polls,
+                    "successes": successes,
+                    "failures": failures,
+                    "success_rate": success_rate,
+                    "items_total": int(entry.get("items_total") or 0),
+                    "item_count": int(entry.get("item_count") or 0),
+                    "last_status": last_status,
+                    "last_status_code": entry.get("status_code"),
+                    "last_error": entry.get("last_error") if "last_error" in entry else entry.get("error"),
+                    "last_status_at": entry.get("last_fetch_at"),
+                    "last_success_at": entry.get("last_success_at"),
+                    "last_failure_at": entry.get("last_failure_at"),
+                    "consecutive_errors": int(entry.get("consecutive_errors") or 0),
+                    "elapsed_ms": entry.get("elapsed_ms"),
+                    "cooldown_until": entry.get("cooldown_until"),
+                    "backed_off": backed_off,
+                }
+            )
         # Sort by url so the table is stable across reloads. (The snapshot
         # itself sorts by feed name; URL is what the user sees in the cell
         # so sorting by it keeps the on-screen order predictable.)
@@ -4768,11 +4883,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     last_emit = now
                     yield {
                         "event": "summary",
-                        "data": json.dumps({
-                            "totals": counts,
-                            "dlq": sup.storage.dlq_count(),
-                            "generated_at": datetime.now(UTC).isoformat(),
-                        }),
+                        "data": json.dumps(
+                            {
+                                "totals": counts,
+                                "dlq": sup.storage.dlq_count(),
+                                "generated_at": datetime.now(UTC).isoformat(),
+                            }
+                        ),
                     }
                 else:
                     yield {"event": "tick", "data": str(int(now))}
@@ -4788,10 +4905,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # that don't already match an API/assets route, and we never shadow the
     # /assets mount or /docs (OpenAPI).
     _RESERVED_PATH_PREFIXES = (
-        "assets/", "docs", "openapi.json", "redoc",
-        "healthz", "config", "metrics", "recent", "record",
-        "records/", "process-one", "dashboard",
-        "legacy", "ui/", "favicon",
+        "assets/",
+        "docs",
+        "openapi.json",
+        "redoc",
+        "healthz",
+        "config",
+        "metrics",
+        "recent",
+        "record",
+        "records/",
+        "process-one",
+        "dashboard",
+        "legacy",
+        "ui/",
+        "favicon",
         # `api/` reserves the whole API surface (incl. /api/docs, /api/redoc,
         # /api/openapi.json, /api/_index) so unknown /api paths 404 cleanly
         # instead of getting served the SPA shell.
@@ -4865,7 +4993,9 @@ def run() -> None:
     """
     s = load_settings()
     app = create_app(s)
-    uvicorn.run(app, host=s.api.host, port=s.api.port, log_level=_normalize_uvicorn_log_level(s.logging.level))
+    uvicorn.run(
+        app, host=s.api.host, port=s.api.port, log_level=_normalize_uvicorn_log_level(s.logging.level)
+    )
 
 
 # Module-level app for `uvicorn catchem.api:app`

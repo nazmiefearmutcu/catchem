@@ -203,3 +203,71 @@ def test_datetime_timestamp_objects_accepted() -> None:
     rec = {"title": "AAPL", "published_ts": NOW - timedelta(seconds=90.0)}
     out = find_coverage_gaps([rec], ["AAPL"], window_seconds=3600.0, now=NOW)
     assert out["covered"][0]["last_seen_age_seconds"] == 90.0
+
+
+def test_coerce_dt_edge_cases() -> None:
+    # 1. string that strips to empty
+    assert find_coverage_gaps([{"title": "AAPL", "published_ts": "   "}], ["AAPL"], now=NOW)["covered"] == []
+    # 2. string ending with "z" or "Z"
+    rec_z = {"title": "AAPL", "published_ts": "2026-05-29T12:00:00z"}
+    rec_Z = {"title": "AAPL", "published_ts": "2026-05-29T12:00:00Z"}
+    assert len(find_coverage_gaps([rec_z], ["AAPL"], now=NOW)["covered"]) == 1
+    assert len(find_coverage_gaps([rec_Z], ["AAPL"], now=NOW)["covered"]) == 1
+    # 3. non-None/str/datetime value (e.g. integer)
+    rec_int = {"title": "AAPL", "published_ts": 12345}
+    assert find_coverage_gaps([rec_int], ["AAPL"], now=NOW)["covered"] == []
+
+
+def test_symbols_field_matching_edge_cases() -> None:
+    # 1. symbols field is a single string
+    rec_str = {"title": "Nothing", "published_ts": NOW.isoformat(), "symbols": "  AAPL  "}
+    out = find_coverage_gaps([rec_str], ["AAPL"], now=NOW)
+    assert len(out["covered"]) == 1
+    assert out["covered"][0]["term"] == "AAPL"
+
+    # 1b. symbols field is a single string but empty/whitespace
+    rec_str_empty = {"title": "Nothing", "published_ts": NOW.isoformat(), "symbols": "   "}
+    out_empty = find_coverage_gaps([rec_str_empty], ["AAPL"], now=NOW)
+    assert out_empty["covered"] == []
+
+    # 2. list/tuple/set with non-string and empty string items
+    rec_junk = {"title": "Nothing", "published_ts": NOW.isoformat(), "symbols": [123, None, "", "   ", "AAPL"]}
+    out = find_coverage_gaps([rec_junk], ["AAPL"], now=NOW)
+    assert len(out["covered"]) == 1
+
+    # 3. tuple and set symbol types
+    rec_tuple = {"title": "Nothing", "published_ts": NOW.isoformat(), "symbols": ("AAPL",)}
+    assert len(find_coverage_gaps([rec_tuple], ["AAPL"], now=NOW)["covered"]) == 1
+
+    rec_set = {"title": "Nothing", "published_ts": NOW.isoformat(), "symbols": {"AAPL"}}
+    assert len(find_coverage_gaps([rec_set], ["AAPL"], now=NOW)["covered"]) == 1
+
+
+def test_now_parameter_omitted_defaults_to_utcnow() -> None:
+    # Omitted now parameter - defaults to UTC now
+    out = find_coverage_gaps([], ["AAPL"])
+    assert "generated_at" in out
+    assert isinstance(out["generated_at"], str)
+
+
+def test_window_seconds_invalid_coercion() -> None:
+    # window_seconds is a value that cannot be coerced to float
+    out = find_coverage_gaps([_rec("AAPL", age_seconds=50.0)], ["AAPL"], window_seconds="not-a-float", now=NOW)
+    assert len(out["covered"]) == 1
+
+
+def test_watch_terms_invalid_types_and_empty() -> None:
+    # Watch terms list contains invalid types (None, int) and empty strings
+    out = find_coverage_gaps([_rec("AAPL", age_seconds=10.0)], ["AAPL", 123, None, "", "   "], now=NOW)
+    assert out["gaps"] == []
+    assert len(out["covered"]) == 1
+    assert out["covered"][0]["term"] == "AAPL"
+
+
+def test_record_with_no_searchable_content() -> None:
+    # Record has timestamp but no text fields and no symbol fields
+    rec = {"published_ts": NOW.isoformat()}
+    out = find_coverage_gaps([rec], ["AAPL"], now=NOW)
+    assert out["covered"] == []
+    assert out["gaps"] == ["AAPL"]
+

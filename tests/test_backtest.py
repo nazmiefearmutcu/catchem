@@ -122,9 +122,7 @@ class TestRunBacktest:
         assert run.summary["items_evaluated"] == 3
         # 6-decimal rounding (the wire format trims down for stable JSON),
         # so we accept anything within 1e-5 of the analytical mean.
-        assert run.summary["mean_abs_error"] == pytest.approx(
-            (0.1 + 0.05 + 0.05) / 3, abs=1e-5
-        )
+        assert run.summary["mean_abs_error"] == pytest.approx((0.1 + 0.05 + 0.05) / 3, abs=1e-5)
         assert run.summary["max_abs_error"] == pytest.approx(0.1, abs=1e-5)
 
     def test_calibration_bins_respect_ranges(self) -> None:
@@ -163,12 +161,8 @@ class TestRunBacktest:
         # the result entirely (they don't carry a usable score).
         pairs = [
             _make_pair("good-a", stub_score=0.5, deepseek_score=0.6),
-            _make_pair(
-                "ds-erred", stub_score=0.5, deepseek_score=0.0, deepseek_error="timeout"
-            ),
-            _make_pair(
-                "stub-erred", stub_score=0.0, deepseek_score=0.5, stub_error="bad_json"
-            ),
+            _make_pair("ds-erred", stub_score=0.5, deepseek_score=0.0, deepseek_error="timeout"),
+            _make_pair("stub-erred", stub_score=0.0, deepseek_score=0.5, stub_error="bad_json"),
             _make_pair("good-b", stub_score=0.3, deepseek_score=0.4),
         ]
         sup = FakeSupervisor(FakeStorage(pairs))
@@ -212,8 +206,7 @@ class TestRunBacktest:
         # 60 input pairs — sample should cap at 50 even though all are valid,
         # while `items_evaluated` reflects the full N.
         pairs = [
-            _make_pair(f"cap-{i:02d}", stub_score=0.4 + (i % 5) * 0.02,
-                       deepseek_score=0.5 + (i % 5) * 0.02)
+            _make_pair(f"cap-{i:02d}", stub_score=0.4 + (i % 5) * 0.02, deepseek_score=0.5 + (i % 5) * 0.02)
             for i in range(60)
         ]
         sup = FakeSupervisor(FakeStorage(pairs))
@@ -254,3 +247,27 @@ def test_api_backtest_endpoint_returns_documented_envelope(tmp_path, monkeypatch
     }
     assert body["calibration_bins"] == []
     assert body["predictions_sample"] == []
+
+
+def test_backtest_coverage_gaps() -> None:
+    # 1. Exercise _StorageLike protocol's reviews_with_pair method body to satisfy coverage
+    from catchem.backtest import _bin_for, _StorageLike
+
+    assert _StorageLike.reviews_with_pair(None, "a", "b") is None
+
+    # 2. Exercise out-of-bounds check in _bin_for
+    assert _bin_for(-0.5) is None
+    assert _bin_for(1.5) is None
+
+    # 3. Exercise TypeError/ValueError paths in run_backtest
+    # We pass scores that cannot be converted to floats
+    pairs = [
+        _make_pair("bad-val", stub_score="not-a-float", deepseek_score=0.5),  # ValueError
+        _make_pair("bad-type", stub_score=[1, 2], deepseek_score=0.5),  # TypeError
+        # 4. Exercise non-finite paths in run_backtest
+        _make_pair("nan-val", stub_score=float("nan"), deepseek_score=0.5),
+        _make_pair("inf-val", stub_score=0.5, deepseek_score=float("inf")),
+    ]
+    sup = FakeSupervisor(FakeStorage(pairs))
+    run = run_backtest(sup, sample_size=100)
+    assert run.items_evaluated == 0

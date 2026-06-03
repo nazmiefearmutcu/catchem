@@ -196,4 +196,18 @@ describe("AnalysisSummary", () => {
     // No headline link/heading for the (absent) title.
     expect(screen.queryByRole("heading", { name: /apple/i })).toBeNull();
   });
+
+  it("implements custom focus-visible ring styles on footer controls for keyboard navigation", () => {
+    renderSummary(makeResult());
+    const feedLink = screen.getByRole("link", { name: /open in feed/i });
+    const copyBtn = screen.getByRole("button", { name: /copy JSON/i });
+
+    expect(feedLink).toHaveClass("focus:outline-none");
+    expect(feedLink).toHaveClass("focus-visible:ring-1");
+    expect(feedLink).toHaveClass("focus-visible:ring-accent");
+
+    expect(copyBtn).toHaveClass("focus:outline-none");
+    expect(copyBtn).toHaveClass("focus-visible:ring-1");
+    expect(copyBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

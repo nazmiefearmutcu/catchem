@@ -86,11 +86,14 @@ export function AnalysisSummary({ result }: { result: DemoRunResponse }) {
       )}
 
       <footer className="flex flex-wrap items-center gap-2 pt-2 border-t border-[color:var(--border-subtle)]">
-        <Link to={`/feed/${encodeURIComponent(r.capture_id)}`} className="btn btn-accent text-xs">
+        <Link
+          to={`/feed/${encodeURIComponent(r.capture_id)}`}
+          className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        >
           open in feed →
         </Link>
         <button
-          className="btn text-xs"
+          className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           onClick={() => navigator.clipboard?.writeText(JSON.stringify(result, null, 2))}
           title="Copy the full DemoRunResponse JSON"
         >

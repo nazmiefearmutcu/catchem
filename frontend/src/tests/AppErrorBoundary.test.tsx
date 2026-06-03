@@ -97,4 +97,30 @@ describe("AppErrorBoundary", () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText.mock.calls[0][0]).toMatch(/Error: kaboom/);
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", () => {
+    const ref = { throw: true };
+    render(
+      <AppErrorBoundary>
+        <Boom live={ref} />
+      </AppErrorBoundary>,
+    );
+
+    const summary = screen.getByText(/show error details/i);
+    const reloadBtn = screen.getByRole("button", { name: /reload app/i });
+    const copyBtn = screen.getByRole("button", { name: /copy diagnostics/i });
+
+    expect(summary).toHaveClass("focus:outline-none");
+    expect(summary).toHaveClass("focus-visible:ring-1");
+    expect(summary).toHaveClass("focus-visible:ring-accent");
+
+    expect(reloadBtn).toHaveClass("focus:outline-none");
+    expect(reloadBtn).toHaveClass("focus-visible:ring-1");
+    expect(reloadBtn).toHaveClass("focus-visible:ring-accent");
+
+    expect(copyBtn).toHaveClass("focus:outline-none");
+    expect(copyBtn).toHaveClass("focus-visible:ring-1");
+    expect(copyBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });
+

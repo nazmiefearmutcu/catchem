@@ -23,6 +23,7 @@ manual one-shot harness, intentionally NOT a unit test.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import ClassVar
 
@@ -371,10 +372,150 @@ async def test_connect_and_read_sse_pumps_events(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setitem(__import__("sys").modules, "httpx", _FakeHttpx)
     # The method does `import httpx` locally; patching sys.modules covers it.
-    await chan._connect_and_read_sse(spec, st)
+    await chan._connect_and_read(spec, st)
 
     assert st.connected is True  # _mark_connected fired
     assert st.messages_received == 1
     assert st.ingested == 1
     assert sup.processed[0].title == "Wikipedia edit: Microsoft"
     _ = ws_push  # keep import referenced
+
+
+# ── Additional unit tests for coverage parity ──────────────────
+
+
+def test_sse_block_no_data_lines() -> None:
+    payloads, remainder = _iter_sse_data_lines("id: 123\n\n")
+    assert payloads == []
+    assert remainder == ""
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_sse_stop_during_iter(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("wiki", "https://stream.wikimedia.org/ws", "en.wikipedia.org", "sse", "wikimedia")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+        async def aiter_text(self):
+            yield "data: first\n\n"
+            chan._stop.set()
+            yield "data: second\n\n"
+
+    class _FakeStreamCtx:
+        async def __aenter__(self):
+            return _FakeResponse()
+        async def __aexit__(self, *a):
+            return False
+
+    class _FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        def stream(self, method, url, headers=None):
+            return _FakeStreamCtx()
+
+    class _FakeHttpx:
+        AsyncClient = _FakeClient
+        
+        @staticmethod
+        def Timeout(*a, **k):
+            return None
+
+    monkeypatch.setitem(sys.modules, "httpx", _FakeHttpx)
+    await chan._connect_and_read_sse(spec, st)
+
+    assert st.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_sse_buffer_overflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    import catchem.ws_push as ws_push
+    monkeypatch.setattr(ws_push, "MAX_SSE_BUFFER_BYTES", 5)
+
+    spec = WsSourceSpec("wiki", "https://stream.wikimedia.org/ws", "en.wikipedia.org", "sse", "wikimedia")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+        async def aiter_text(self):
+            yield "data: too long chunk without boundary"
+
+    class _FakeStreamCtx:
+        async def __aenter__(self):
+            return _FakeResponse()
+        async def __aexit__(self, *a):
+            return False
+
+    class _FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        def stream(self, method, url, headers=None):
+            return _FakeStreamCtx()
+
+    class _FakeHttpx:
+        AsyncClient = _FakeClient
+        
+        @staticmethod
+        def Timeout(*a, **k):
+            return None
+
+    monkeypatch.setitem(sys.modules, "httpx", _FakeHttpx)
+    with pytest.raises(RuntimeError, match="sse_buffer_overflow"):
+        await chan._connect_and_read_sse(spec, st)
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_sse_stop_during_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("wiki", "https://stream.wikimedia.org/ws", "en.wikipedia.org", "sse", "wikimedia")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    # Monkeypatch _handle_frame to set stop on first payload
+    async def mock_handle_frame(_spec, _st, payload):
+        chan._stop.set()
+
+    monkeypatch.setattr(chan, "_handle_frame", mock_handle_frame)
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+        async def aiter_text(self):
+            yield "data: first\n\ndata: second\n\n"
+
+    class _FakeStreamCtx:
+        async def __aenter__(self):
+            return _FakeResponse()
+        async def __aexit__(self, *a):
+            return False
+
+    class _FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        def stream(self, method, url, headers=None):
+            return _FakeStreamCtx()
+
+    class _FakeHttpx:
+        AsyncClient = _FakeClient
+        
+        @staticmethod
+        def Timeout(*a, **k):
+            return None
+
+    monkeypatch.setitem(sys.modules, "httpx", _FakeHttpx)
+    await chan._connect_and_read_sse(spec, st)

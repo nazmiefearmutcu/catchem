@@ -18,13 +18,16 @@ import is ever needed.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from catchem import ws_push
 from catchem.settings import load_settings, reload_settings
 from catchem.ws_push import (
     WS_BACKOFF_LADDER_SECONDS,
@@ -490,3 +493,358 @@ async def test_handle_frame_survives_throwing_custom_parser(
     assert st.messages_received == 1
     assert st.ingested == 0
     assert sup.processed == []
+
+
+# ── Additional unit tests for coverage parity ──────────────────
+
+
+def test_ws_lib_available_fallback() -> None:
+    # Mock both websockets and httpx_ws as missing
+    with pytest.MonkeyPatch.context() as m:
+        m.setitem(sys.modules, "websockets", None)
+        m.setitem(sys.modules, "httpx_ws", None)
+        assert ws_push._ws_lib_available() is None
+
+    # Mock websockets missing, but httpx_ws available
+    dummy_httpx_ws = MagicMock()
+    with pytest.MonkeyPatch.context() as m:
+        m.setitem(sys.modules, "websockets", None)
+        m.setitem(sys.modules, "httpx_ws", dummy_httpx_ws)
+        assert ws_push._ws_lib_available() == "httpx_ws"
+
+
+def test_parse_ws_message_bytes() -> None:
+    raw = b'{"title": "Fed cuts rates 25bps", "url": "https://wire.example.com/a"}'
+    item = parse_ws_message(raw, fallback_domain="wire.example.com")
+    assert item is not None
+    assert item.title == "Fed cuts rates 25bps"
+
+
+def test_parse_ws_message_no_title() -> None:
+    # No title keys, but text key is present
+    raw = '{"text": "Short body text without a title"}'
+    item = parse_ws_message(raw, fallback_domain="wire.example.com")
+    assert item is not None
+    assert item.title == "Short body text without a title"
+    assert item.text == "Short body text without a title"
+
+
+def test_sources_from_settings_attribute_error() -> None:
+    class _S:
+        class paths:
+            catchem_output_dir = Path("/tmp")
+        class news:
+            websocket_sources: ClassVar[list] = [
+                "not-a-dict",  # will raise AttributeError
+                {"url": "wss://valid/ws"},
+            ]
+    chan = WebSocketNewsChannel(
+        supervisor=_FakeSupervisor(),  # type: ignore[arg-type]
+        settings=_S(),  # type: ignore[arg-type]
+    )
+    assert len(chan.sources) == 1
+    assert chan.sources[0].url == "wss://valid/ws"
+
+
+@pytest.mark.asyncio
+async def test_start_already_running() -> None:
+    chan = _make_channel(sources=[WsSourceSpec("s", "wss://s/ws")])
+    # Manually append a mock task
+    mock_task = object()
+    chan._tasks.append(mock_task)  # type: ignore
+    chan.start()
+    assert len(chan._tasks) == 1
+    assert chan._tasks[0] is mock_task
+
+
+@pytest.mark.asyncio
+async def test_start_with_ws_library_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ws_push, "_ws_lib_available", lambda: "websockets")
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+
+    # Monkeypatch _connect_and_read to be a no-op that waits on stop
+    async def dummy_connect_and_read(_spec, _st):
+        await chan._stop.wait()
+
+    monkeypatch.setattr(chan, "_connect_and_read", dummy_connect_and_read)
+
+    chan.start()
+    assert len(chan._tasks) == 1
+    assert chan._lib == "websockets"
+    await chan.stop()
+    assert chan._tasks == []
+
+
+@pytest.mark.asyncio
+async def test_start_with_only_sse_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("sse_only", "https://s/sse", kind="sse")
+    chan = _make_channel(sources=[spec])
+
+    async def mock_connect_sse(_spec, _st):
+        await chan._stop.wait()
+
+    monkeypatch.setattr(chan, "_connect_and_read_sse", mock_connect_sse)
+    chan.start()
+    assert len(chan._tasks) == 1
+    assert chan._lib is not None
+    await chan.stop()
+
+
+@pytest.mark.asyncio
+async def test_run_source_stop_during_connect_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    async def mock_connect(_spec, _st):
+        chan._stop.set()
+
+    monkeypatch.setattr(chan, "_connect_and_read", mock_connect)
+    await chan._run_source(spec)
+    assert st.state == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_run_source_cancelled_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+
+    async def mock_connect(_spec, _st):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(chan, "_connect_and_read", mock_connect)
+
+    task = asyncio.create_task(chan._run_source(spec))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_run_source_exception_resets_failures_if_messages_received(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+    st.consecutive_failures = 3
+
+    async def mock_connect(_spec, _st):
+        _st.messages_received += 1
+        raise ConnectionError("drop after messages")
+
+    monkeypatch.setattr(chan, "_connect_and_read", mock_connect)
+
+    chan._stop.clear()
+    task = asyncio.create_task(chan._run_source(spec))
+    await asyncio.sleep(0.01)
+    chan._stop.set()
+    await task
+
+    assert st.consecutive_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_websockets(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_websockets = MagicMock()
+
+    class MockWS:
+        def __init__(self):
+            self.msgs = ["msg1"]
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            if not self.msgs:
+                raise StopAsyncIteration
+            return self.msgs.pop(0)
+
+    def mock_connect(url):
+        return MockWS()
+
+    mock_websockets.connect = mock_connect
+    monkeypatch.setitem(sys.modules, "websockets", mock_websockets)
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    chan._lib = "websockets"
+    st = chan._states[spec.name]
+
+    await chan._connect_and_read(spec, st)
+    assert st.connected is True
+    assert st.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_httpx_ws(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_httpx_ws = MagicMock()
+
+    class MockWS:
+        def __init__(self, channel):
+            self.channel = channel
+            self.msgs = ["msg1"]
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def receive_text(self):
+            if not self.msgs:
+                raise ConnectionError("connection closed")
+            return self.msgs.pop(0)
+
+    def mock_aconnect_ws(url, client):
+        return MockWS(chan)
+
+    mock_httpx_ws.aconnect_ws = mock_aconnect_ws
+    monkeypatch.setitem(sys.modules, "httpx_ws", mock_httpx_ws)
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    chan._lib = "httpx_ws"
+    st = chan._states[spec.name]
+
+    chan._stop.clear()
+    with pytest.raises(ConnectionError):
+        await chan._connect_and_read(spec, st)
+    assert st.connected is True
+    assert st.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_one_write_jsonl_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def mock_write_jsonl(*args, **kwargs):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr(ws_push, "write_jsonl", mock_write_jsonl)
+
+    spec = WsSourceSpec("wire", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+
+    item = ws_push.ParsedItem("title", "text", "https://s/a", "s.com", datetime.now(UTC))
+    chan._ingest_one(item)
+
+
+@pytest.mark.asyncio
+async def test_handle_frame_storage_check_exception() -> None:
+    spec = WsSourceSpec("wire", "wss://wire/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    # Mock get_record to raise exception
+    def mock_get_record(cap_id):
+        raise RuntimeError("database error")
+
+    chan._sup.storage.get_record = mock_get_record  # type: ignore
+
+    frame = '{"title": "Story A", "url": "https://wire.example.com/a"}'
+    await chan._handle_frame(spec, st, frame)
+    # The URL should have been discarded from seen cache
+    assert "https://wire.example.com/a" not in chan._seen
+
+
+@pytest.mark.asyncio
+async def test_handle_frame_ingest_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("wire", "wss://wire/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    def mock_ingest_one(item):
+        raise RuntimeError("ingest error")
+
+    monkeypatch.setattr(chan, "_ingest_one", mock_ingest_one)
+
+    frame = '{"title": "Story A", "url": "https://wire.example.com/a"}'
+    await chan._handle_frame(spec, st, frame)
+    # The URL should have been discarded from seen cache
+    assert "https://wire.example.com/a" not in chan._seen
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_httpx_ws_clean_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_httpx_ws = MagicMock()
+
+    class MockWS:
+        def __init__(self, channel):
+            self.channel = channel
+            self.msgs = ["msg1"]
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def receive_text(self):
+            # Set stop so the next iteration exits cleanly
+            self.channel._stop.set()
+            return "msg1"
+
+    def mock_aconnect_ws(url, client):
+        return MockWS(chan)
+
+    mock_httpx_ws.aconnect_ws = mock_aconnect_ws
+    monkeypatch.setitem(sys.modules, "httpx_ws", mock_httpx_ws)
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    chan._lib = "httpx_ws"
+    st = chan._states[spec.name]
+
+    chan._stop.clear()
+    await chan._connect_and_read(spec, st)
+    assert st.connected is True
+    assert st.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_run_source_stop_during_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    async def mock_connect(_spec, _st):
+        chan._stop.set()
+        raise ConnectionError("drop")
+
+    monkeypatch.setattr(chan, "_connect_and_read", mock_connect)
+    await chan._run_source(spec)
+    assert st.state == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_websockets_stop_during_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_websockets = MagicMock()
+
+    class MockWS:
+        def __init__(self, channel):
+            self.channel = channel
+            self.msgs = ["msg1", "msg2"]
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            if not self.msgs:
+                raise StopAsyncIteration
+            # Set stop after first message
+            if len(self.msgs) == 1:
+                self.channel._stop.set()
+            return self.msgs.pop(0)
+
+    def mock_connect(url):
+        return MockWS(chan)
+
+    mock_websockets.connect = mock_connect
+    monkeypatch.setitem(sys.modules, "websockets", mock_websockets)
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    chan._lib = "websockets"
+    st = chan._states[spec.name]
+
+    chan._stop.clear()
+    await chan._connect_and_read(spec, st)
+    assert st.messages_received == 1

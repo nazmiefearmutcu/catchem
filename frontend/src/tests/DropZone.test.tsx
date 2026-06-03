@@ -28,6 +28,10 @@ describe("<DropZone>", () => {
     // Enabled zone is focusable.
     expect(zone.getAttribute("tabindex")).toBe("0");
     expect(zone.getAttribute("aria-disabled")).toBe("false");
+    // Focus ring styles.
+    expect(zone).toHaveClass("focus:outline-none");
+    expect(zone).toHaveClass("focus-visible:ring-2");
+    expect(zone).toHaveClass("focus-visible:ring-accent");
     // The hint advertises the size cap and at least one allowed extension.
     expect(screen.getByText(/≤ 5 MB/)).toBeInTheDocument();
     expect(screen.getByText(/\.txt/)).toBeInTheDocument();

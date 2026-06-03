@@ -67,7 +67,7 @@ export function DropZone({ onFile, disabled = false, className = "" }: DropZoneP
         aria-disabled={disabled}
         aria-describedby={`${inputId}-hint`}
         aria-label="Upload article file"
-        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer ${
+        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
           disabled
             ? "border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/50 opacity-50 cursor-not-allowed"
             : hover

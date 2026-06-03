@@ -84,6 +84,38 @@ describe("RouteErrorBoundary", () => {
     const link = screen.getByRole("link", { name: /back to overview/i });
     expect(link).toHaveAttribute("href", "/");
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", () => {
+    const ref = { throw: true };
+    render(
+      <MemoryRouter>
+        <RouteErrorBoundary>
+          <Boom live={ref} />
+        </RouteErrorBoundary>
+      </MemoryRouter>
+    );
+
+    const summary = screen.getByText(/show error details/i);
+    const retryBtn = screen.getByRole("button", { name: /retry this page/i });
+    const backLink = screen.getByRole("link", { name: /back to overview/i });
+    const copyBtn = screen.getByRole("button", { name: /copy diagnostics/i });
+
+    expect(summary).toHaveClass("focus:outline-none");
+    expect(summary).toHaveClass("focus-visible:ring-1");
+    expect(summary).toHaveClass("focus-visible:ring-accent");
+
+    expect(retryBtn).toHaveClass("focus:outline-none");
+    expect(retryBtn).toHaveClass("focus-visible:ring-1");
+    expect(retryBtn).toHaveClass("focus-visible:ring-accent");
+
+    expect(backLink).toHaveClass("focus:outline-none");
+    expect(backLink).toHaveClass("focus-visible:ring-1");
+    expect(backLink).toHaveClass("focus-visible:ring-accent");
+
+    expect(copyBtn).toHaveClass("focus:outline-none");
+    expect(copyBtn).toHaveClass("focus-visible:ring-1");
+    expect(copyBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });
 
 describe("AppErrorBoundary", () => {

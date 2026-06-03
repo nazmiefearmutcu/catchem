@@ -62,7 +62,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, State> 
             </p>
             {this.state.error && (
               <details className="mt-4 text-[10px] text-[color:var(--fg-muted)]">
-                <summary className="cursor-pointer">Show error details</summary>
+                <summary className="cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">Show error details</summary>
                 <pre className="mt-2 overflow-auto max-h-48 bg-[color:var(--bg-elev2)] rounded p-2 font-mono leading-relaxed">
                   {this.state.error.name}: {this.state.error.message}
                   {this.state.error.stack ? `\n\n${this.state.error.stack}` : ""}
@@ -70,8 +70,8 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, State> 
               </details>
             )}
             <div className="mt-4 flex gap-2">
-              <button onClick={this.reload} className="btn">Reload app</button>
-              <button onClick={this.copy} className="btn">Copy diagnostics</button>
+              <button onClick={this.reload} className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Reload app</button>
+              <button onClick={this.copy} className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Copy diagnostics</button>
             </div>
           </div>
         </div>

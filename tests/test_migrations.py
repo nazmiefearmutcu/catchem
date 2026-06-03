@@ -9,6 +9,7 @@ actually fires on app boot.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -32,9 +33,16 @@ def _fresh_conn() -> sqlite3.Connection:
     return sqlite3.connect(":memory:", isolation_level=None)
 
 
-def test_fresh_db_runs_every_migration() -> None:
+@pytest.fixture
+def conn() -> Generator[sqlite3.Connection, None, None]:
+    """Provide a fresh in-memory SQLite connection and close it after the test."""
+    c = _fresh_conn()
+    yield c
+    c.close()
+
+
+def test_fresh_db_runs_every_migration(conn: sqlite3.Connection) -> None:
     """An untouched DB starts at user_version=0 and ends at max_known."""
-    conn = _fresh_conn()
     assert current_version(conn) == 0
     applied = apply_migrations(conn)
     assert len(applied) == len(MIGRATIONS)
@@ -42,9 +50,8 @@ def test_fresh_db_runs_every_migration() -> None:
     assert current_version(conn) == max_known_version()
 
 
-def test_reapply_is_noop_when_already_current() -> None:
+def test_reapply_is_noop_when_already_current(conn: sqlite3.Connection) -> None:
     """Apply twice — second call returns an empty list and leaves version pinned."""
-    conn = _fresh_conn()
     apply_migrations(conn)
     expected = current_version(conn)
     applied_again = apply_migrations(conn)
@@ -52,7 +59,9 @@ def test_reapply_is_noop_when_already_current() -> None:
     assert current_version(conn) == expected
 
 
-def test_failing_migration_rolls_back_user_version(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failing_migration_rolls_back_user_version(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A migration whose SQL errors leaves user_version untouched.
 
     Injects a bogus migration AFTER the real ones (version = max+1) so the
@@ -61,7 +70,6 @@ def test_failing_migration_rolls_back_user_version(monkeypatch: pytest.MonkeyPat
     the persisted ``user_version`` reflects only the migrations that
     succeeded before the failure.
     """
-    conn = _fresh_conn()
     apply_migrations(conn)  # land at max_known_version
     baseline_version = current_version(conn)
 
@@ -94,9 +102,8 @@ def test_unique_migration_names() -> None:
     assert len(names) == len(set(names)), f"duplicate migration name in {names}"
 
 
-def test_pending_migrations_filters_by_current_version() -> None:
+def test_pending_migrations_filters_by_current_version(conn: sqlite3.Connection) -> None:
     """A DB pinned mid-history reports exactly the unapplied tail."""
-    conn = _fresh_conn()
     # Pretend a partial migration: claim version 1 is already applied,
     # so pending should drop entries with version <= 1.
     conn.execute("PRAGMA user_version = 1")
@@ -105,9 +112,8 @@ def test_pending_migrations_filters_by_current_version() -> None:
     assert [m.version for m in pending] == [m.version for m in expected]
 
 
-def test_applied_migrations_create_record_tags_table() -> None:
+def test_applied_migrations_create_record_tags_table(conn: sqlite3.Connection) -> None:
     """End-to-end: after migrating a fresh DB, migration #2's table exists."""
-    conn = _fresh_conn()
     apply_migrations(conn)
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='record_tags'"
@@ -123,9 +129,8 @@ def test_applied_migrations_create_record_tags_table() -> None:
     assert {"idx_record_tags_tag", "idx_record_tags_capture"} <= idx
 
 
-def test_applied_migrations_create_portfolio_table() -> None:
+def test_applied_migrations_create_portfolio_table(conn: sqlite3.Connection) -> None:
     """Migration #3 lays down the READ-ONLY portfolio holdings table."""
-    conn = _fresh_conn()
     apply_migrations(conn)
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='portfolio'"
@@ -151,14 +156,13 @@ def test_applied_migrations_create_portfolio_table() -> None:
     assert "idx_portfolio_symbol" in idx
 
 
-def test_apply_migrations_idempotent_against_partial_state() -> None:
+def test_apply_migrations_idempotent_against_partial_state(conn: sqlite3.Connection) -> None:
     """Re-running a migration whose objects already exist is a clean no-op.
 
     Pre-creates migration #2's table by hand, then resets user_version to 1
     so apply_migrations re-runs #2. The IF NOT EXISTS guards must absorb the
     pre-existing objects without error, and the version must land at max.
     """
-    conn = _fresh_conn()
     apply_migrations(conn)
     assert current_version(conn) == max_known_version()
     # Simulate an interrupted upgrade: objects exist but version is behind.
@@ -170,9 +174,8 @@ def test_apply_migrations_idempotent_against_partial_state() -> None:
     assert current_version(conn) == max_known_version()
 
 
-def test_pending_on_fresh_db_is_full_registry() -> None:
+def test_pending_on_fresh_db_is_full_registry(conn: sqlite3.Connection) -> None:
     """A pristine connection reports every migration as pending."""
-    conn = _fresh_conn()
     assert [m.version for m in pending_migrations(conn)] == [m.version for m in MIGRATIONS]
 
 

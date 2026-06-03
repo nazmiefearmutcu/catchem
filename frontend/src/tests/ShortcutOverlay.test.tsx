@@ -139,4 +139,23 @@ describe("shortcut overlay", () => {
     expect(screen.getByTestId("shortcut-overlay-card")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
   });
+
+  it("has ARIA descriptions and custom focus states on close button", () => {
+    renderShell();
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
+    });
+    const card = screen.getByTestId("shortcut-overlay-card");
+    expect(card).toHaveAttribute("aria-describedby", "shortcut-overlay-instructions");
+
+    const instructions = document.getElementById("shortcut-overlay-instructions");
+    expect(instructions).toBeInTheDocument();
+    expect(instructions).toHaveClass("sr-only");
+    expect(instructions?.textContent).toContain("Keyboard shortcuts list");
+
+    const closeBtn = screen.getByTestId("shortcut-overlay-close");
+    expect(closeBtn).toHaveClass("focus:outline-none");
+    expect(closeBtn).toHaveClass("focus-visible:ring-1");
+    expect(closeBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

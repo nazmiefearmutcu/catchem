@@ -196,10 +196,14 @@ export function ShortcutOverlay() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="shortcut-overlay-title"
+        aria-describedby="shortcut-overlay-instructions"
         data-testid="shortcut-overlay-card"
         className="relative w-full max-w-2xl rounded-xl border border-accent/40 hero-gradient shadow-soft animate-modal-enter overflow-hidden my-8"
         onClick={(e) => e.stopPropagation()}
       >
+        <div id="shortcut-overlay-instructions" className="sr-only">
+          Keyboard shortcuts list. Press Escape to close.
+        </div>
         {/* Soft accent blob to echo the hero aesthetic used elsewhere
             (SettingsPage hero / quant heroes / Welcome page). */}
         <div
@@ -228,7 +232,7 @@ export function ShortcutOverlay() {
               type="button"
               onClick={close}
               aria-label="Close shortcuts"
-              className="btn shrink-0"
+              className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
               data-testid="shortcut-overlay-close"
             >
               ×

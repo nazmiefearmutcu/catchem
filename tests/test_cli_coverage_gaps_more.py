@@ -123,9 +123,11 @@ def seeded_storage(tmp_path: Path):
 
 
 def test_format_size_large() -> None:
-    # Coverage for line 258 fallback GB return
-    res = _format_size(5 * 1024 * 1024 * 1024)
-    assert res == "5.0 GB"
+    # Coverage for all units in _format_size
+    assert _format_size(500) == "500 B"
+    assert _format_size(1500) == "1.5 KB"
+    assert _format_size(5 * 1024 * 1024) == "5.0 MB"
+    assert _format_size(5 * 1024 * 1024 * 1024) == "5.0 GB"
 
 
 def test_override_mode_none() -> None:

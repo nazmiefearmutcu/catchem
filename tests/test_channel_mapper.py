@@ -109,3 +109,11 @@ def test_explicit_wildcard_reason_token_is_harmless() -> None:
     assert map_channels(["equities"], ["earnings", "*"]) == map_channels(
         ["equities"], ["earnings"]
     )
+
+
+def test_duplicate_channels_deduplicated_and_covered() -> None:
+    # "employment" and "labor_market" both map to "macro.labor".
+    # This triggers the "if channel in seen: continue" branch for coverage.
+    out = map_channels(["macro"], ["employment", "labor_market"])
+    assert out == ["macro.labor", "macro.general"]
+

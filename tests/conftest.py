@@ -21,7 +21,13 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VENV_SITE_PACKAGES = next(
-    (p for p in (PROJECT_ROOT / ".venv").glob("lib/python*/site-packages") if p.is_dir()),
+    (
+        p
+        for p in (PROJECT_ROOT / ".venv").glob(
+            f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        )
+        if p.is_dir()
+    ),
     None,
 )
 SRC_ROOT = PROJECT_ROOT / "src"

@@ -193,3 +193,71 @@ def test_evidence_fed_does_not_match_federated() -> None:
     assert real_idx == 0 or not spurious_present, (
         f"Real 'Fed' hit must outrank 'federated' substring hit. ev={ev}"
     )
+
+
+def test_clean_boilerplate_text() -> None:
+    from catchem.evidence import clean_boilerplate_text
+    text = "This is a real sentence. Follow us on Twitter for more updates. Click here to read more."
+    cleaned = clean_boilerplate_text(text)
+    assert cleaned == "This is a real sentence."
+
+
+def test_split_sentences_edge_cases() -> None:
+    # empty/None/whitespace
+    assert split_sentences(None) == []
+    assert split_sentences("   ") == []
+    assert split_sentences("") == []
+
+    # consecutive whitespace resulting in empty sentences
+    assert len(split_sentences("Sentence one.   . Sentence two.")) == 2
+
+    # boilerplate removal in split_sentences
+    assert split_sentences("Sentence one. All rights reserved.") == ["Sentence one."]
+
+    # long sentence truncation (> 400 chars)
+    long_sent = "A" * 399 + " B" * 10
+    res = split_sentences(long_sent)
+    assert len(res) == 1
+    assert res[0].endswith("…")
+    assert len(res[0]) <= 401
+
+    # duplicates seen
+    assert split_sentences("Hello. Hello. Hello.") == ["Hello."]
+
+
+def test_split_sentences_empty_part_mock() -> None:
+    from unittest.mock import patch
+    with patch("catchem.evidence._SENTENCE_SPLIT_RE") as mock_re:
+        mock_re.split.return_value = ["", "Valid sentence"]
+        assert split_sentences("some text") == ["Valid sentence"]
+
+
+def test_sentence_word_match_empty_term() -> None:
+    from catchem.evidence import _sentence_word_match
+    assert _sentence_word_match("hello world", "") is False
+
+
+def test_extract_evidence_edge_cases() -> None:
+    # no title, no body -> no sentences -> return []
+    cap_empty = _cap(title="", text="")
+    assert extract_evidence(cap_empty, label_terms=["fed"], entity_terms=[]) == []
+
+    # no terms -> fallback to first sentence
+    cap_no_terms = _cap(title="Fallback title", text="Body text.")
+    assert extract_evidence(cap_no_terms, label_terms=[], entity_terms=[]) == ["Fallback title"]
+
+    # title identical to first body sentence (s in seen branch)
+    cap_duplicate = _cap(title="Same Title.", text="Same Title. Another sentence.")
+    ev = extract_evidence(cap_duplicate, label_terms=["same"], entity_terms=[])
+    assert ev == ["Same Title."]
+
+    # no out: sentences exist, terms exist, but no matches -> returns first sentence
+    cap_no_match = _cap(title="", text="Hello world. Beautiful day.")
+    assert extract_evidence(cap_no_match, label_terms=["nonexistent"], entity_terms=[]) == ["Hello world."]
+
+
+def test_build_reason_text_edge_cases() -> None:
+    # empty asset/reason and missing sentiment
+    assert build_reason_text([], [], None) == "general | no-specific-reason | sentiment=unknown"
+
+

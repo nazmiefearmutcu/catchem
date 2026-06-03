@@ -215,4 +215,27 @@ describe("<HelpDrawer>", () => {
     // shortcut section should be rendered.
     expect(screen.queryByTestId("help-drawer-shortcuts")).not.toBeInTheDocument();
   });
+
+  it("has ARIA descriptions and custom focus states on trigger and close buttons", () => {
+    renderAt("/");
+    const trigger = screen.getByTestId("help-drawer-trigger");
+    expect(trigger).toHaveClass("focus:outline-none");
+    expect(trigger).toHaveClass("focus-visible:ring-2");
+    expect(trigger).toHaveClass("focus-visible:ring-accent");
+
+    fireEvent.click(trigger);
+
+    const drawer = screen.getByTestId("help-drawer");
+    expect(drawer).toHaveAttribute("aria-describedby", "help-drawer-instructions");
+
+    const instructions = document.getElementById("help-drawer-instructions");
+    expect(instructions).toBeInTheDocument();
+    expect(instructions).toHaveClass("sr-only");
+    expect(instructions?.textContent).toContain("Contextual help drawer");
+
+    const closeBtn = screen.getByTestId("help-drawer-close");
+    expect(closeBtn).toHaveClass("focus:outline-none");
+    expect(closeBtn).toHaveClass("focus-visible:ring-1");
+    expect(closeBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

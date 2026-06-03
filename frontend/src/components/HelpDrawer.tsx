@@ -124,7 +124,7 @@ export function HelpDrawer() {
         aria-controls="help-drawer"
         data-testid="help-drawer-trigger"
         title="Context help — quick tips for this page"
-        className="fixed bottom-4 right-4 z-[45] inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-[#0b1018] font-bold text-sm shadow-soft hover:opacity-90 hover:-translate-y-0.5 transition-all"
+        className="fixed bottom-4 right-4 z-[45] inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-[#0b1018] font-bold text-sm shadow-soft hover:opacity-90 hover:-translate-y-0.5 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         ?
       </button>
@@ -138,6 +138,7 @@ export function HelpDrawer() {
         role="dialog"
         aria-modal="false"
         aria-labelledby="help-drawer-title"
+        aria-describedby="help-drawer-instructions"
         onKeyDownCapture={handleKeyDownCapture}
         hidden={!open}
         // The `inert` attribute removes the subtree from the tab order AND
@@ -153,6 +154,9 @@ export function HelpDrawer() {
         data-open={open ? "true" : "false"}
         style={{ transitionDuration: "220ms" }}
       >
+        <div id="help-drawer-instructions" className="sr-only">
+          Contextual help drawer. Press Escape to close.
+        </div>
         <header className="flex items-start justify-between gap-3 border-b border-[color:var(--border-subtle)] px-4 py-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">
@@ -176,7 +180,7 @@ export function HelpDrawer() {
             aria-label="Close help drawer"
             ref={closeButtonRef}
             data-testid="help-drawer-close"
-            className="btn h-8 w-8 shrink-0 items-center justify-center p-0 text-sm leading-none"
+            className="btn h-8 w-8 shrink-0 items-center justify-center p-0 text-sm leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
           >
             ×
           </button>

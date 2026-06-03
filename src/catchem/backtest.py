@@ -94,9 +94,7 @@ def _bin_for(score: float) -> tuple[float, float] | None:
         if low <= score < high:
             return (low, high)
     last_low, last_high = _BIN_EDGES[-1]
-    if last_low <= score <= last_high:
-        return (last_low, last_high)
-    return None
+    return (last_low, last_high)
 
 
 def _empty_summary() -> dict[str, float | int]:
@@ -109,9 +107,7 @@ def _empty_summary() -> dict[str, float | int]:
     }
 
 
-def run_backtest(
-    supervisor: _SupervisorLike, sample_size: int = 200
-) -> BacktestRun:
+def run_backtest(supervisor: _SupervisorLike, sample_size: int = 200) -> BacktestRun:
     """Evaluate stub-vs-DeepSeek calibration over the last `sample_size` paired rows.
 
     We pull (stub, deepseek) pairs newest-first via `reviews_with_pair`,
@@ -178,10 +174,7 @@ def run_backtest(
     # two averages close to each other (and both close to the bin midpoint).
     calibration_bins: list[dict[str, Any]] = []
     for low, high in _BIN_EDGES:
-        in_bin = [
-            p for p in predictions
-            if _bin_for(float(p["predicted_score"])) == (low, high)
-        ]
+        in_bin = [p for p in predictions if _bin_for(float(p["predicted_score"])) == (low, high)]
         if not in_bin:
             continue
         avg_pred = sum(float(p["predicted_score"]) for p in in_bin) / len(in_bin)

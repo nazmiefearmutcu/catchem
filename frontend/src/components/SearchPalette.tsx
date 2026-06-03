@@ -458,7 +458,12 @@ export function SearchPalette() {
         className="w-full max-w-2xl rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft animate-modal-enter"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-[color:var(--border)] px-3">
+        <div id="search-palette-instructions" className="sr-only">
+          {hasQuery
+            ? "Search results loaded. Use up and down arrow keys to navigate, Enter to open, Command S to save, and Escape to close."
+            : "Use up and down arrow keys to navigate saved searches, Enter to run, Backspace to remove, and Escape to close."}
+        </div>
+        <div className="flex items-center gap-2 border-b border-[color:var(--border)] px-3 focus-within:ring-1 focus-within:ring-accent/50 focus-within:border-accent transition-all duration-200">
           <input
             ref={inputRef}
             value={input}
@@ -466,19 +471,31 @@ export function SearchPalette() {
             onKeyDown={handleKey}
             placeholder="Search records, symbols, clusters..."
             aria-label="Search query"
+            aria-describedby="search-palette-instructions"
             data-testid="search-palette-input"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls="search-palette-listbox"
+            aria-activedescendant={selectablesCount > 0 ? `search-palette-option-${selected}` : undefined}
             className="flex-1 bg-transparent py-3 text-sm outline-none"
           />
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="btn py-1 px-2 text-[10px] leading-none"
+            className="btn py-1 px-2 text-[10px] leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             aria-label="Close search palette"
           >
             close
           </button>
         </div>
-        <div ref={listRef} className="max-h-[28rem] overflow-auto p-1">
+        <div
+          ref={listRef}
+          id="search-palette-listbox"
+          role="listbox"
+          aria-label="Search results and saved queries"
+          className="max-h-[28rem] overflow-auto p-1"
+        >
           {/* ── Empty-query view: SAVED queries (v33) ───────────── */}
           {!hasQuery && visibleSaved.length === 0 && (
             <div className="px-3 py-4 text-[11px] text-[color:var(--fg-dim)] text-center">
@@ -486,7 +503,7 @@ export function SearchPalette() {
             </div>
           )}
           {!hasQuery && visibleSaved.length > 0 && (
-            <div data-testid="search-palette-saved-section">
+            <div data-testid="search-palette-saved-section" role="group" aria-label={`Saved searches (${visibleSaved.length})`}>
               <div
                 className="mt-1 px-3 py-1 text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)] label"
               >
@@ -498,10 +515,12 @@ export function SearchPalette() {
                 return (
                   <div
                     key={q}
+                    id={`search-palette-option-${i}`}
                     data-row-index={i}
                     data-saved-row="1"
                     data-testid="search-palette-saved-row"
                     aria-selected={isSelected}
+                    aria-label={`Saved search: ${q}`}
                     role="option"
                     className={
                       "group flex items-center justify-between gap-2 rounded px-3 py-2 text-sm cursor-pointer transition-opacity transition-colors " +
@@ -531,7 +550,7 @@ export function SearchPalette() {
                         ev.stopPropagation();
                         doRemove(q);
                       }}
-                      className="shrink-0 inline-flex items-center justify-center text-[color:var(--fg-dim)] hover:text-[color:var(--bad)] rounded px-1 py-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                      className="shrink-0 inline-flex items-center justify-center text-[color:var(--fg-dim)] hover:text-[color:var(--bad)] rounded px-1 py-0.5 opacity-60 hover:opacity-100 transition-opacity focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                     >
                       <Icon name="close" size={10} />
                     </button>
@@ -593,6 +612,14 @@ export function SearchPalette() {
                 : row.kind === "symbol"
                   ? `sym-${row.symbol}`
                   : `cluster-${row.cluster_id}`;
+            
+            const ariaLabel =
+              row.kind === "record"
+                ? `Record: ${row.title || "Untitled"}${row.domain ? ` (${row.domain})` : ""}`
+                : row.kind === "symbol"
+                  ? `Symbol: ${row.symbol}, ${row.count} mention${row.count === 1 ? "" : "s"}`
+                  : `Cluster: #${row.cluster_id.slice(0, 8)}, size ${row.size}${row.symbols.length > 0 ? `, symbols: ${row.symbols.slice(0, 6).join(", ")}` : ""}`;
+
             return (
               <div key={naturalKey}>
                 {sectionLabel && (
@@ -604,6 +631,9 @@ export function SearchPalette() {
                   type="button"
                   role="option"
                   aria-selected={isSelected}
+                  aria-label={ariaLabel}
+                  id={`search-palette-option-${i}`}
+                  tabIndex={-1}
                   data-row-index={i}
                   data-row-kind={row.kind}
                   onMouseEnter={() => setSelected(i)}
@@ -683,7 +713,7 @@ export function SearchPalette() {
                 type="button"
                 onClick={doSave}
                 data-testid="search-palette-save-button"
-                className="text-[11px] px-2 py-1 rounded border border-[color:var(--border)] hover:bg-[color:var(--bg-elev2)] hover:border-[color:var(--accent)] transition-colors flex items-center gap-1"
+                className="text-[11px] px-2 py-1 rounded border border-[color:var(--border)] hover:bg-[color:var(--bg-elev2)] hover:border-[color:var(--accent)] transition-colors flex items-center gap-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               >
                 <Icon name="save" size={12} />
                 {justSaved === input.trim() ? "Saved!" : "Save this search"}

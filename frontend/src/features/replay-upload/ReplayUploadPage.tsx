@@ -158,7 +158,7 @@ function ModeStrip({ current, onChange }: { current: Tab; onChange: (t: Tab) => 
             aria-selected={active}
             onClick={() => onChange(t)}
             data-testid={`tab-${t}`}
-            className={`group flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+            className={`group flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
               active
                 ? "border-accent bg-accent/10 text-[color:var(--fg)]"
                 : "border-[color:var(--border)] bg-[color:var(--bg-elev)] hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]"
@@ -294,7 +294,7 @@ function PasteForm() {
           </label>
           <input
             id="paste-title"
-            className="input"
+            className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             placeholder="Federal Reserve raises rates by 25 bps"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -313,7 +313,7 @@ function PasteForm() {
           </div>
           <textarea
             id="paste-text"
-            className="input min-h-[260px] resize-y font-mono text-xs leading-relaxed"
+            className="input min-h-[260px] resize-y font-mono text-xs leading-relaxed focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             placeholder="Paste the article body here…"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -338,7 +338,7 @@ function PasteForm() {
             </label>
             <input
               id="paste-domain"
-              className="input"
+              className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               placeholder="reuters.com"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
@@ -351,7 +351,7 @@ function PasteForm() {
             </label>
             <input
               id="paste-url"
-              className="input"
+              className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               placeholder="https://reuters.com/…"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -361,12 +361,12 @@ function PasteForm() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="submit" className="btn btn-accent" disabled={!ready || m.isPending}>
+          <button type="submit" className="btn btn-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" disabled={!ready || m.isPending}>
             {m.isPending ? `analyzing… ${fmtElapsed(runElapsed)}` : "Analyze"}
           </button>
           <button
             type="button"
-            className="btn"
+            className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             disabled={m.isPending || !dirty}
             onClick={onClear}
           >
@@ -374,7 +374,7 @@ function PasteForm() {
           </button>
           <button
             type="button"
-            className="btn"
+            className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             disabled={m.isPending}
             onClick={onLoadSample}
           >
@@ -468,7 +468,7 @@ function UploadForm() {
             </label>
             <input
               id="up-title"
-              className="input"
+              className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               placeholder="defaults to first heading or first sentence"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -481,7 +481,7 @@ function UploadForm() {
             </label>
             <input
               id="up-domain"
-              className="input"
+              className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               autoComplete="off"
@@ -507,7 +507,7 @@ function UploadForm() {
               </span>
               <button
                 type="button"
-                className="ml-auto btn text-[10px] py-0.5 px-2"
+                className="ml-auto btn text-[10px] py-0.5 px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 disabled={m.isPending}
                 onClick={() => { setStaged(null); setPreview(null); }}
               >
@@ -520,7 +520,7 @@ function UploadForm() {
             <div className="mt-3 flex items-center gap-2">
               <button
                 type="button"
-                className="btn btn-accent"
+                className="btn btn-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 disabled={m.isPending}
                 onClick={onProcess}
                 data-testid="upload-process"
@@ -537,7 +537,7 @@ function UploadForm() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="btn"
+            className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             disabled={m.isPending || !dirty}
             onClick={onClear}
             data-testid="upload-clear"
@@ -655,7 +655,7 @@ function ReplayForm() {
               </label>
               <input
                 id="replay-max"
-                className="input w-32"
+                className="input w-32 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 type="number"
                 min={1}
                 max={5000}
@@ -677,7 +677,7 @@ function ReplayForm() {
                   <button
                     key={n}
                     type="button"
-                    className={`chip text-[10px] ${maxRecords === n ? "chip-active" : ""}`}
+                    className={`chip text-[10px] ${maxRecords === n ? "chip-active" : ""} focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
                     onClick={() => setMaxRecords(n)}
                     disabled={m.isPending}
                   >
@@ -690,7 +690,7 @@ function ReplayForm() {
           <div className="flex items-center gap-2">
             <button
               type="submit"
-              className="btn btn-accent"
+              className="btn btn-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               disabled={!ready || m.isPending}
               data-testid="replay-run"
             >
@@ -698,7 +698,7 @@ function ReplayForm() {
             </button>
             <button
               type="button"
-              className="btn"
+              className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               disabled={m.isPending || (!result && !m.isError)}
               onClick={() => {
                 setResult(null);

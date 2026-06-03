@@ -232,4 +232,91 @@ describe("ReplayUploadPage", () => {
     fireEvent.click(screen.getByTestId("tab-replay"));
     expect(screen.getByTestId("help-card")).toHaveTextContent(/What does Replay do/i);
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", () => {
+    render(createElement(ReplayUploadPage), { wrapper });
+
+    // 1. Mode tabs
+    const tabPaste = screen.getByTestId("tab-paste");
+    expect(tabPaste).toHaveClass("focus:outline-none");
+    expect(tabPaste).toHaveClass("focus-visible:ring-1");
+    expect(tabPaste).toHaveClass("focus-visible:ring-accent");
+
+    // 2. PasteForm controls (default tab)
+    const pasteTitle = screen.getByLabelText(/title/i);
+    expect(pasteTitle).toHaveClass("focus:outline-none");
+    expect(pasteTitle).toHaveClass("focus-visible:ring-1");
+    expect(pasteTitle).toHaveClass("focus-visible:ring-accent");
+
+    const pasteText = screen.getByLabelText(/article body/i);
+    expect(pasteText).toHaveClass("focus:outline-none");
+    expect(pasteText).toHaveClass("focus-visible:ring-1");
+    expect(pasteText).toHaveClass("focus-visible:ring-accent");
+
+    const pasteDomain = screen.getByLabelText(/domain/i);
+    expect(pasteDomain).toHaveClass("focus:outline-none");
+    expect(pasteDomain).toHaveClass("focus-visible:ring-1");
+    expect(pasteDomain).toHaveClass("focus-visible:ring-accent");
+
+    const pasteUrl = screen.getByLabelText(/url \(optional\)/i);
+    expect(pasteUrl).toHaveClass("focus:outline-none");
+    expect(pasteUrl).toHaveClass("focus-visible:ring-1");
+    expect(pasteUrl).toHaveClass("focus-visible:ring-accent");
+
+    const pasteSubmit = screen.getByRole("button", { name: /Analyze/i });
+    expect(pasteSubmit).toHaveClass("focus:outline-none");
+    expect(pasteSubmit).toHaveClass("focus-visible:ring-1");
+    expect(pasteSubmit).toHaveClass("focus-visible:ring-accent");
+
+    const pasteClear = screen.getByRole("button", { name: /clear/i });
+    expect(pasteClear).toHaveClass("focus:outline-none");
+    expect(pasteClear).toHaveClass("focus-visible:ring-1");
+    expect(pasteClear).toHaveClass("focus-visible:ring-accent");
+
+    const pasteSample = screen.getByRole("button", { name: /Load sample/i });
+    expect(pasteSample).toHaveClass("focus:outline-none");
+    expect(pasteSample).toHaveClass("focus-visible:ring-1");
+    expect(pasteSample).toHaveClass("focus-visible:ring-accent");
+
+    // Switch to Upload tab
+    fireEvent.click(screen.getByTestId("tab-upload"));
+
+    // 3. UploadForm controls
+    const upTitle = screen.getByLabelText(/title \(optional/i);
+    expect(upTitle).toHaveClass("focus:outline-none");
+    expect(upTitle).toHaveClass("focus-visible:ring-1");
+    expect(upTitle).toHaveClass("focus-visible:ring-accent");
+
+    const upDomain = screen.getByLabelText(/domain/i);
+    expect(upDomain).toHaveClass("focus:outline-none");
+    expect(upDomain).toHaveClass("focus-visible:ring-1");
+    expect(upDomain).toHaveClass("focus-visible:ring-accent");
+
+    const upClear = screen.getByTestId("upload-clear");
+    expect(upClear).toHaveClass("focus:outline-none");
+    expect(upClear).toHaveClass("focus-visible:ring-1");
+    expect(upClear).toHaveClass("focus-visible:ring-accent");
+
+    // Switch to Replay tab
+    fireEvent.click(screen.getByTestId("tab-replay"));
+
+    // 4. ReplayForm controls
+    const replayMax = screen.getByTestId("replay-max-input");
+    expect(replayMax).toHaveClass("focus:outline-none");
+    expect(replayMax).toHaveClass("focus-visible:ring-1");
+    expect(replayMax).toHaveClass("focus-visible:ring-accent");
+
+    const presets = ["25", "50", "200", "1000"];
+    presets.forEach((val) => {
+      const presetBtn = screen.getByRole("button", { name: new RegExp(`^${val}$`) });
+      expect(presetBtn).toHaveClass("focus:outline-none");
+      expect(presetBtn).toHaveClass("focus-visible:ring-1");
+      expect(presetBtn).toHaveClass("focus-visible:ring-accent");
+    });
+
+    const replayRun = screen.getByTestId("replay-run");
+    expect(replayRun).toHaveClass("focus:outline-none");
+    expect(replayRun).toHaveClass("focus-visible:ring-1");
+    expect(replayRun).toHaveClass("focus-visible:ring-accent");
+  });
 });

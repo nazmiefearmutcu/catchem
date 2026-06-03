@@ -460,7 +460,7 @@ function HeroLiveRead({
             <button
               key={n}
               type="button"
-              className={`chip text-[10px] ${windowSize === n ? "chip-active" : ""}`}
+              className={`chip text-[10px] ${windowSize === n ? "chip-active" : ""} focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
               onClick={() => onWindowChange(n)}
             >
               {n.toLocaleString()}
@@ -468,7 +468,7 @@ function HeroLiveRead({
           ))}
           <button
             type="button"
-            className="chip text-[10px]"
+            className="chip text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={onRegenerate}
             disabled={stream.state === "streaming"}
             data-testid="live-read-regenerate"
@@ -483,7 +483,7 @@ function HeroLiveRead({
           </button>
           <button
             type="button"
-            className="chip text-[10px]"
+            className="chip text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             disabled={!dashboard}
             onClick={() => {
               if (!dashboard) return;
@@ -508,7 +508,7 @@ function HeroLiveRead({
           <a
             href={api.exportQuantUrl(windowSize)}
             download="catchem_quant.json"
-            className="chip text-[10px] hover:bg-[color:var(--bg-elev2)]"
+            className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             title="Download a fresh quant signals JSON from the sidecar"
             data-testid="quant-export-signals"
           >
@@ -519,7 +519,7 @@ function HeroLiveRead({
           </a>
           <button
             type="button"
-            className="chip text-[10px] no-print"
+            className="chip text-[10px] no-print focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => window.print()}
             title="Print this page or save as PDF"
           >
@@ -868,7 +868,7 @@ function TabStrip({
               selected
                 ? "border-accent text-[color:var(--fg)] font-semibold"
                 : "border-transparent text-[color:var(--fg-dim)] hover:text-[color:var(--fg)]"
-            }`}
+            } focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-t`}
           >
             {TAB_LABELS[t]}
             {badge > 0 && (
@@ -1202,7 +1202,7 @@ function TopEventHero({
   const primary = (
     <button
       type="button"
-      className="hover:underline text-left"
+      className="hover:underline text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
       onClick={() => onSelect(top)}
       title="open cluster drill-down"
     >
@@ -1433,7 +1433,7 @@ function TopNetworkHero({
       primaryValue={
         <button
           type="button"
-          className="hover:underline text-left"
+          className="hover:underline text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
           onClick={() => onSelectCell({ asset: top.asset_class, reason: top.reason_code })}
           title="open record list for this combo"
         >
@@ -1694,7 +1694,7 @@ function Header({
           <button
             key={n}
             type="button"
-            className={`chip text-[10px] ${windowSize === n ? "chip-active" : ""}`}
+            className={`chip text-[10px] ${windowSize === n ? "chip-active" : ""} focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
             onClick={() => onWindowChange(n)}
           >
             {n.toLocaleString()}
@@ -1702,7 +1702,7 @@ function Header({
         ))}
         <button
           type="button"
-          className="chip text-[10px] ml-auto"
+          className="chip text-[10px] ml-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           disabled={!dashboard}
           onClick={() => {
             if (!dashboard) return;
@@ -1756,7 +1756,7 @@ function RegimeLineChart({ report }: { report: RegimeReportDTO | null }) {
     return (
       <section className="card">
         <h2 className="label mb-2">topic regime · KL divergence</h2>
-        <EmptyState title="No regime buckets yet" hint="Wait for the corpus to fill at least 2 buckets." action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} />
+        <EmptyState title="No regime buckets yet" hint="Wait for the corpus to fill at least 2 buckets." action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} />
       </section>
     );
   }
@@ -1779,7 +1779,7 @@ function RegimeLineChart({ report }: { report: RegimeReportDTO | null }) {
           {lastShift && (
             <button
               type="button"
-              className="chip text-[10px]"
+              className="chip text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               disabled={explain.isPending}
               onClick={() => explain.mutate(lastShift as unknown as Record<string, unknown>)}
             >
@@ -1978,7 +1978,7 @@ function AnomalySubpanel({
                 {onExplain && r.payload && (
                   <button
                     type="button"
-                    className="text-[9px] text-[color:var(--fg-muted)] hover:text-accent"
+                    className="text-[9px] text-[color:var(--fg-muted)] hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                     onClick={() => onExplain(r.payload!)}
                     title="explain signal"
                     aria-label="Explain signal"
@@ -2027,7 +2027,7 @@ function SymbolBurstSubpanel({
                 <span className="text-[9px] text-bad font-mono">z {b.z_score.toFixed(1)}</span>
                 <button
                   type="button"
-                  className="text-[9px] text-[color:var(--fg-muted)] hover:text-accent"
+                  className="text-[9px] text-[color:var(--fg-muted)] hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                   onClick={() => onExplain(b)}
                   title="explain symbol burst"
                   aria-label={`Explain symbol burst for ${b.symbol}`}
@@ -2058,7 +2058,7 @@ function EventClustersPanel({
     return (
       <section className="card">
         <h2 className="label mb-2">event clusters</h2>
-        <EmptyState title="No multi-source events yet" hint="A cluster needs ≥2 captures of the same event within 30 min." action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} />
+        <EmptyState title="No multi-source events yet" hint="A cluster needs ≥2 captures of the same event within 30 min." action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} />
       </section>
     );
   }
@@ -2193,7 +2193,7 @@ function ClusterDrillDown({
     <aside className="card grid gap-2 text-xs">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="label">cluster #{cluster.cluster_id.slice(0, 8)}</h3>
-        <button type="button" className="btn text-[10px] py-0.5 px-2" onClick={onClose}>
+        <button type="button" className="btn text-[10px] py-0.5 px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={onClose}>
           close
         </button>
       </div>
@@ -2290,7 +2290,7 @@ function MemberRecordsList({
               <div className="text-[11px] leading-snug mt-0.5 flex items-baseline gap-1">
                 <button
                   type="button"
-                  className="text-left text-[color:var(--fg)] hover:underline"
+                  className="text-left text-[color:var(--fg)] hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                   onClick={() => setOpenCaptureId(open ? null : r.capture_id)}
                   title="show paired reviews + market reaction"
                 >
@@ -2301,7 +2301,7 @@ function MemberRecordsList({
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[10px] text-[color:var(--fg-dim)] hover:text-accent"
+                    className="text-[10px] text-[color:var(--fg-dim)] hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                     title="open the source article in a new tab"
                     aria-label="Open source article in new tab"
                   >
@@ -2398,7 +2398,7 @@ function HeatmapDetailDrawer({
     <aside className="card grid gap-2 text-xs">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="label">heatmap drill</h3>
-        <button type="button" className="btn text-[10px] py-0.5 px-2" onClick={onClose}>
+        <button type="button" className="btn text-[10px] py-0.5 px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={onClose}>
           close
         </button>
       </div>
@@ -2579,7 +2579,7 @@ function WatchlistCard({
       </div>
       <div className="flex gap-1">
         <input
-          className="input text-[11px] flex-1"
+          className="input text-[11px] flex-1 focus:outline-none focus:ring-1 focus:ring-accent focus-visible:ring-1 focus-visible:ring-accent"
           placeholder="add ticker (AAPL, BTC-USD)"
           aria-label="Add ticker to watchlist"
           value={input}
@@ -2593,7 +2593,7 @@ function WatchlistCard({
         />
         <button
           type="button"
-          className="btn text-[10px] px-2"
+          className="btn text-[10px] px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           onClick={handleAdd}
           disabled={!input.trim()}
         >
@@ -2615,7 +2615,7 @@ function WatchlistCard({
                 type="button"
                 role="radio"
                 aria-checked={active}
-                className={`chip text-[10px] ${active ? "chip-active" : ""}`}
+                className={`chip text-[10px] ${active ? "chip-active" : ""} focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
                 data-testid={`watchlist-sort-${mode}`}
                 onClick={() => setSortBy(mode)}
                 title={`Sort by ${WATCHLIST_SORT_LABELS[mode].toLowerCase()}`}
@@ -2664,7 +2664,7 @@ function WatchlistCard({
               >
                 <button
                   type="button"
-                  className="text-[10px] text-[color:var(--fg-muted)] cursor-grab active:cursor-grabbing select-none px-0.5"
+                  className="text-[10px] text-[color:var(--fg-muted)] cursor-grab active:cursor-grabbing select-none px-0.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                   aria-label={`Reorder ${sym} (Alt+ArrowUp or Alt+ArrowDown)`}
                   title="drag to reorder · Alt+↑ / Alt+↓"
                   data-testid={`watchlist-handle-${sym}`}
@@ -2686,7 +2686,7 @@ function WatchlistCard({
                 </span>
                 <button
                   type="button"
-                  className="text-[10px] text-[color:var(--fg-muted)] hover:text-bad"
+                  className="text-[10px] text-[color:var(--fg-muted)] hover:text-bad focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
                   onClick={() => remove(sym)}
                   title="remove"
                   aria-label={`Remove ${sym} from watchlist`}
@@ -2747,7 +2747,7 @@ function TickerTape({
             <button
               key={t.symbol}
               type="button"
-              className={`rounded border ${tone} px-2 py-1 text-[11px] hover:bg-[color:var(--bg-elev2)] transition-colors`}
+              className={`rounded border ${tone} px-2 py-1 text-[11px] hover:bg-[color:var(--bg-elev2)] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
               onClick={() => onToggleWatch(t.symbol)}
               title={`${insufficient ? "single bucket — momentum needs more data" : t.direction.replace("_", " ")} · ${t.mention_count} mentions across ${t.buckets.length} buckets`}
             >
@@ -2888,7 +2888,7 @@ function SentimentMomentumPanel({
         <EmptyState
           title="Not enough ticker mentions yet"
           hint={`A ticker needs ≥${report?.min_mentions ?? 4} mentions across multiple ${report?.bucket_minutes ?? 240}m buckets to register.`}
-          action={<Link to="/replay" className="btn">Open Replay/Upload</Link>}
+          action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>}
         />
       </section>
     );
@@ -2980,7 +2980,7 @@ function SentimentDispersionPanel() {
                 scope === s
                   ? "border-accent/60 bg-accent/10 text-accent"
                   : "border-[color:var(--border-subtle)] text-[color:var(--fg-muted)] hover:border-accent/40"
-              }`}
+              } focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
             >
               {s === "asset_classes" ? "asset class" : "symbol"}
             </button>
@@ -3201,7 +3201,7 @@ function IntensityPanel() {
                 scope === s
                   ? "border-accent/60 bg-accent/10 text-accent"
                   : "border-[color:var(--border-subtle)] text-[color:var(--fg-muted)] hover:border-accent/40"
-              }`}
+              } focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
             >
               {s === "asset_classes" ? "asset class" : "symbol"}
             </button>
@@ -3261,7 +3261,7 @@ function IntensityRow({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[color:var(--bg-elev2)]/50"
+        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[color:var(--bg-elev2)]/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
         data-testid="intensity-row"
       >
         <span
@@ -3375,7 +3375,7 @@ function TickerMomentumRow({
       <div className="flex items-baseline justify-between gap-2">
         <button
           type="button"
-          className="font-mono font-semibold text-sm text-accent flex items-center gap-1 hover:underline"
+          className="font-mono font-semibold text-sm text-accent flex items-center gap-1 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
           onClick={onToggleWatch}
           title={watched ? "remove from watchlist" : "add to watchlist"}
         >

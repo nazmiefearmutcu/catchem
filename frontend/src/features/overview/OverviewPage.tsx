@@ -217,7 +217,7 @@ export function OverviewPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="chip text-[10px] no-print hover:bg-[color:var(--bg-elev2)]"
+              className="chip text-[10px] no-print hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={() => window.print()}
               title="Print this page or save as PDF"
             >
@@ -226,7 +226,7 @@ export function OverviewPage() {
                 print / save PDF
               </span>
             </button>
-            <Link to="/scan" className="chip text-[10px] hover:bg-[color:var(--bg-elev2)]">
+            <Link to="/scan" className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">
               <span className="inline-flex items-center gap-1">
                 open Quant Scan
                 <Icon name="arrowRight" />
@@ -266,7 +266,7 @@ export function OverviewPage() {
         {isCustomTileOrder && (
           <button
             type="button"
-            className="chip text-[10px] absolute -top-6 right-0 opacity-0 group-hover/tiles:opacity-100 focus:opacity-100 transition-opacity hover:bg-[color:var(--bg-elev2)]"
+            className="chip text-[10px] absolute -top-6 right-0 opacity-0 group-hover/tiles:opacity-100 focus:opacity-100 transition-opacity hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={resetTileOrder}
             title="Reset KPI tile order to default"
             data-testid="overview-tile-reset"
@@ -303,6 +303,7 @@ export function OverviewPage() {
                 className={[
                   "relative rounded transition-shadow",
                   "cursor-grab active:cursor-grabbing select-none",
+                  "focus:outline-none focus-visible:ring-1 focus-visible:ring-accent",
                   isDragging ? "opacity-50" : "",
                   isDropTarget ? "ring-1 ring-accent" : "",
                 ]
@@ -330,7 +331,7 @@ export function OverviewPage() {
         <div className="card">
           <h2 className="label mb-2">trend (last buckets)</h2>
           {trends.isLoading ? <Skeleton className="h-40" /> :
-            trends.data && trends.data.buckets.length === 0 ? <EmptyState title="No trend data yet" hint="Run a replay first." action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} /> :
+            trends.data && trends.data.buckets.length === 0 ? <EmptyState title="No trend data yet" hint="Run a replay first." action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} /> :
             trends.data && (
               <EChart
                 height={180}
@@ -357,12 +358,12 @@ export function OverviewPage() {
       <section className="card">
         <div className="flex items-center justify-between mb-2">
           <h2 className="label">most recent relevant</h2>
-          <Link to="/feed" className="text-xs text-accent hover:underline">view all →</Link>
+          <Link to="/feed" className="text-xs text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">view all →</Link>
         </div>
         {s.recent_top.length === 0 ? (
           <EmptyState title="No records yet"
                       hint="The live news poller is fetching now — items will appear here within a minute. You can also paste an article in Replay/Upload to ingest immediately."
-                      action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} />
+                      action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} />
         ) : (
           <ul className="divide-y divide-[color:var(--border)]">
             {s.recent_top.map((r) => {
@@ -378,7 +379,7 @@ export function OverviewPage() {
                   </div>
                   <div className="text-sm">
                     {href ? (
-                      <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">
                         {r.title ?? "(untitled)"}
                       </a>
                     ) : (

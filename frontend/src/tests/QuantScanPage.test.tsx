@@ -241,4 +241,62 @@ describe("QuantScanPage (smoke)", () => {
     // Hero is still mounted — the interaction didn't blow up the tree.
     expect(screen.getByTestId("live-read-title")).toBeInTheDocument();
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    // Populate clusters so cluster detail buttons render
+    dashboardFixture.n_clusters = 1;
+    dashboardFixture.clusters = [
+      {
+        cluster_id: "cluster-focus-0001",
+        capture_ids: ["cap-1"],
+        first_seen_ts: "2026-05-28T12:00:00Z",
+        last_seen_ts: "2026-05-28T12:20:00Z",
+        dominant_symbols: ["AAPL"],
+        dominant_reasons: ["earnings"],
+        dominant_assets: ["equities"],
+        member_domains: ["reuters.com"],
+        size: 1,
+        mean_relevance: 0.82,
+        coherence: 0.74,
+      },
+    ];
+
+    renderPage();
+
+    // 1. Check window chips (e.g. "200")
+    const windowChip = await screen.findByRole("button", { name: "200" });
+    expect(windowChip).toHaveClass("focus:outline-none");
+    expect(windowChip).toHaveClass("focus-visible:ring-1");
+    expect(windowChip).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Regenerate button
+    const regenBtn = await screen.findByRole("button", { name: /regenerate/i });
+    expect(regenBtn).toHaveClass("focus:outline-none");
+    expect(regenBtn).toHaveClass("focus-visible:ring-1");
+    expect(regenBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Export signals link/button
+    const exportLink = await screen.findByTestId("quant-export-signals");
+    expect(exportLink).toHaveClass("focus:outline-none");
+    expect(exportLink).toHaveClass("focus-visible:ring-1");
+    expect(exportLink).toHaveClass("focus-visible:ring-accent");
+
+    // 4. Tab buttons (tablist)
+    const tabBtn = await screen.findByTestId("quant-tab-events");
+    expect(tabBtn).toHaveClass("focus:outline-none");
+    expect(tabBtn).toHaveClass("focus-visible:ring-1");
+    expect(tabBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 5. Watchlist add button
+    const addBtn = await screen.findByRole("button", { name: /add/i });
+    expect(addBtn).toHaveClass("focus:outline-none");
+    expect(addBtn).toHaveClass("focus-visible:ring-1");
+    expect(addBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 6. Watchlist input
+    const inputField = await screen.findByLabelText(/Add ticker to watchlist/i);
+    expect(inputField).toHaveClass("focus:outline-none");
+    expect(inputField).toHaveClass("focus-visible:ring-1");
+    expect(inputField).toHaveClass("focus-visible:ring-accent");
+  });
 });

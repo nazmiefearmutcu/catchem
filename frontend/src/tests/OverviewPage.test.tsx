@@ -313,4 +313,62 @@ describe("OverviewPage (smoke)", () => {
     // No per-theme chips in the degraded state.
     expect(screen.queryByTestId("global-tone-theme-markets")).toBeNull();
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderOverview();
+
+    // 1. Print / Save PDF button
+    const printBtn = await screen.findByRole("button", { name: /print \/ save PDF/i });
+    expect(printBtn).toHaveClass("focus:outline-none");
+    expect(printBtn).toHaveClass("focus-visible:ring-1");
+    expect(printBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Link to scan
+    const scanLink = await screen.findByRole("link", { name: /open Quant Scan/i });
+    expect(scanLink).toHaveClass("focus:outline-none");
+    expect(scanLink).toHaveClass("focus-visible:ring-1");
+    expect(scanLink).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Tile elements (role="group" with tabIndex=0)
+    const totalTile = await screen.findByTestId("overview-tile-total");
+    expect(totalTile).toHaveClass("focus:outline-none");
+    expect(totalTile).toHaveClass("focus-visible:ring-1");
+    expect(totalTile).toHaveClass("focus-visible:ring-accent");
+
+    // 4. View all link
+    const viewAllLink = await screen.findByRole("link", { name: /view all →/i });
+    expect(viewAllLink).toHaveClass("focus:outline-none");
+    expect(viewAllLink).toHaveClass("focus-visible:ring-1");
+    expect(viewAllLink).toHaveClass("focus-visible:ring-accent");
+
+    // 5. Recent top record link
+    const recentLink = await screen.findByRole("link", { name: /fed holds rates steady/i });
+    expect(recentLink).toHaveClass("focus:outline-none");
+    expect(recentLink).toHaveClass("focus-visible:ring-1");
+    expect(recentLink).toHaveClass("focus-visible:ring-accent");
+  });
+
+  it("implements custom focus-visible ring styles on empty state action links", async () => {
+    summaryMock.mockResolvedValue(
+      makeSummary({
+        totals: { total: 0, finance_relevant: 0 },
+        asset_class_distribution: {},
+        reason_code_distribution: {},
+        sentiment_distribution: {},
+        recent_top: [],
+        dlq: 0,
+      }),
+    );
+    trendsMock.mockResolvedValue(makeTrends({ buckets: [], asset_classes: [], series: {} }));
+
+    renderOverview();
+
+    const emptyLinks = await screen.findAllByRole("link", { name: /open replay\/upload/i });
+    expect(emptyLinks.length).toBeGreaterThan(0);
+    emptyLinks.forEach((link) => {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    });
+  });
 });

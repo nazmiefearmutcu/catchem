@@ -147,4 +147,19 @@ describe("BenchmarkPage", () => {
       await screen.findByText(/1 item misclassified/i),
     ).toBeInTheDocument();
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderPage();
+
+    const printBtn = await screen.findByRole("button", { name: /print \/ save pdf/i });
+    const rerunBtn = await screen.findByRole("button", { name: /re-run/i });
+
+    expect(printBtn).toHaveClass("focus:outline-none");
+    expect(printBtn).toHaveClass("focus-visible:ring-1");
+    expect(printBtn).toHaveClass("focus-visible:ring-accent");
+
+    expect(rerunBtn).toHaveClass("focus:outline-none");
+    expect(rerunBtn).toHaveClass("focus-visible:ring-1");
+    expect(rerunBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

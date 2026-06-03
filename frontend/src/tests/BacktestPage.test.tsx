@@ -149,4 +149,19 @@ describe("BacktestPage", () => {
     ).toBeGreaterThan(0);
     expect(screen.getByText(/0 populated bins/i)).toBeInTheDocument();
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderPage();
+
+    const sampleSelect = await screen.findByRole("combobox", { name: /sample size/i });
+    const rerunBtn = await screen.findByRole("button", { name: /re-run/i });
+
+    expect(sampleSelect).toHaveClass("focus:outline-none");
+    expect(sampleSelect).toHaveClass("focus-visible:ring-1");
+    expect(sampleSelect).toHaveClass("focus-visible:ring-accent");
+
+    expect(rerunBtn).toHaveClass("focus:outline-none");
+    expect(rerunBtn).toHaveClass("focus-visible:ring-1");
+    expect(rerunBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

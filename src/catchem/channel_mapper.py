@@ -42,6 +42,7 @@ _CHANNEL_RULES: list[tuple[str, str, str]] = [
     ("macro", "inflation", "macro.inflation"),
     ("macro", "central_bank", "macro.policy"),
     ("macro", "employment", "macro.labor"),
+    ("macro", "labor_market", "macro.labor"),
     ("macro", "growth_recession", "macro.growth"),
     ("macro", "geopolitics", "macro.geo"),
     ("macro", "sanctions_trade", "macro.trade"),
@@ -55,7 +56,7 @@ def map_channels(asset_classes: Iterable[str], reason_codes: Iterable[str]) -> l
     channels: list[str] = []
     seen: set[str] = set()
     for asset, reason, channel in _CHANNEL_RULES:
-        if asset not in asset_set and asset != "*":
+        if asset not in asset_set:
             continue
         if reason != "*" and reason not in reason_set:
             continue

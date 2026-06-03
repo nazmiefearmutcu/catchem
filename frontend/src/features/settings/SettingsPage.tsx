@@ -143,7 +143,7 @@ export function SettingsPage() {
                 </div>
               </div>
             </div>
-            <button className="btn shrink-0" onClick={toggle}>
+            <button className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={toggle}>
               switch to {theme === "dark" ? "light" : "dark"}
             </button>
           </div>
@@ -236,11 +236,11 @@ export function SettingsPage() {
         <section className="card">
           <h2 className="label mb-2">api / debug links</h2>
           <ul className="text-sm grid gap-1">
-            <li><a className="text-accent hover:underline" href="/legacy" target="_blank" rel="noopener noreferrer">/legacy — vanilla dashboard</a></li>
-            <li><a className="text-accent hover:underline" href="/docs" target="_blank" rel="noopener noreferrer">/docs — OpenAPI</a></li>
-            <li><a className="text-accent hover:underline" href="/ui/summary" target="_blank" rel="noopener noreferrer">/ui/summary — JSON overview</a></li>
-            <li><a className="text-accent hover:underline" href="/ui/guards" target="_blank" rel="noopener noreferrer">/ui/guards — guard snapshot</a></li>
-            <li><a className="text-accent hover:underline" href="/ui/benchmark/latest" target="_blank" rel="noopener noreferrer">/ui/benchmark/latest — last benchmark</a></li>
+            <li><a className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" href="/legacy" target="_blank" rel="noopener noreferrer">/legacy — vanilla dashboard</a></li>
+            <li><a className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" href="/docs" target="_blank" rel="noopener noreferrer">/docs — OpenAPI</a></li>
+            <li><a className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" href="/ui/summary" target="_blank" rel="noopener noreferrer">/ui/summary — JSON overview</a></li>
+            <li><a className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" href="/ui/guards" target="_blank" rel="noopener noreferrer">/ui/guards — guard snapshot</a></li>
+            <li><a className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" href="/ui/benchmark/latest" target="_blank" rel="noopener noreferrer">/ui/benchmark/latest — last benchmark</a></li>
           </ul>
         </section>
       </section>
@@ -535,15 +535,15 @@ function DeepSeekReviewerCard() {
           step={0.01}
           value={samplingRate}
           onChange={(e) => setSamplingRate(parseFloat(e.target.value))}
-          className="w-full accent-[color:var(--accent)]"
+          className="w-full accent-[color:var(--accent)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           data-testid="ds-sampling-slider"
         />
         <div className="flex justify-between text-[9px] text-[color:var(--fg-muted)] tabular-nums">
-          <button type="button" className="hover:text-accent" onClick={() => setSamplingRate(0)}>0%</button>
-          <button type="button" className="hover:text-accent" onClick={() => setSamplingRate(0.25)}>25%</button>
-          <button type="button" className="hover:text-accent" onClick={() => setSamplingRate(0.5)}>50%</button>
-          <button type="button" className="hover:text-accent" onClick={() => setSamplingRate(0.75)}>75%</button>
-          <button type="button" className="hover:text-accent" onClick={() => setSamplingRate(1)}>100%</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setSamplingRate(0)}>0%</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setSamplingRate(0.25)}>25%</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setSamplingRate(0.5)}>50%</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setSamplingRate(0.75)}>75%</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setSamplingRate(1)}>100%</button>
         </div>
         <div className="text-[10px] text-[color:var(--fg-muted)]">
           deterministic — same capture_id always lands in the same bucket
@@ -564,7 +564,7 @@ function DeepSeekReviewerCard() {
               </span>
               <button
                 type="button"
-                className="btn text-[10px] !py-0.5 !px-2"
+                className="btn text-[10px] !py-0.5 !px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={() => setEditingKey(true)}
                 data-testid="ds-key-replace"
               >
@@ -576,7 +576,7 @@ function DeepSeekReviewerCard() {
               <input
                 id="ds-key"
                 type="password"
-                className="input"
+                className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 placeholder="sk-..."
                 value={apiKey}
                 onChange={(e) => {
@@ -597,7 +597,7 @@ function DeepSeekReviewerCard() {
                       href="https://platform.deepseek.com/api_keys"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-accent hover:underline"
+                      className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                     >
                       deepseek.com
                     </a>
@@ -606,7 +606,7 @@ function DeepSeekReviewerCard() {
                 {d.deepseek_keyed && (
                   <button
                     type="button"
-                    className="text-accent hover:underline"
+                    className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                     onClick={() => {
                       setEditingKey(false);
                       setApiKey("");
@@ -625,7 +625,7 @@ function DeepSeekReviewerCard() {
           <label htmlFor="ds-model" className="label">model</label>
           <input
             id="ds-model"
-            className="input"
+            className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             value={model}
             onChange={(e) => setModel(e.target.value)}
             placeholder="deepseek-chat"
@@ -647,7 +647,7 @@ function DeepSeekReviewerCard() {
             type="number"
             min={0}
             step={0.5}
-            className="input flex-1"
+            className="input flex-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             value={usdCap}
             onChange={(e) => {
               const n = parseFloat(e.target.value);
@@ -678,7 +678,7 @@ function DeepSeekReviewerCard() {
       <div className="relative flex flex-wrap items-center gap-2 pt-3 border-t border-[color:var(--border-subtle)]">
         <button
           type="button"
-          className="btn btn-accent text-xs"
+          className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           disabled={!dirty || save.isPending}
           onClick={saveFormValues}
           data-testid="ds-save-btn"
@@ -850,7 +850,7 @@ function AccentPickerCard() {
               <input
                 id="accent-custom-light"
                 type="color"
-                className="h-7 w-12 cursor-pointer rounded border border-[color:var(--border)] bg-transparent p-0"
+                className="h-7 w-12 cursor-pointer rounded border border-[color:var(--border)] bg-transparent p-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 value={customLight}
                 onChange={(e) => setCustomLight(e.target.value)}
                 aria-label="Accent color for light theme"
@@ -869,7 +869,7 @@ function AccentPickerCard() {
               <input
                 id="accent-custom-dark"
                 type="color"
-                className="h-7 w-12 cursor-pointer rounded border border-[color:var(--border)] bg-transparent p-0"
+                className="h-7 w-12 cursor-pointer rounded border border-[color:var(--border)] bg-transparent p-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 value={customDark}
                 onChange={(e) => setCustomDark(e.target.value)}
                 aria-label="Accent color for dark theme"
@@ -922,7 +922,7 @@ function AccentSwatch({
       title={presetId}
       data-testid={`accent-swatch-${presetId}`}
       data-active={active ? "true" : "false"}
-      className={`relative h-7 w-7 rounded-full transition-transform hover:scale-110 ${
+      className={`relative h-7 w-7 rounded-full transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--bg-elev)] focus-visible:ring-accent ${
         active
           ? "ring-2 ring-offset-2 ring-offset-[color:var(--bg-elev)] ring-accent"
           : "ring-1 ring-[color:var(--border)]"
@@ -986,7 +986,7 @@ function LanguagePickerCard() {
               onClick={() => setLang(opt.id)}
               data-testid={`language-option-${opt.id}`}
               data-active={active ? "true" : "false"}
-              className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border transition-colors ${
+              className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                 active
                   ? "border-accent bg-accent/15 text-accent font-semibold"
                   : "border-[color:var(--border)] bg-[color:var(--bg-elev2)]/40 text-[color:var(--fg-dim)] hover:border-accent/50 hover:text-[color:var(--fg)]"
@@ -1029,6 +1029,7 @@ function ToggleSwitch({
         className={`
           relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full
           border transition-colors disabled:opacity-60 disabled:cursor-wait
+          focus:outline-none focus-visible:ring-1 focus-visible:ring-accent
           ${checked
             ? "bg-accent border-accent"
             : "bg-[color:var(--bg-elev2)] border-[color:var(--border)]"}
@@ -1231,7 +1232,7 @@ function DatabaseBackupCard() {
         <a
           href={api.dbExportUrl}
           download
-          className={`btn btn-accent text-xs ${!info.data?.exists ? "pointer-events-none opacity-50" : ""}`}
+          className={`btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${!info.data?.exists ? "pointer-events-none opacity-50" : ""}`}
           aria-disabled={!info.data?.exists}
           data-testid="db-export-link"
         >
@@ -1260,7 +1261,7 @@ function DatabaseBackupCard() {
           </div>
           <button
             type="button"
-            className="btn text-xs"
+            className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => fileRef.current?.click()}
             data-testid="db-import-pick"
           >
@@ -1298,7 +1299,7 @@ function DatabaseBackupCard() {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 type="button"
-                className="btn btn-accent text-xs"
+                className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={confirmImport}
                 disabled={importMutation.isPending}
                 data-testid="db-import-confirm-btn"
@@ -1307,7 +1308,7 @@ function DatabaseBackupCard() {
               </button>
               <button
                 type="button"
-                className="btn text-xs"
+                className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={cancelImport}
                 disabled={importMutation.isPending}
                 data-testid="db-import-cancel-btn"
@@ -1573,7 +1574,7 @@ function WebhookOutputCard() {
             </span>
             <button
               type="button"
-              className="btn text-[10px] !py-0.5 !px-2"
+              className="btn text-[10px] !py-0.5 !px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={() => setEditingUrl(true)}
               data-testid="webhook-url-replace"
             >
@@ -1585,7 +1586,7 @@ function WebhookOutputCard() {
             <input
               id="wh-url"
               type="url"
-              className="input"
+              className="input focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               placeholder="https://hooks.slack.com/services/T.../B.../..."
               value={url}
               onChange={(e) => {
@@ -1606,7 +1607,7 @@ function WebhookOutputCard() {
               {d.url_configured && (
                 <button
                   type="button"
-                  className="text-accent hover:underline"
+                  className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                   onClick={() => {
                     setEditingUrl(false);
                     setUrl("");
@@ -1654,15 +1655,15 @@ function WebhookOutputCard() {
           step={0.01}
           value={minScore}
           onChange={(e) => setMinScore(parseFloat(e.target.value))}
-          className="w-full accent-[color:var(--accent)]"
+          className="w-full accent-[color:var(--accent)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           data-testid="webhook-score-slider"
         />
         <div className="flex justify-between text-[9px] text-[color:var(--fg-muted)] tabular-nums">
-          <button type="button" className="hover:text-accent" onClick={() => setMinScore(0)}>0.00</button>
-          <button type="button" className="hover:text-accent" onClick={() => setMinScore(0.5)}>0.50</button>
-          <button type="button" className="hover:text-accent" onClick={() => setMinScore(0.7)}>0.70</button>
-          <button type="button" className="hover:text-accent" onClick={() => setMinScore(0.85)}>0.85</button>
-          <button type="button" className="hover:text-accent" onClick={() => setMinScore(1.0)}>1.00</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setMinScore(0)}>0.00</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setMinScore(0.5)}>0.50</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setMinScore(0.7)}>0.70</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setMinScore(0.85)}>0.85</button>
+          <button type="button" className="hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm" onClick={() => setMinScore(1.0)}>1.00</button>
         </div>
         <div className="text-[10px] text-[color:var(--fg-muted)]">
           only records with <code className="font-mono">finance_relevance_score</code> ≥ this fire
@@ -1690,7 +1691,7 @@ function WebhookOutputCard() {
                 key={ac}
                 type="button"
                 onClick={() => setAssetFilter((cur) => toggleChip(cur, ac))}
-                className={`text-[10px] tabular-nums rounded-full border px-2.5 py-0.5 transition-colors ${
+                className={`text-[10px] tabular-nums rounded-full border px-2.5 py-0.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   active
                     ? "border-accent bg-accent/15 text-accent"
                     : "border-[color:var(--border)] text-[color:var(--fg-dim)] hover:border-accent/40 hover:text-accent"
@@ -1726,7 +1727,7 @@ function WebhookOutputCard() {
                 key={rc}
                 type="button"
                 onClick={() => setReasonFilter((cur) => toggleChip(cur, rc))}
-                className={`text-[10px] tabular-nums rounded-full border px-2.5 py-0.5 transition-colors ${
+                className={`text-[10px] tabular-nums rounded-full border px-2.5 py-0.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   active
                     ? "border-accent bg-accent/15 text-accent"
                     : "border-[color:var(--border)] text-[color:var(--fg-dim)] hover:border-accent/40 hover:text-accent"
@@ -1745,7 +1746,7 @@ function WebhookOutputCard() {
       <div className="relative flex flex-wrap items-center gap-2 pt-3 border-t border-[color:var(--border-subtle)]">
         <button
           type="button"
-          className="btn btn-accent text-xs"
+          className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           disabled={!dirty || save.isPending}
           onClick={saveFormValues}
           data-testid="webhook-save-btn"
@@ -1765,7 +1766,7 @@ function WebhookOutputCard() {
           return (
             <button
               type="button"
-              className="btn text-xs inline-flex items-center gap-1.5"
+              className="btn text-xs inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               disabled={testDisabled}
               onClick={() => test.mutate()}
               title={
@@ -1954,7 +1955,7 @@ function WorkspaceSnapshotCard() {
       {/* Allow-list disclosure — so the user can see exactly what's about
           to leave or land on their machine. */}
       <details className="mb-3" data-testid="snapshot-allowlist-disclosure">
-        <summary className="cursor-pointer text-[11px] text-accent hover:underline">
+        <summary className="cursor-pointer text-[11px] text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">
           What's included? ({SNAPSHOT_ALLOW_LIST.length} keys)
         </summary>
         <ul
@@ -1971,7 +1972,7 @@ function WorkspaceSnapshotCard() {
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <button
           type="button"
-          className="btn btn-accent text-xs"
+          className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           onClick={handleExport}
           data-testid="snapshot-export-btn"
         >
@@ -1987,7 +1988,7 @@ function WorkspaceSnapshotCard() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="btn text-xs"
+            className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => fileRef.current?.click()}
             data-testid="snapshot-import-pick"
           >
@@ -2041,7 +2042,7 @@ function WorkspaceSnapshotCard() {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 type="button"
-                className="btn btn-accent text-xs"
+                className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={handleConfirmImport}
                 disabled={importBusy || !pendingDiff || !reviewedDiff}
                 data-testid="snapshot-import-confirm-btn"
@@ -2050,7 +2051,7 @@ function WorkspaceSnapshotCard() {
               </button>
               <button
                 type="button"
-                className="btn text-xs"
+                className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={handleCancelImport}
                 disabled={importBusy}
                 data-testid="snapshot-import-cancel-btn"
@@ -2099,7 +2100,7 @@ function WorkspaceSnapshotCard() {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 type="button"
-                className="btn btn-accent text-xs"
+                className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={() => window.location.reload()}
                 data-testid="snapshot-reload-btn"
               >
@@ -2107,7 +2108,7 @@ function WorkspaceSnapshotCard() {
               </button>
               <button
                 type="button"
-                className="btn text-xs"
+                className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={() => setImportResult(null)}
                 data-testid="snapshot-dismiss-btn"
               >
@@ -2227,7 +2228,7 @@ function SnapshotDiffPreview({
           type="checkbox"
           checked={reviewed}
           onChange={(e) => onReviewedChange(e.target.checked)}
-          className="accent-[color:var(--accent)]"
+          className="accent-[color:var(--accent)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
           data-testid="snapshot-diff-reviewed-checkbox"
         />
         <span className="text-[color:var(--fg-dim)]">
@@ -2273,7 +2274,7 @@ function SnapshotDiffGroup({
       className={`rounded border ${toneClass} px-2 py-1 text-[10px]`}
       data-testid={testid}
     >
-      <summary className="cursor-pointer font-semibold flex items-center gap-1.5">
+      <summary className="cursor-pointer font-semibold flex items-center gap-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">
         <span aria-hidden className="font-mono">{icon}</span>
         <span>{label}</span>
       </summary>
@@ -2409,7 +2410,7 @@ function ResetPreferencesCard() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="btn border-bad/60 text-bad hover:bg-bad/10 text-xs"
+            className="btn border-bad/60 text-bad hover:bg-bad/10 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={handleOpen}
             data-testid="reset-preferences-open-btn"
           >
@@ -2548,7 +2549,7 @@ function ResetPreferencesModal({
             <button
               ref={cancelButtonRef}
               type="button"
-              className="btn text-xs"
+              className="btn text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={onClose}
               data-testid="reset-preferences-modal-cancel"
             >
@@ -2556,7 +2557,7 @@ function ResetPreferencesModal({
             </button>
             <button
               type="button"
-              className="btn border-bad/60 text-bad hover:bg-bad/10 text-xs"
+              className="btn border-bad/60 text-bad hover:bg-bad/10 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={handleConfirm}
               data-testid="reset-preferences-modal-confirm"
             >

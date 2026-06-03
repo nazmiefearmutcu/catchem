@@ -273,7 +273,7 @@ export function Shell() {
     <div className="min-h-full flex flex-col">
       {/* Skip-to-content link — first focusable element so keyboard users can
           bypass the nav. Visually hidden until focused (see globals.css). */}
-      <a href="#main" className="skip-link">Skip to main content</a>
+      <a href="#main" className="skip-link focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Skip to main content</a>
       {/* Sticky header with subtle backdrop blur — sits above page content
           on scroll so the analyst can navigate without losing context. */}
       <header className="sticky top-0 z-30 border-b border-[color:var(--border)] bg-[color:var(--bg-elev)]/85 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--bg-elev)]/70">
@@ -291,7 +291,7 @@ export function Shell() {
               ref={mobileNavTriggerRef}
               type="button"
               onClick={toggleMobileNav}
-              className="btn md:hidden"
+              className="btn md:hidden focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
               aria-expanded={mobileNavOpen}
               aria-controls="mobile-nav-drawer"
@@ -315,7 +315,7 @@ export function Shell() {
                     isActive ? "text-[color:var(--fg)] font-semibold" : "text-[color:var(--fg-dim)]"
                   } after:content-[''] after:absolute after:left-2 after:right-2 after:-bottom-[10px] after:h-px ${
                     isActive ? "after:bg-accent" : "after:bg-transparent"
-                  }`
+                  } focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded`
                 }
               >
                 {t(n.key)}
@@ -323,7 +323,7 @@ export function Shell() {
             ))}
             <a
               href="/legacy"
-              className="ml-1 px-2 py-1 rounded-md text-[color:var(--fg-muted)] hover:bg-[color:var(--bg-elev2)] hover:text-[color:var(--fg-dim)]"
+              className="ml-1 px-2 py-1 rounded-md text-[color:var(--fg-muted)] hover:bg-[color:var(--bg-elev2)] hover:text-[color:var(--fg-dim)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               aria-label="Legacy dashboard"
             >
               /legacy
@@ -351,7 +351,7 @@ export function Shell() {
               data-testid="notification-bell"
               data-unread={unreadCount > 0 ? "1" : "0"}
               title="Notifications (g n)"
-              className="btn relative"
+              className="btn relative focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             >
               <Icon name={unreadCount > 0 ? "bell" : "bellOff"} size={14} />
               {unreadCount > 0 && (
@@ -365,7 +365,7 @@ export function Shell() {
               )}
             </button>
             <button onClick={toggle}
-                    className="btn"
+                    className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                     title="Toggle theme (Cmd+K → theme)"
                     aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
               {theme === "dark" ? "☼" : "☾"}
@@ -373,7 +373,7 @@ export function Shell() {
             <button
               type="button"
               onClick={openCommandPalette}
-              className="btn hidden sm:inline-flex"
+              className="btn hidden sm:inline-flex focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               title="Open command palette (nav + actions)"
               aria-label="Open command palette"
             >
@@ -382,7 +382,7 @@ export function Shell() {
             <button
               type="button"
               onClick={openSearchPalette}
-              className="btn hidden sm:inline-flex"
+              className="btn hidden sm:inline-flex focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               title="Open search palette (records, symbols, clusters)"
               aria-label="Open search palette"
             >
@@ -416,7 +416,7 @@ export function Shell() {
                   <button
                     type="button"
                     onClick={closeMobileNav}
-                    className="btn px-2 py-1 text-[10px] leading-none"
+                    className="btn px-2 py-1 text-[10px] leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                     aria-label="Close navigation panel"
                   >
                     close
@@ -431,7 +431,7 @@ export function Shell() {
                     onFocus={() => prefetchRoute(n.path)}
                     onClick={closeMobileNav}
                     className={({ isActive }) =>
-                      `block rounded-md px-3 py-2 text-sm transition-colors ${
+                      `block rounded-md px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                         isActive
                           ? "bg-[color:var(--bg-elev2)] text-[color:var(--fg)] font-semibold"
                           : "text-[color:var(--fg-dim)] hover:bg-[color:var(--bg-elev2)]"
@@ -444,7 +444,7 @@ export function Shell() {
                 <a
                   href="/legacy"
                   onClick={closeMobileNav}
-                  className="block rounded-md px-3 py-2 mt-1 text-[color:var(--fg-dim)] hover:bg-[color:var(--bg-elev2)] hover:text-[color:var(--fg-dim)]"
+                  className="block rounded-md px-3 py-2 mt-1 text-[color:var(--fg-dim)] hover:bg-[color:var(--bg-elev2)] hover:text-[color:var(--fg-dim)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                   aria-label="Legacy dashboard"
                 >
                   /legacy

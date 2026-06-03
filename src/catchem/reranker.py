@@ -15,8 +15,12 @@ from rapidfuzz import fuzz
 
 class Reranker(Protocol):
     @property
-    def model_version(self) -> str: ...
-    def rank(self, query: str, candidates: Iterable[str]) -> list[tuple[str, float]]: ...
+    def model_version(self) -> str:
+        return ""
+
+    def rank(self, query: str, candidates: Iterable[str]) -> list[tuple[str, float]]:
+        return []
+
 
 
 class RerankerStub:

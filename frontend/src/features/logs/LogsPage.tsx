@@ -306,7 +306,7 @@ export function LogsPage() {
             </div>
           </div>
           <button
-            className="btn max-w-full"
+            className="btn max-w-full focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => {
               qc.invalidateQueries({ queryKey: ["logs-page-tail"] });
             }}
@@ -353,7 +353,7 @@ export function LogsPage() {
             data-testid="logs-filter-select"
             value={filter}
             onChange={(e) => setFilter(e.target.value as FilterValue)}
-            className="rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2 py-1 text-xs"
+            className="rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2 py-1 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             <option value="all">All</option>
             <option value="info">Info</option>
@@ -367,7 +367,7 @@ export function LogsPage() {
             placeholder="search lines…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="min-w-[160px] flex-1 max-w-md rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2 py-1 text-xs"
+            className="min-w-[160px] flex-1 max-w-md rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2 py-1 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
           <label className="flex items-center gap-1 text-xs cursor-pointer select-none">
             <input
@@ -375,6 +375,7 @@ export function LogsPage() {
               data-testid="logs-autoscroll-toggle"
               checked={autoScroll}
               onChange={(e) => setAutoScroll(e.target.checked)}
+              className="accent-[color:var(--accent)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
             />
             <span>auto-scroll</span>
           </label>
@@ -384,12 +385,13 @@ export function LogsPage() {
               data-testid="logs-pause-toggle"
               checked={paused}
               onChange={(e) => setPaused(e.target.checked)}
+              className="accent-[color:var(--accent)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
             />
             <span>pause</span>
           </label>
           <button
             type="button"
-            className="btn ml-auto max-w-full"
+            className="btn ml-auto max-w-full focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             data-testid="logs-copy-button"
             onClick={copyVisible}
             disabled={filtered.length === 0}
@@ -418,7 +420,7 @@ export function LogsPage() {
             title="no log lines yet"
             hint="The sidecar hasn't written anything yet. Triggering a replay or poll-news will produce activity."
             action={
-              <Link to="/feed" className="btn" data-testid="logs-empty-cta">
+              <Link to="/feed" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" data-testid="logs-empty-cta">
                 Trigger log activity
               </Link>
             }
@@ -436,7 +438,7 @@ export function LogsPage() {
             action={
               <button
                 type="button"
-                className="btn"
+                className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={() => {
                   setFilter("all");
                   setSearch("");
@@ -467,7 +469,7 @@ export function LogsPage() {
               <button
                 type="button"
                 data-testid="logs-jump-to-bottom"
-                className="absolute right-4 bottom-4 btn shadow-soft"
+                className="absolute right-4 bottom-4 btn shadow-soft focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick={() => {
                   const el = scrollRef.current;
                   if (el) el.scrollTop = el.scrollHeight;

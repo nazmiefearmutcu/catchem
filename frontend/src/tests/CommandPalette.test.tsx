@@ -188,4 +188,66 @@ describe("command palette", () => {
     expect(router.state.location.pathname).toBe("/");
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
   });
+
+  describe("Accessibility (O-11)", () => {
+    it("enforces combobox and listbox accessibility contracts", () => {
+      renderShell();
+      
+      // Open the palette
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+      });
+      
+      const input = screen.getByLabelText("Command query") as HTMLInputElement;
+      
+      // Verify initial combobox attributes on input
+      expect(input).toHaveAttribute("role", "combobox");
+      expect(input).toHaveAttribute("aria-autocomplete", "list");
+      expect(input).toHaveAttribute("aria-expanded", "true");
+      expect(input).toHaveAttribute("aria-controls", "command-palette-listbox");
+      expect(input).toHaveAttribute("aria-describedby", "command-palette-instructions");
+      
+      // Verify instruction element exists and describes list navigation
+      const instructions = document.getElementById("command-palette-instructions");
+      expect(instructions).toBeInTheDocument();
+      expect(instructions?.textContent).toContain("arrow keys");
+
+      // Check listbox role and id
+      const listbox = screen.getByRole("listbox");
+      expect(listbox).toHaveAttribute("id", "command-palette-listbox");
+
+      // Check option list attributes
+      const options = screen.getAllByRole("option");
+      expect(options.length).toBeGreaterThan(0);
+
+      // Verify Option 0 attributes
+      expect(options[0]).toHaveAttribute("id", "command-palette-option-0");
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+      expect(options[0]).toHaveAttribute("tabIndex", "-1");
+      expect(options[0]).toHaveAttribute("aria-label");
+
+      // Navigate to next option and verify active descendant updates
+      act(() => {
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+      });
+      expect(input).toHaveAttribute("aria-activedescendant", "command-palette-option-1");
+      expect(options[1]).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("applies correct focus outline and visible ring CSS classes to interactive controls", () => {
+      renderShell();
+      
+      // Open the palette
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+      });
+      
+      const input = screen.getByLabelText("Command query") as HTMLInputElement;
+      const inputWrapper = input.parentElement;
+      expect(inputWrapper).toHaveClass("focus-within:ring-1");
+
+      const closeBtn = screen.getByLabelText("Close command palette");
+      expect(closeBtn).toHaveClass("focus-visible:ring-accent");
+    });
+  });
 });

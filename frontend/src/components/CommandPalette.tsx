@@ -663,7 +663,10 @@ export function CommandPalette() {
         className="w-full max-w-xl rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft animate-modal-enter"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-[color:var(--border)] px-3">
+        <div id="command-palette-instructions" className="sr-only">
+          Command palette loaded. Use up and down arrow keys to navigate options, Enter to select, and Escape to close.
+        </div>
+        <div className="flex items-center gap-2 border-b border-[color:var(--border)] px-3 focus-within:ring-1 focus-within:ring-accent/50 focus-within:border-accent transition-all duration-200">
           <input
             ref={inputRef}
             value={input}
@@ -671,18 +674,30 @@ export function CommandPalette() {
             onKeyDown={handleKey}
             placeholder={SYMBOL_MENTION_PLACEHOLDER}
             aria-label="Command query"
+            aria-describedby="command-palette-instructions"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls="command-palette-listbox"
+            aria-activedescendant={rows.length > 0 ? `command-palette-option-${selected}` : undefined}
             className="flex-1 bg-transparent py-3 text-sm outline-none"
           />
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="btn py-1 px-2 text-[10px] leading-none"
+            className="btn py-1 px-2 text-[10px] leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             aria-label="Close command palette"
           >
             close
           </button>
         </div>
-        <div ref={listRef} className="max-h-96 overflow-auto p-1">
+        <div
+          ref={listRef}
+          id="command-palette-listbox"
+          role="listbox"
+          aria-label="Commands"
+          className="max-h-96 overflow-auto p-1"
+        >
           {!hasQuery && recentRowCount > 0 && (
             <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)]">
               Recent
@@ -722,6 +737,14 @@ export function CommandPalette() {
                 : row.kind === "action"
                   ? `action-${row.id}`
                   : "symbol";
+
+            const optionAriaLabel =
+              row.kind === "nav"
+                ? `Navigate to: ${row.label}${row.kbd ? `, Shortcut: ${row.kbd}` : ""}`
+                : row.kind === "action"
+                  ? `Action: ${row.label}, Group: ${row.group}`
+                  : `Symbol Search: ${row.label}`;
+
             return (
               <div key={naturalKey}>
                 {isFirstNonRecent && (
@@ -733,6 +756,9 @@ export function CommandPalette() {
                   type="button"
                   role="option"
                   aria-selected={isSelected}
+                  aria-label={optionAriaLabel}
+                  id={`command-palette-option-${i}`}
+                  tabIndex={-1}
                   data-row-index={i}
                   data-row-kind={row.kind}
                   data-row-id={row.kind === "action" ? row.id : undefined}
@@ -742,7 +768,8 @@ export function CommandPalette() {
                     "w-full text-left flex items-center justify-between rounded px-3 py-2 text-sm cursor-pointer transition-colors " +
                     (isSelected
                       ? "bg-[color:var(--bg-elev2)] border border-[color:var(--accent)]"
-                      : "border border-transparent hover:bg-[color:var(--bg-elev2)]")
+                      : "border border-transparent hover:bg-[color:var(--bg-elev2)]") +
+                    " focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                   }
                 >
                   <span>{label}</span>

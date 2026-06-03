@@ -243,11 +243,30 @@ from .contracts import (
     DemoRunResponse,
     FinancialImpactDetail,
     FinancialImpactSummary,
+    GuardSummary,
     LogTailResponse,
     MarketQuote,
     MarketQuoteBatchResponse,
+    NewsFeedHealthEntry,
     RecordListResponse,
     SidecarStatusResponse,
+    TimelineSeriesEntry,
+    TopReasonEntry,
+    TopSymbolEntry,
+    UiArchiveNowResponse,
+    UiArchiveStatusResponse,
+    UiBenchmarkHistoryResponse,
+    UiBenchmarkLatestResponse,
+    UiFacetsResponse,
+    UiMatrixResponse,
+    UiNewsPollNowResponse,
+    UiNewsStatusResponse,
+    UiSummaryResponse,
+    UiSymbolDetailResponse,
+    UiTimelineResponse,
+    UiTopReasonsResponse,
+    UiTopSymbolsResponse,
+    UiTrendsResponse,
 )
 from .dashboard_data import overview
 from .demo import DemoResult as _DemoResult
@@ -298,6 +317,63 @@ def _display_path(p: Path | str | None) -> str | None:
     if home and text.startswith(home + "/"):
         return "~" + text[len(home):]
     return text
+
+
+def _sanitize_symbol(symbol: str) -> str:
+    """Sanitize and normalize symbol path/routing parameters."""
+    if not symbol or not isinstance(symbol, str):
+        raise HTTPException(status_code=400, detail="Invalid symbol parameter")
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.$# \t")
+    if any(c not in allowed_chars for c in symbol):
+        raise HTTPException(status_code=400, detail="Symbol contains invalid characters")
+    normalized = "".join(symbol.upper().strip().split())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Symbol cannot be empty")
+    return normalized
+
+
+def _sanitize_capture_id(capture_id: str) -> str:
+    """Sanitize capture_id path/routing parameters to prevent path traversal/XSS/injection."""
+    if not capture_id or not isinstance(capture_id, str):
+        raise HTTPException(status_code=400, detail="Invalid capture_id parameter")
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:.")
+    if any(c not in allowed_chars for c in capture_id):
+        raise HTTPException(status_code=400, detail="capture_id contains invalid characters")
+    return capture_id
+
+
+def _sanitize_cluster_id(cluster_id: str) -> str:
+    """Sanitize cluster_id path/routing parameters."""
+    if not cluster_id or not isinstance(cluster_id, str):
+        raise HTTPException(status_code=400, detail="Invalid cluster_id parameter")
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:.")
+    if any(c not in allowed_chars for c in cluster_id):
+        raise HTTPException(status_code=400, detail="cluster_id contains invalid characters")
+    return cluster_id
+
+
+def _sanitize_slug(val: str, name: str) -> str:
+    """Sanitize generic slugs like asset_class, reason_code, tag, etc."""
+    if not val or not isinstance(val, str):
+        raise HTTPException(status_code=400, detail=f"Invalid {name} parameter")
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_: .")
+    if any(c not in allowed_chars for c in val):
+        raise HTTPException(status_code=400, detail=f"{name} contains invalid characters")
+    return val
+
+
+def _sanitize_routing_path(path: str) -> str:
+    """Sanitize SPA fallback routing path to prevent traversal or malicious input."""
+    if not isinstance(path, str):
+        raise HTTPException(status_code=400, detail="Invalid path parameter")
+    if ".." in path or "\\" in path:
+        raise HTTPException(status_code=400, detail="Invalid path segments")
+    # Limit allowed characters in the path for security
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:")
+    if any(c not in allowed_chars for c in path):
+        raise HTTPException(status_code=400, detail="Path contains invalid characters")
+    return path
+
 
 
 # Regulator / official-source domains. A feed whose fallback_domain matches one
@@ -1413,6 +1489,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/record/{capture_id}", response_model=FinancialImpactDetail)
     def record(capture_id: str) -> FinancialImpactDetail:
+        capture_id = _sanitize_capture_id(capture_id)
         sup = _get_supervisor()
         rec = sup.storage.get_record(capture_id)
         if rec is None:
@@ -1422,18 +1499,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/records/by-symbol/{symbol}", response_model=RecordListResponse)
     def by_symbol(symbol: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
+        symbol = _sanitize_symbol(symbol)
         sup = _get_supervisor()
         items = sup.storage.by_label("symbol", symbol, limit=limit)
         return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
 
     @app.get("/records/by-asset-class/{asset_class}", response_model=RecordListResponse)
     def by_asset_class(asset_class: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
+        asset_class = _sanitize_slug(asset_class, "asset_class")
         sup = _get_supervisor()
         items = sup.storage.by_label("asset_class", asset_class, limit=limit)
         return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
 
     @app.get("/records/by-reason/{reason_code}", response_model=RecordListResponse)
     def by_reason(reason_code: str, limit: int = Query(50, ge=1, le=500)) -> RecordListResponse:
+        reason_code = _sanitize_slug(reason_code, "reason_code")
         sup = _get_supervisor()
         items = sup.storage.by_label("reason_code", reason_code, limit=limit)
         return RecordListResponse(items=_to_summary_list(items, _is_production_safe()))
@@ -1450,6 +1530,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/records/{capture_id}/tags")
     def api_get_tags(capture_id: str) -> dict[str, Any]:
+        capture_id = _sanitize_capture_id(capture_id)
         sup = _get_supervisor()
         return {
             "capture_id": capture_id,
@@ -1458,6 +1539,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/records/{capture_id}/tags")
     def api_add_tag(capture_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        capture_id = _sanitize_capture_id(capture_id)
         raw = payload.get("tag")
         tag = (raw or "").strip() if isinstance(raw, str) else ""
         if not tag or len(tag) > 50 or not _TAG_API_PATTERN.match(tag):
@@ -1481,6 +1563,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/records/{capture_id}/tags/{tag}")
     def api_remove_tag(capture_id: str, tag: str) -> dict[str, Any]:
+        capture_id = _sanitize_capture_id(capture_id)
+        tag = _sanitize_slug(tag, "tag")
         sup = _get_supervisor()
         try:
             removed = sup.storage.remove_record_tag(capture_id, tag)
@@ -1501,6 +1585,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def api_records_by_tag(
         tag: str, limit: int = Query(50, ge=1, le=500)
     ) -> RecordListResponse:
+        tag = _sanitize_slug(tag, "tag")
         sup = _get_supervisor()
         try:
             records = sup.storage.records_by_tag(tag, limit)
@@ -1743,6 +1828,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sampled. Returns 404 if the capture is not in storage, 503 if
         DeepSeek is disabled.
         """
+        capture_id = _sanitize_capture_id(capture_id)
         sup = _get_supervisor()
         rec = sup.storage.get_record(capture_id)
         if rec is None:
@@ -2102,6 +2188,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/quant/novelty/{capture_id}")
     def quant_novelty_one(capture_id: str) -> dict[str, Any]:
+        capture_id = _sanitize_capture_id(capture_id)
         from dataclasses import asdict
         engine = _get_quant_engine()
         result = engine.novelty_for(capture_id)
@@ -2135,6 +2222,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/quant/reaction/{capture_id}")
     def quant_reaction(capture_id: str) -> dict[str, Any]:
+        capture_id = _sanitize_capture_id(capture_id)
         from dataclasses import asdict
         engine = _get_quant_engine()
         report = engine.reaction_for(capture_id)
@@ -2836,6 +2924,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         report. Single endpoint so the UI can render a drawer in one
         round-trip instead of fan-out.
         """
+        capture_id = _sanitize_capture_id(capture_id)
         sup = _get_supervisor()
         rec = sup.storage.get_record(capture_id)
         if rec is None:
@@ -2899,6 +2988,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         different id) for every other window and 404s the drill-down. The UI
         threads its current ``windowSize`` as ``window`` so the corpora match.
         """
+        cluster_id = _sanitize_cluster_id(cluster_id)
         engine = _get_quant_engine()
         # Re-run clustering over the SAME window the dashboard used so the
         # cluster_id reproduces; default mirrors the dashboard's 1000 default.
@@ -3767,8 +3857,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # These do NOT replace /recent etc. — they coexist for UI ergonomics.
     # ────────────────────────────────────────────────────────────────────────
 
-    @app.get("/ui/summary")
-    async def ui_summary() -> dict[str, Any]:
+    @app.get("/ui/summary", response_model=UiSummaryResponse)
+    async def ui_summary() -> UiSummaryResponse:
         """Compact landing payload. Single round-trip for the Overview page."""
         sup = _get_supervisor()
         dash = await asyncio.to_thread(overview, sup.storage, limit=50)
@@ -3776,25 +3866,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         guards = _guard_snapshot(s)
         prod_safe = s.is_production_safe()
         recent_top = dash["recent"][:6]
-        return {
-            "mode": s.mode.value,
-            "is_production_safe": prod_safe,
-            "diagnostic_allowed": s.diagnostic_allowed(),
-            "use_ml_stubs": s.models.use_ml_stubs,
-            "totals": dash["totals"],
-            "diagnostic_count": 0 if prod_safe else dash["diagnostic_count"],
-            "asset_class_distribution": dash["asset_class_distribution"],
-            "reason_code_distribution": dash["reason_code_distribution"],
-            "sentiment_distribution": dash["sentiment_distribution"],
-            "recent_top": redact_records_for_mode(recent_top, production_safe=prod_safe),
-            "dlq": sup.storage.dlq_count(),
-            "model_versions": dict(sup.service.model_versions),
-            "guards": safe_guard_view(guards),
-            "generated_at": datetime.now(UTC).isoformat(),
-        }
+        redacted_recent = redact_records_for_mode(recent_top, production_safe=prod_safe)
+        recent_details = [FinancialImpactDetail(**_normalize_detail_payload(r)) for r in redacted_recent]
+        return UiSummaryResponse(
+            mode=s.mode.value,
+            is_production_safe=prod_safe,
+            diagnostic_allowed=s.diagnostic_allowed(),
+            use_ml_stubs=s.models.use_ml_stubs,
+            totals=dash["totals"],
+            diagnostic_count=0 if prod_safe else dash["diagnostic_count"],
+            asset_class_distribution=dash["asset_class_distribution"],
+            reason_code_distribution=dash["reason_code_distribution"],
+            sentiment_distribution=dash["sentiment_distribution"],
+            recent_top=recent_details,
+            dlq=sup.storage.dlq_count(),
+            model_versions=dict(sup.service.model_versions),
+            guards=GuardSummary(**safe_guard_view(guards)),
+            generated_at=datetime.now(UTC).isoformat(),
+        )
 
-    @app.get("/ui/facets")
-    def ui_facets(limit: int = Query(500, ge=10, le=2000)) -> dict[str, Any]:
+    @app.get("/ui/facets", response_model=UiFacetsResponse)
+    def ui_facets(limit: int = Query(500, ge=10, le=2000)) -> UiFacetsResponse:
         """Facets over recent N records — for filter chip populations."""
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=limit, relevant_only=False)
@@ -3813,19 +3905,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 dom[r["domain"]] += 1
             if r.get("sentiment_label"):
                 sent[r["sentiment_label"]] += 1
-        return {
-            "window_total": len(rows),
-            "window_relevant": relevant_n,
-            "asset_classes": ac.most_common(),
-            "reason_codes": rc.most_common(),
-            "symbols": sym.most_common(50),
-            "domains": dom.most_common(50),
-            "sentiments": sent.most_common(),
-        }
+        return UiFacetsResponse(
+            window_total=len(rows),
+            window_relevant=relevant_n,
+            asset_classes=ac.most_common(),
+            reason_codes=rc.most_common(),
+            symbols=sym.most_common(50),
+            domains=dom.most_common(50),
+            sentiments=sent.most_common(),
+        )
 
-    @app.get("/ui/timeline")
+    @app.get("/ui/timeline", response_model=UiTimelineResponse)
     def ui_timeline(bucket_minutes: int = Query(60, ge=5, le=1440),
-                    limit: int = Query(500, ge=10, le=5000)) -> dict[str, Any]:
+                    limit: int = Query(500, ge=10, le=5000)) -> UiTimelineResponse:
         """Timestamp-bucketed counts for trend charts."""
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=limit, relevant_only=False)
@@ -3854,28 +3946,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             b["total"] += 1
             if r.get("is_finance_relevant"):
                 b["relevant"] += 1
-        series = [{"ts": k, **v} for k, v in sorted(buckets.items())]
-        return {"bucket_minutes": bucket_minutes, "series": series}
+        series = [TimelineSeriesEntry(ts=k, **v) for k, v in sorted(buckets.items())]
+        return UiTimelineResponse(bucket_minutes=bucket_minutes, series=series)
 
-    @app.get("/ui/top-symbols")
-    def ui_top_symbols(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+    @app.get("/ui/top-symbols", response_model=UiTopSymbolsResponse)
+    def ui_top_symbols(limit: int = Query(20, ge=1, le=100)) -> UiTopSymbolsResponse:
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=500, relevant_only=True)
         c = Counter()
         for r in rows:
             for s in r.get("candidate_symbols", []):
                 c[s] += 1
-        return {"items": [{"symbol": k, "count": n} for k, n in c.most_common(limit)]}
+        return UiTopSymbolsResponse(items=[TopSymbolEntry(symbol=k, count=n) for k, n in c.most_common(limit)])
 
-    @app.get("/ui/top-reasons")
-    def ui_top_reasons(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+    @app.get("/ui/top-reasons", response_model=UiTopReasonsResponse)
+    def ui_top_reasons(limit: int = Query(20, ge=1, le=100)) -> UiTopReasonsResponse:
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=500, relevant_only=True)
         c = Counter()
         for r in rows:
             for s in r.get("impact_reason_codes", []):
                 c[s] += 1
-        return {"items": [{"reason": k, "count": n} for k, n in c.most_common(limit)]}
+        return UiTopReasonsResponse(items=[TopReasonEntry(reason=k, count=n) for k, n in c.most_common(limit)])
 
     @app.get("/ui/quotes", response_model=MarketQuoteBatchResponse)
     def ui_quotes(symbols: str = Query("", description="Comma-separated symbols")) -> MarketQuoteBatchResponse:
@@ -3895,10 +3987,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ui/quote/{symbol}", response_model=MarketQuote)
     def ui_quote(symbol: str) -> MarketQuote:
         """Single-symbol quote contract with the same stale/unavailable semantics."""
+        symbol = _sanitize_symbol(symbol)
         return _MARKET_DATA.quote(symbol)
 
-    @app.get("/ui/trends")
-    def ui_trends(limit: int = Query(500, ge=10, le=5000)) -> dict[str, Any]:
+    @app.get("/ui/trends", response_model=UiTrendsResponse)
+    def ui_trends(limit: int = Query(500, ge=10, le=5000)) -> UiTrendsResponse:
         """Stacked trends across asset classes (sparkline-ready)."""
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=limit, relevant_only=True)
@@ -3920,10 +4013,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ac_: [ts_ac[k].get(ac_, 0) for k in keys]
             for ac_ in asset_classes
         }
-        return {"buckets": keys, "asset_classes": asset_classes, "series": series}
+        return UiTrendsResponse(buckets=keys, asset_classes=asset_classes, series=series)
 
-    @app.get("/ui/matrix")
-    def ui_matrix() -> dict[str, Any]:
+    @app.get("/ui/matrix", response_model=UiMatrixResponse)
+    def ui_matrix() -> UiMatrixResponse:
         """Asset-class x reason-code co-occurrence matrix."""
         sup = _get_supervisor()
         rows = sup.storage.recent_records(limit=1000, relevant_only=True)
@@ -3938,15 +4031,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         acs = sorted(ac_set)
         rcs = sorted(rc_set)
         data = [[cell.get((ac_, rc_), 0) for rc_ in rcs] for ac_ in acs]
-        return {"asset_classes": acs, "reason_codes": rcs, "matrix": data}
+        return UiMatrixResponse(asset_classes=acs, reason_codes=rcs, matrix=data)
 
-    @app.get("/ui/guards")
-    def ui_guards() -> dict[str, Any]:
+    @app.get("/ui/guards", response_model=GuardSummary)
+    def ui_guards() -> GuardSummary:
         s = _SETTINGS or load_settings()
-        return safe_guard_view(_guard_snapshot(s))
+        return GuardSummary(**safe_guard_view(_guard_snapshot(s)))
 
-    @app.get("/ui/benchmark/latest")
-    def ui_benchmark_latest() -> dict[str, Any]:
+    @app.get("/ui/benchmark/latest", response_model=UiBenchmarkLatestResponse)
+    def ui_benchmark_latest() -> UiBenchmarkLatestResponse:
         """Run the synthetic golden benchmark and return the report.
 
         This is intentionally synchronous and cheap (12 items, CPU stubs).
@@ -3954,10 +4047,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from .golden import SYNTHETIC, run_benchmark
         sup = _get_supervisor()
         rep = run_benchmark(sup.service, SYNTHETIC)
-        return {**rep.to_dict(), "ran_at": datetime.now(UTC).isoformat()}
+        return UiBenchmarkLatestResponse(**{**rep.to_dict(), "ran_at": datetime.now(UTC).isoformat()})
 
-    @app.get("/ui/benchmark/history")
-    def ui_benchmark_history() -> dict[str, Any]:
+    @app.get("/ui/benchmark/history", response_model=UiBenchmarkHistoryResponse)
+    def ui_benchmark_history() -> UiBenchmarkHistoryResponse:
         """Return the persisted benchmark history (if any). Empty for v1."""
         history_path = (_SETTINGS or load_settings()).paths.catchem_output_dir / "results" / "benchmark_history.jsonl"
         items: list[dict] = []
@@ -3969,11 +4062,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     items.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
-        return {"history": items[-50:]}
+        return UiBenchmarkHistoryResponse(history=items[-50:])
 
-    @app.get("/ui/symbol/{symbol}")
-    def ui_symbol(symbol: str, limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+    @app.get("/ui/symbol/{symbol}", response_model=UiSymbolDetailResponse)
+    def ui_symbol(symbol: str, limit: int = Query(50, ge=1, le=200)) -> UiSymbolDetailResponse:
         """Aggregate one symbol: records + per-reason and per-sentiment summary."""
+        symbol = _sanitize_symbol(symbol)
         sup = _get_supervisor()
         items = sup.storage.by_label("symbol", symbol, limit=limit)
         rc, sent = Counter(), Counter()
@@ -3982,19 +4076,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 rc[x] += 1
             if r.get("sentiment_label"):
                 sent[r["sentiment_label"]] += 1
-        return {
-            "symbol": symbol,
-            "count": len(items),
-            "reason_distribution": dict(rc),
-            "sentiment_distribution": dict(sent),
-            "items": redact_records_for_mode(items, production_safe=_is_production_safe()),
-        }
+        return UiSymbolDetailResponse(
+            symbol=symbol,
+            count=len(items),
+            reason_distribution=dict(rc),
+            sentiment_distribution=dict(sent),
+            items=_to_summary_list(items, _is_production_safe()),
+        )
 
     @app.get("/api/symbols/{symbol}/sentiment-trend")
     def api_symbol_sentiment_trend(
         symbol: str,
         days: int = Query(7, ge=1, le=30),
     ) -> dict[str, Any]:
+        symbol = _sanitize_symbol(symbol)
         """Daily sentiment breakdown for one symbol over the trailing ``days`` window.
 
         Returns one series row per UTC day in the window (zero-filled where
@@ -4063,62 +4158,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "series": [{"day": d, **counts} for d, counts in by_day.items()],
         }
 
-    @app.get("/ui/news-status")
-    async def news_status() -> dict[str, Any]:
+    @app.get("/ui/news-status", response_model=UiNewsStatusResponse)
+    async def news_status() -> UiNewsStatusResponse:
         """Diagnostics for the background RSS poller. Surfaced in Live Feed UI."""
         if _NEWS_POLLER is None:
-            return {
-                "enabled": False,
-                "feeds": 0,
-                "interval_seconds": None,
-                "last_run_at": None,
-                "next_run_at": None,
-                "last_ingested": 0,
-                "total_ingested": 0,
-                "last_error": None,
-                "is_polling": False,
-                "last_new_at": None,
-                "empty_ticks": 0,
-                "last_avg_publisher_lag_seconds": None,
-                "last_median_publisher_lag_seconds": None,
-                "unhealthy_feeds": 0,
-                "backed_off_feeds": 0,
-                "feed_health": [],
-                "max_item_age_seconds": None,
-                "last_stale_skipped": 0,
-            }
+            return UiNewsStatusResponse(
+                enabled=False,
+                feeds=0,
+                interval_seconds=None,
+                last_run_at=None,
+                next_run_at=None,
+                last_ingested=0,
+                total_ingested=0,
+                last_error=None,
+                is_polling=False,
+                last_new_at=None,
+                empty_ticks=0,
+                last_avg_publisher_lag_seconds=None,
+                last_median_publisher_lag_seconds=None,
+                unhealthy_feeds=0,
+                backed_off_feeds=0,
+                feed_health=[],
+                max_item_age_seconds=None,
+                last_stale_skipped=0,
+            )
         feed_health = _NEWS_POLLER.feed_health_snapshot()
-        return {
-            "enabled": True,
-            "feeds": len(_NEWS_POLLER.feeds),
-            "interval_seconds": _NEWS_POLLER.interval_seconds,
-            "last_run_at": _NEWS_POLLER.last_run_at.isoformat() if _NEWS_POLLER.last_run_at else None,
-            "next_run_at": _NEWS_POLLER.next_run_at.isoformat() if _NEWS_POLLER.next_run_at else None,
-            "last_ingested": _NEWS_POLLER.last_ingested,
-            "total_ingested": _NEWS_POLLER.total_ingested,
-            "last_error": _NEWS_POLLER.last_error,
-            "is_polling": _NEWS_POLLER.is_polling,
+        health_entries = [NewsFeedHealthEntry(**fh) for fh in feed_health]
+        return UiNewsStatusResponse(
+            enabled=True,
+            feeds=len(_NEWS_POLLER.feeds),
+            interval_seconds=_NEWS_POLLER.interval_seconds,
+            last_run_at=_NEWS_POLLER.last_run_at.isoformat() if _NEWS_POLLER.last_run_at else None,
+            next_run_at=_NEWS_POLLER.next_run_at.isoformat() if _NEWS_POLLER.next_run_at else None,
+            last_ingested=_NEWS_POLLER.last_ingested,
+            total_ingested=_NEWS_POLLER.total_ingested,
+            last_error=_NEWS_POLLER.last_error,
+            is_polling=_NEWS_POLLER.is_polling,
             # Distinguishes "actively flowing" from "alive but quiet" —
             # the UI uses these to show "last new arrival: X min ago" when
             # last_ingested has been 0 for several ticks. Reassures the
             # analyst the poller is healthy even when publishers are idle.
-            "last_new_at": _NEWS_POLLER.last_new_at.isoformat() if _NEWS_POLLER.last_new_at else None,
-            "empty_ticks": _NEWS_POLLER.empty_ticks,
+            last_new_at=_NEWS_POLLER.last_new_at.isoformat() if _NEWS_POLLER.last_new_at else None,
+            empty_ticks=_NEWS_POLLER.empty_ticks,
             # Average/median seconds between item.published_ts and ingest
             # time, over the most recent poll. Lets the UI explicitly show
             # the analyst how much of the visible lag is publisher-side
             # vs our pipeline (our pipeline is ~4ms/item in stub mode).
-            "last_avg_publisher_lag_seconds": _NEWS_POLLER.last_avg_publisher_lag_seconds,
-            "last_median_publisher_lag_seconds": _NEWS_POLLER.last_median_publisher_lag_seconds,
-            "unhealthy_feeds": sum(1 for f in feed_health if int(f.get("consecutive_errors") or 0) > 0),
-            "backed_off_feeds": sum(1 for f in feed_health if bool(f.get("backed_off"))),
-            "feed_health": feed_health,
-            "max_item_age_seconds": _NEWS_POLLER.max_item_age_seconds,
-            "last_stale_skipped": _NEWS_POLLER.last_stale_skipped,
-        }
+            last_avg_publisher_lag_seconds=_NEWS_POLLER.last_avg_publisher_lag_seconds,
+            last_median_publisher_lag_seconds=_NEWS_POLLER.last_median_publisher_lag_seconds,
+            unhealthy_feeds=sum(1 for f in feed_health if int(f.get("consecutive_errors") or 0) > 0),
+            backed_off_feeds=sum(1 for f in feed_health if bool(f.get("backed_off"))),
+            feed_health=health_entries,
+            max_item_age_seconds=_NEWS_POLLER.max_item_age_seconds,
+            last_stale_skipped=_NEWS_POLLER.last_stale_skipped,
+        )
 
-    @app.post("/ui/news-poll-now")
-    async def news_poll_now() -> dict[str, Any]:
+    @app.post("/ui/news-poll-now", response_model=UiNewsPollNowResponse)
+    async def news_poll_now() -> UiNewsPollNowResponse:
         """Force an immediate news-poll tick. Powers the UI 'Poll now' button.
 
         Idempotent under concurrent calls — the poller's internal lock
@@ -4134,7 +4230,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if ingested and _QUANT_ENGINE is not None:
             with contextlib.suppress(Exception):
                 _QUANT_ENGINE.invalidate()
-        return {"ingested": ingested, "total_ingested": _NEWS_POLLER.total_ingested}
+        return UiNewsPollNowResponse(ingested=ingested, total_ingested=_NEWS_POLLER.total_ingested)
 
     @app.post(
         "/api/news/sources/probe",
@@ -4609,51 +4705,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {"enabled": False}
         return channel.stats()
 
-    @app.get("/ui/archive-status")
-    def archive_status() -> dict[str, Any]:
+    @app.get("/ui/archive-status", response_model=UiArchiveStatusResponse)
+    def archive_status() -> UiArchiveStatusResponse:
         """Diagnostics for the Drive archiver."""
         if _ARCHIVER is None:
-            return {
-                "enabled": False,
-                "drive_dir": None,
-                "interval_seconds": None,
-                "local_cap_rows": None,
-                "last_run_at": None,
-                "last_archived_count": 0,
-                "total_archived": 0,
-                "last_error": None,
-                "is_archiving": False,
-                "current_csv_path": None,
-            }
-        return {
-            "enabled": True,
+            return UiArchiveStatusResponse(
+                enabled=False,
+                drive_dir=None,
+                interval_seconds=None,
+                local_cap_rows=None,
+                last_run_at=None,
+                last_archived_count=0,
+                total_archived=0,
+                last_error=None,
+                is_archiving=False,
+                current_csv_path=None,
+            )
+        return UiArchiveStatusResponse(
+            enabled=True,
             # User-facing surface: tilde-redacted so /Users/<name>/... does not
             # leak into tooltips, screenshots, or persisted UI state. The
             # archiver retains the resolved absolute path internally; only the
             # JSON projection is redacted.
-            "drive_dir": _display_path(_ARCHIVER.drive_dir),
-            "interval_seconds": _ARCHIVER.interval_seconds,
-            "local_cap_rows": _ARCHIVER.local_cap,
-            "last_run_at": _ARCHIVER.last_run_at.isoformat() if _ARCHIVER.last_run_at else None,
-            "last_archived_count": _ARCHIVER.last_archived_count,
-            "total_archived": _ARCHIVER.total_archived,
-            "last_error": _ARCHIVER.last_error,
-            "is_archiving": _ARCHIVER.is_archiving,
-            "current_csv_path": _display_path(_ARCHIVER.current_csv_path),
-        }
+            drive_dir=_display_path(_ARCHIVER.drive_dir),
+            interval_seconds=_ARCHIVER.interval_seconds,
+            local_cap_rows=_ARCHIVER.local_cap,
+            last_run_at=_ARCHIVER.last_run_at.isoformat() if _ARCHIVER.last_run_at else None,
+            last_archived_count=_ARCHIVER.last_archived_count,
+            total_archived=_ARCHIVER.total_archived,
+            last_error=_ARCHIVER.last_error,
+            is_archiving=_ARCHIVER.is_archiving,
+            current_csv_path=_display_path(_ARCHIVER.current_csv_path),
+        )
 
-    @app.post("/ui/archive-now")
-    async def archive_now() -> dict[str, Any]:
+    @app.post("/ui/archive-now", response_model=UiArchiveNowResponse)
+    async def archive_now() -> UiArchiveNowResponse:
         """Force an immediate archive sweep. Powers the UI 'Archive now' button."""
         if _ARCHIVER is None:
             raise HTTPException(status_code=503, detail="archiver_disabled")
         result = await _ARCHIVER.archive_now()
-        return {
-            "archived": result.archived,
-            "csv_path": str(result.csv_path) if result.csv_path else None,
-            "error": result.error,
-            "total_archived": _ARCHIVER.total_archived,
-        }
+        return UiArchiveNowResponse(
+            archived=result.archived,
+            csv_path=str(result.csv_path) if result.csv_path else None,
+            error=result.error,
+            total_archived=_ARCHIVER.total_archived,
+        )
 
     @app.get("/ui/stream")
     async def ui_stream(request: Request) -> EventSourceResponse:
@@ -4708,6 +4804,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str) -> HTMLResponse:
+        full_path = _sanitize_routing_path(full_path)
         # Reserved API/asset paths must NOT fall back to HTML — those that
         # don't match a real handler should return their natural 404/405.
         for prefix in _RESERVED_PATH_PREFIXES:

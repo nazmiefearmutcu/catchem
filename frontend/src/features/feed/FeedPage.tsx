@@ -494,10 +494,11 @@ export function FeedPage() {
           <input
             id="q"
             type="search"
-            className="input w-full mt-1"
+            className="input w-full mt-1 focus:outline-none focus:ring-1 focus:ring-accent focus-visible:ring-1 focus-visible:ring-accent"
             placeholder={t("feed.search.placeholder")}
             value={filters.q ?? ""}
             onChange={(e) => setFilter("q", e.target.value || null)}
+            aria-label="Search records"
           />
         </div>
         <div>
@@ -507,8 +508,9 @@ export function FeedPage() {
               <button
                 key={v}
                 onClick={() => setFilter("relevant", v)}
-                className={`chip ${filters.relevant === v ? "chip-active" : ""}`}
+                className={`chip ${filters.relevant === v ? "chip-active" : ""} focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
                 aria-pressed={filters.relevant === v}
+                aria-label={v === "only" ? "Filter by: finance relevant only" : "Filter by: show all records"}
               >
                 {v === "only" ? t("feed.relevance.only") : t("feed.relevance.all")}
               </button>
@@ -519,24 +521,28 @@ export function FeedPage() {
           <>
             <FacetGroup
               label={<JargonTooltip term="asset class" />}
+              labelText="asset class"
               items={facets.data.asset_classes}
               active={filters.ac ?? null}
               onPick={(v) => setFilter("ac", filters.ac === v ? null : v)}
             />
             <FacetGroup
               label={<JargonTooltip term="reason code" />}
+              labelText="reason code"
               items={facets.data.reason_codes}
               active={filters.rc ?? null}
               onPick={(v) => setFilter("rc", filters.rc === v ? null : v)}
             />
             <FacetGroup
               label="symbol"
+              labelText="symbol"
               items={facets.data.symbols.slice(0, 20)}
               active={filters.sym ?? null}
               onPick={(v) => setFilter("sym", filters.sym === v ? null : v)}
             />
             <FacetGroup
               label="sentiment"
+              labelText="sentiment"
               items={facets.data.sentiments}
               active={filters.sentiment ?? null}
               onPick={(v) => setFilter("sentiment", filters.sentiment === v ? null : v)}
@@ -546,17 +552,25 @@ export function FeedPage() {
         {topTags.data && topTags.data.items.length > 0 && (
           <FacetGroup
             label="user tags"
+            labelText="user tag"
             items={topTags.data.items.map((t) => [t.tag, t.count] as [string, number])}
             active={filters.tag ?? null}
             onPick={(v) => setFilter("tag", filters.tag === v ? null : v)}
           />
         )}
         <div className="flex items-center justify-between">
-          <button className="btn" onClick={clear}>clear all</button>
           <button
-            className="btn"
+            className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            onClick={clear}
+            aria-label="Clear all active filters"
+          >
+            clear all
+          </button>
+          <button
+            className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => navigator.clipboard?.writeText(window.location.href)}
             title="Copy current filtered view"
+            aria-label="Copy link to current filtered view"
           >
             copy link
           </button>
@@ -932,12 +946,13 @@ function BulkActionToolbar({
 }
 
 function FacetGroup({
-  label, items, active, onPick,
+  label, items, active, onPick, labelText,
 }: {
   label: React.ReactNode;
   items: [string, number][];
   active: string | null;
   onPick: (v: string) => void;
+  labelText: string;
 }) {
   if (items.length === 0) return null;
   return (
@@ -948,8 +963,9 @@ function FacetGroup({
           <button
             key={v}
             onClick={() => onPick(v)}
-            className={`chip text-[11px] ${active === v ? "chip-active" : ""}`}
+            className={`chip text-[11px] ${active === v ? "chip-active" : ""} focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
             aria-pressed={active === v}
+            aria-label={`${active === v ? "Remove filter" : "Filter by"} ${labelText}: ${v} (${n} items)`}
           >
             {v} <span className="text-[10px] opacity-70">{n}</span>
           </button>

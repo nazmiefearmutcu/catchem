@@ -145,9 +145,14 @@ export function ToastTray() {
   if (visible.length === 0) return null;
   return (
     <div
+      role="region"
       className="fixed top-3 right-3 z-40 flex w-[340px] flex-col gap-2 pointer-events-none"
       aria-label="High-relevance arrivals"
+      aria-describedby="toast-tray-instructions"
     >
+      <div id="toast-tray-instructions" className="sr-only">
+        Active toast notifications. Press tab to navigate between toasts.
+      </div>
       {visible.map(({ toast, phase }) => (
         <ToastItem
           key={toast.id}
@@ -261,16 +266,20 @@ function ToastItem({
     <div
       role="status"
       aria-live={sev === "error" ? "assertive" : "polite"}
+      aria-describedby={`toast-desc-${toast.id}`}
       className={`relative rounded-md border ${SEV_BORDER[sev]} bg-[color:var(--bg-elev)] shadow-soft pointer-events-auto ${animClass}`}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
     >
+      <div id={`toast-desc-${toast.id}`} className="sr-only">
+        {`${SEV_LABEL[sev]} for ${toast.title} with score ${toast.score.toFixed(2)}. Click to open record, or click dismiss to close.`}
+      </div>
       <button
         type="button"
         onClick={() => onOpen(toast)}
-        className="block w-full text-left px-3 py-2 pr-8"
+        className="block w-full text-left px-3 py-2 pr-8 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-md"
         title="Open record"
       >
         <span className="flex items-baseline gap-2 text-[10px] text-[color:var(--fg-dim)]">
@@ -292,7 +301,7 @@ function ToastItem({
         type="button"
         onClick={() => onDismiss(toast)}
         aria-label="Dismiss"
-        className="absolute top-1 right-1 inline-flex items-center justify-center text-[color:var(--fg-muted)] hover:text-[color:var(--fg)] p-1 leading-none"
+        className="absolute top-1 right-1 inline-flex items-center justify-center text-[color:var(--fg-muted)] hover:text-[color:var(--fg)] p-1 leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
       >
         <Icon name="close" size={12} />
       </button>

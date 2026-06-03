@@ -238,9 +238,14 @@ export function OnboardingModal() {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby="onboarding-instructions"
         data-testid="onboarding-card"
         className="relative w-full max-w-xl rounded-xl border border-accent/40 hero-gradient shadow-soft animate-modal-enter overflow-hidden my-8"
       >
+        <div id="onboarding-instructions" className="sr-only">
+          Onboarding tour. Use Arrow Left and Arrow Right to navigate steps. Press Escape to close.
+        </div>
+
         {/* Hero accent blob to match ShortcutOverlay / Welcome page. */}
         <div
           aria-hidden
@@ -253,44 +258,51 @@ export function OnboardingModal() {
           onClick={close}
           aria-label="Skip onboarding"
           data-testid="onboarding-skip"
-          className="btn absolute right-3 top-3 z-10"
+          className="btn absolute right-3 top-3 z-10 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         >
           ×
         </button>
 
         <div className="relative p-7">
-          <div className="flex items-start gap-3 mb-2">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">
-              {current.eyebrow}
+          <div
+            role="tabpanel"
+            id={`onboarding-steppanel-${step}`}
+            aria-labelledby={`onboarding-dot-${step}`}
+            className="focus:outline-none"
+          >
+            <div className="flex items-start gap-3 mb-2">
+              <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">
+                {current.eyebrow}
+              </div>
+              {isFirst && (
+                <span
+                  aria-hidden
+                  className="relative inline-flex h-2 w-2 mt-1"
+                  data-testid="onboarding-ping"
+                >
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                </span>
+              )}
             </div>
-            {isFirst && (
-              <span
-                aria-hidden
-                className="relative inline-flex h-2 w-2 mt-1"
-                data-testid="onboarding-ping"
-              >
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-              </span>
+
+            <h2
+              id={titleId}
+              className="text-2xl font-semibold tracking-tight mb-3"
+            >
+              {current.title}
+            </h2>
+
+            <p className="text-sm leading-relaxed text-[color:var(--fg-dim)]">
+              {current.body}
+            </p>
+
+            {current.hint && (
+              <p className="mt-4 text-[11px] text-[color:var(--fg-muted)] italic border-l-2 border-accent/40 pl-3">
+                {current.hint}
+              </p>
             )}
           </div>
-
-          <h2
-            id={titleId}
-            className="text-2xl font-semibold tracking-tight mb-3"
-          >
-            {current.title}
-          </h2>
-
-          <p className="text-sm leading-relaxed text-[color:var(--fg-dim)]">
-            {current.body}
-          </p>
-
-          {current.hint && (
-            <p className="mt-4 text-[11px] text-[color:var(--fg-muted)] italic border-l-2 border-accent/40 pl-3">
-              {current.hint}
-            </p>
-          )}
 
           {/* Step indicator — 4 dots, current is accent + larger. */}
           <div
@@ -304,14 +316,16 @@ export function OnboardingModal() {
               return (
                 <button
                   key={idx}
+                  id={`onboarding-dot-${idx}`}
                   type="button"
                   role="tab"
                   aria-selected={active}
                   aria-label={`Go to step ${idx + 1} of ${total}`}
+                  aria-controls={`onboarding-steppanel-${idx}`}
                   data-testid={`onboarding-dot-${idx}`}
                   data-active={active ? "1" : "0"}
                   onClick={() => setStep(idx)}
-                  className={`rounded-full transition-all ${
+                  className={`rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     active
                       ? "h-2.5 w-2.5 bg-accent"
                       : "h-1.5 w-1.5 bg-[color:var(--fg-muted)]/50 hover:bg-[color:var(--fg-dim)]"
@@ -327,7 +341,7 @@ export function OnboardingModal() {
               type="button"
               onClick={goPrev}
               disabled={isFirst}
-              className="btn disabled:opacity-40 disabled:cursor-not-allowed"
+              className="btn disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               data-testid="onboarding-prev"
             >
               ← Back
@@ -339,7 +353,7 @@ export function OnboardingModal() {
               ref={primaryRef}
               type="button"
               onClick={goNext}
-              className="btn btn-accent"
+              className="btn btn-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               data-testid={isLast ? "onboarding-finish" : "onboarding-next"}
             >
               {isLast ? "Get started" : "Next →"}

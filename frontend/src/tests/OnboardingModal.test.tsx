@@ -181,4 +181,54 @@ describe("onboarding modal", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(ONBOARDING_STEPS[0].title)).toBeInTheDocument();
   });
+
+  it("implements ARIA dialog description and instructions", () => {
+    render(<OnboardingModal />);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-describedby", "onboarding-instructions");
+    
+    const instructions = dialog.querySelector("#onboarding-instructions");
+    expect(instructions).toBeInTheDocument();
+    expect(instructions).toHaveClass("sr-only");
+    expect(instructions?.textContent).toContain("Onboarding tour");
+  });
+
+  it("implements ARIA tabpanel role with matching controls and labelling", () => {
+    render(<OnboardingModal />);
+    
+    // Check initial step panel
+    const initialPanel = screen.getByRole("tabpanel");
+    expect(initialPanel).toHaveAttribute("id", "onboarding-steppanel-0");
+    expect(initialPanel).toHaveAttribute("aria-labelledby", "onboarding-dot-0");
+    
+    // Check first dot tab controls
+    const firstDot = screen.getByTestId("onboarding-dot-0");
+    expect(firstDot).toHaveAttribute("id", "onboarding-dot-0");
+    expect(firstDot).toHaveAttribute("aria-controls", "onboarding-steppanel-0");
+    
+    // Move to step 2
+    fireEvent.click(screen.getByTestId("onboarding-dot-1"));
+    const secondPanel = screen.getByRole("tabpanel");
+    expect(secondPanel).toHaveAttribute("id", "onboarding-steppanel-1");
+    expect(secondPanel).toHaveAttribute("aria-labelledby", "onboarding-dot-1");
+    
+    const secondDot = screen.getByTestId("onboarding-dot-1");
+    expect(secondDot).toHaveAttribute("id", "onboarding-dot-1");
+    expect(secondDot).toHaveAttribute("aria-controls", "onboarding-steppanel-1");
+  });
+
+  it("applies custom focus classes to all interactive controls", () => {
+    render(<OnboardingModal />);
+    
+    // Skip / Close X
+    expect(screen.getByTestId("onboarding-skip")).toHaveClass("focus-visible:ring-accent");
+    
+    // Dot tabs
+    expect(screen.getByTestId("onboarding-dot-0")).toHaveClass("focus-visible:ring-accent");
+    expect(screen.getByTestId("onboarding-dot-0")).toHaveClass("focus-visible:ring-2");
+    
+    // Prev / Next buttons
+    expect(screen.getByTestId("onboarding-prev")).toHaveClass("focus-visible:ring-accent");
+    expect(screen.getByTestId("onboarding-next")).toHaveClass("focus-visible:ring-accent");
+  });
 });

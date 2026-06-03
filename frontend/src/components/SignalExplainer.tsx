@@ -26,6 +26,8 @@ interface Props {
 export function SignalExplainer({ term, formula, example, children }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const surfaceId = useId();
   useOverlaySurface({
     id: `signal-explainer:${surfaceId}`,
@@ -33,6 +35,16 @@ export function SignalExplainer({ term, formula, example, children }: Props) {
     onClose: () => setOpen(false),
     lockBody: false,
   });
+
+  const prevOpen = useRef(open);
+  useEffect(() => {
+    if (open) {
+      dialogRef.current?.focus();
+    } else if (prevOpen.current && !open) {
+      triggerRef.current?.focus();
+    }
+    prevOpen.current = open;
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,10 +63,17 @@ export function SignalExplainer({ term, formula, example, children }: Props) {
   const effFormula = formula ?? fromDict?.formula;
   const effExample = example ?? fromDict?.example;
 
+  const triggerDescId = `signal-explainer-trigger-desc-${surfaceId}`;
+  const dialogDescId = `signal-explainer-dialog-desc-${surfaceId}`;
+
   return (
     <span ref={ref} className="relative inline-block">
       {children}
+      <span id={triggerDescId} className="sr-only">
+        Press to toggle explanation for the {term} signal.
+      </span>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => {
           if (open) {
@@ -66,16 +85,23 @@ export function SignalExplainer({ term, formula, example, children }: Props) {
         }}
         aria-label={`Explain ${term}`}
         aria-expanded={open}
+        aria-describedby={triggerDescId}
         className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[color:var(--bg-elev2)] text-[color:var(--fg-muted)] hover:bg-accent hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors align-middle"
       >
         <Icon name="question" size={10} />
       </button>
       {open && (
         <div
+          ref={dialogRef}
           role="dialog"
+          tabIndex={-1}
           aria-label={`${term} explanation`}
-          className="absolute z-30 left-0 top-full mt-1 w-72 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] p-3 shadow-lg text-left"
+          aria-describedby={dialogDescId}
+          className="absolute z-30 left-0 top-full mt-1 w-72 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] p-3 shadow-lg text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         >
+          <span id={dialogDescId} className="sr-only">
+            Detailed description, formula, and example for {term}. Click outside or press Escape to close.
+          </span>
           <div className="text-[10px] uppercase tracking-wider text-accent font-semibold">
             {term}
           </div>

@@ -117,4 +117,41 @@ describe("SignalExplainer", () => {
     });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("implements ARIA description tags, focus management, and focus styling", () => {
+    render(<SignalExplainer term="z-score" />);
+    const trigger = screen.getByRole("button", { name: "Explain z-score" });
+
+    // 1. Verify trigger button's aria-describedby attribute and target text
+    const triggerDescId = trigger.getAttribute("aria-describedby");
+    expect(triggerDescId).toBeTruthy();
+    const triggerDesc = document.getElementById(triggerDescId!);
+    expect(triggerDesc).toBeInTheDocument();
+    expect(triggerDesc).toHaveClass("sr-only");
+    expect(triggerDesc?.textContent).toContain("Press to toggle explanation for the z-score signal");
+
+    // 2. Open popover and verify focus shifting and dialog styling
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "z-score explanation" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute("tabindex", "-1");
+    expect(dialog).toHaveClass("focus-visible:ring-1", "focus-visible:ring-accent");
+
+    // 3. Verify dialog's aria-describedby attribute and target text
+    const dialogDescId = dialog.getAttribute("aria-describedby");
+    expect(dialogDescId).toBeTruthy();
+    const dialogDesc = document.getElementById(dialogDescId!);
+    expect(dialogDesc).toBeInTheDocument();
+    expect(dialogDesc).toHaveClass("sr-only");
+    expect(dialogDesc?.textContent).toContain("Detailed description, formula, and example for z-score");
+
+    // 4. Verify focus is automatically moved to the dialog
+    expect(document.activeElement).toBe(dialog);
+
+    // 5. Verify focus is restored to the trigger button upon closing
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
 });
+

@@ -238,7 +238,7 @@ function HoldingRow({
               href={topHref}
               target="_blank"
               rel="noreferrer noopener"
-              className="text-[color:var(--fg)] hover:text-accent transition-colors line-clamp-2"
+              className="text-[color:var(--fg)] hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm transition-colors line-clamp-2"
               title={top.title}
             >
               {top.title}
@@ -261,7 +261,7 @@ function HoldingRow({
           disabled={removing}
           aria-label={`Remove ${holding.symbol}`}
           title={`Remove ${holding.symbol}`}
-          className="btn px-2 py-1 text-[color:var(--fg-dim)] hover:text-bad disabled:opacity-50"
+          className="btn px-2 py-1 text-[color:var(--fg-dim)] hover:text-bad disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         >
           ×
         </button>
@@ -347,7 +347,7 @@ function AddHoldingForm({
         <label htmlFor="pf-symbol" className="label">symbol</label>
         <input
           id="pf-symbol"
-          className="input w-full mt-1"
+          className="input w-full mt-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           placeholder="AAPL, BTC-USD, ^GSPC…"
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
@@ -357,7 +357,7 @@ function AddHoldingForm({
         <label htmlFor="pf-shares" className="label">shares (optional)</label>
         <input
           id="pf-shares"
-          className="input w-full mt-1"
+          className="input w-full mt-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           inputMode="decimal"
           placeholder="100"
           value={shares}
@@ -368,13 +368,13 @@ function AddHoldingForm({
         <label htmlFor="pf-label" className="label">label (optional)</label>
         <input
           id="pf-label"
-          className="input w-full mt-1"
+          className="input w-full mt-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           placeholder="Core tech"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
         />
       </div>
-      <button type="submit" className="btn" disabled={pending || !symbol.trim()}>
+      <button type="submit" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" disabled={pending || !symbol.trim()}>
         {pending ? "Adding…" : "Add holding"}
       </button>
       {error ? (

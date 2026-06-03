@@ -193,4 +193,45 @@ describe("PortfolioPage", () => {
 
     await waitFor(() => expect(apiMock.portfolioDelete).toHaveBeenCalledWith(1));
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderPortfolio();
+    await screen.findByText("AAPL");
+
+    // 1. Top headline link
+    const link = screen.getByRole("link", { name: /Apple unveils new chip/i });
+    expect(link).toHaveClass("focus:outline-none");
+    expect(link).toHaveClass("focus-visible:ring-1");
+    expect(link).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Remove button
+    const removeBtn = screen.getByRole("button", { name: /remove aapl/i });
+    expect(removeBtn).toHaveClass("focus:outline-none");
+    expect(removeBtn).toHaveClass("focus-visible:ring-1");
+    expect(removeBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Symbol input
+    const symbolInput = screen.getByLabelText("symbol");
+    expect(symbolInput).toHaveClass("focus:outline-none");
+    expect(symbolInput).toHaveClass("focus-visible:ring-1");
+    expect(symbolInput).toHaveClass("focus-visible:ring-accent");
+
+    // 4. Shares input
+    const sharesInput = screen.getByLabelText("shares (optional)");
+    expect(sharesInput).toHaveClass("focus:outline-none");
+    expect(sharesInput).toHaveClass("focus-visible:ring-1");
+    expect(sharesInput).toHaveClass("focus-visible:ring-accent");
+
+    // 5. Label input
+    const labelInput = screen.getByLabelText("label (optional)");
+    expect(labelInput).toHaveClass("focus:outline-none");
+    expect(labelInput).toHaveClass("focus-visible:ring-1");
+    expect(labelInput).toHaveClass("focus-visible:ring-accent");
+
+    // 6. Submit button
+    const submitBtn = screen.getByRole("button", { name: /add holding/i });
+    expect(submitBtn).toHaveClass("focus:outline-none");
+    expect(submitBtn).toHaveClass("focus-visible:ring-1");
+    expect(submitBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

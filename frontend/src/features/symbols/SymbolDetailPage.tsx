@@ -104,7 +104,7 @@ export function SymbolDetailPage() {
           </div>
           <Link
             to="/symbols"
-            className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] shrink-0"
+            className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             ← all symbols
           </Link>
@@ -138,7 +138,7 @@ export function SymbolDetailPage() {
 
       <section className="card">
         <h2 className="label mb-2">records mentioning {data.symbol}</h2>
-        {data.items.length === 0 ? <EmptyState title="No records" action={<Link to="/symbols" className="btn">← back to symbols</Link>} /> : (
+        {data.items.length === 0 ? <EmptyState title="No records" action={<Link to="/symbols" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">← back to symbols</Link>} /> : (
           <ul className="divide-y divide-[color:var(--border)]">
             {data.items.map((r) => {
               const href = safeHref(r.url);
@@ -150,11 +150,11 @@ export function SymbolDetailPage() {
                     <span className="ml-auto">score {fmtScore(r.finance_relevance_score)}</span>
                   </div>
                   <div className="text-sm mt-1">
-                    <Link to={`/feed/${encodeURIComponent(r.capture_id)}`} className="hover:underline">
+                    <Link to={`/feed/${encodeURIComponent(r.capture_id)}`} className="hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">
                       {r.title ?? "(untitled)"}
                     </Link>
                     {href && (
-                      <a href={href} target="_blank" rel="noopener noreferrer" className="ml-2 inline-flex align-middle text-[color:var(--fg-dim)] hover:text-accent">
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="ml-2 inline-flex align-middle text-[color:var(--fg-dim)] hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">
                         <Icon name="external" size={12} />
                       </a>
                     )}

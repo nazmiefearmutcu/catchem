@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { createElement, type ReactNode } from "react";
@@ -128,5 +128,75 @@ describe("SymbolsPage smoke", () => {
     renderPage(createElement(SymbolsPage));
 
     expect(await screen.findByText("No symbol mentions found")).toBeInTheDocument();
+  });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    apiMock.topSymbols.mockResolvedValue({
+      items: [
+        { symbol: "AAPL", count: 12 },
+        { symbol: "MSFT", count: 5 },
+      ],
+    });
+    apiMock.quotes.mockResolvedValue({
+      items: [quoteRow("AAPL"), quoteRow("MSFT")],
+      provider: "local_fixture",
+      generated_at: "2026-05-21T12:00:00+00:00",
+    });
+
+    renderPage(createElement(SymbolsPage));
+
+    // 1. Top-3 hero link
+    const topHeroLink = await screen.findByRole("link", { name: /#1.*AAPL/i });
+    expect(topHeroLink).toHaveClass("focus:outline-none");
+    expect(topHeroLink).toHaveClass("focus-visible:ring-1");
+    expect(topHeroLink).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Filter input
+    const filterInput = screen.getByLabelText(/filter symbol mentions/i);
+    expect(filterInput).toHaveClass("focus:outline-none");
+    expect(filterInput).toHaveClass("focus-visible:ring-1");
+    expect(filterInput).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Symbol list item link
+    const msftLinks = screen.getAllByRole("link", { name: /MSFT/i });
+    expect(msftLinks.length).toBe(2);
+    for (const link of msftLinks) {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    }
+  });
+
+  it("renders empty state action link and clear filter button with custom focus rings", async () => {
+    // Empty state 1: no symbols returned
+    apiMock.topSymbols.mockResolvedValue({ items: [] });
+    const { unmount } = renderPage(createElement(SymbolsPage));
+
+    const replayLink = await screen.findByRole("link", { name: /Open Replay/i });
+    expect(replayLink).toHaveClass("focus:outline-none");
+    expect(replayLink).toHaveClass("focus-visible:ring-1");
+    expect(replayLink).toHaveClass("focus-visible:ring-accent");
+
+    unmount();
+
+    // Empty state 2: filtered to empty
+    apiMock.topSymbols.mockResolvedValue({
+      items: [{ symbol: "AAPL", count: 12 }],
+    });
+    apiMock.quotes.mockResolvedValue({
+      items: [quoteRow("AAPL")],
+      provider: "local_fixture",
+      generated_at: "2026-05-21T12:00:00+00:00",
+    });
+    renderPage(createElement(SymbolsPage));
+
+    // Locate filter input and change value so nothing matches
+    const filterInput = await screen.findByLabelText(/filter symbol mentions/i);
+    fireEvent.change(filterInput, { target: { value: "NONEXISTENT_SYMBOL" } });
+
+    const clearBtn = await screen.findByRole("button", { name: /Clear filter/i });
+    expect(clearBtn).toHaveClass("focus:outline-none");
+    expect(clearBtn).toHaveClass("focus-visible:ring-1");
+    expect(clearBtn).toHaveClass("focus-visible:ring-accent");
   });
 });

@@ -69,7 +69,7 @@ export function SymbolsPage() {
               <Link
                 key={it.symbol}
                 to={`/symbols/${encodeURIComponent(it.symbol)}`}
-                className="group rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors"
+                className="group rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">
@@ -95,7 +95,7 @@ export function SymbolsPage() {
         <label htmlFor="symq" className="label">filter symbol mentions</label>
         <input
           id="symq"
-          className="input w-full mt-1"
+          className="input w-full mt-1 focus:outline-none focus:ring-1 focus:ring-accent focus-visible:ring-1 focus-visible:ring-accent"
           placeholder="AAPL mentions, BTC-USD news, ^GSPC mentions..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -103,8 +103,8 @@ export function SymbolsPage() {
       </div>
       {top.isLoading ? <Skeleton className="h-72" /> :
         top.error ? <ErrorBox err={top.error} /> :
-        !top.data || top.data.items.length === 0 ? <EmptyState title="No symbol mentions found" hint="Run a replay with finance-related news first." action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} /> :
-        filteredItems.length === 0 ? <EmptyState title="No matching symbol mentions" hint="Clear or change the symbol mention filter." action={<button type="button" className="btn" onClick={() => setQ("")}>Clear filter</button>} /> : (
+        !top.data || top.data.items.length === 0 ? <EmptyState title="No symbol mentions found" hint="Run a replay with finance-related news first." action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} /> :
+        filteredItems.length === 0 ? <EmptyState title="No matching symbol mentions" hint="Clear or change the symbol mention filter." action={<button type="button" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={() => setQ("")}>Clear filter</button>} /> : (
           <>
             <section className="card" aria-label="Market quote context">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -137,7 +137,7 @@ export function SymbolsPage() {
                     <li key={it.symbol}>
                       <Link
                         to={`/symbols/${encodeURIComponent(it.symbol)}`}
-                        className="card flex items-center justify-between hover:bg-[color:var(--bg-elev2)] transition-colors"
+                        className="card flex items-center justify-between hover:bg-[color:var(--bg-elev2)] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                       >
                         <span className="font-semibold text-good">{it.symbol}</span>
                         <span className="text-[10px] text-[color:var(--fg-dim)]">{it.count} mentions</span>

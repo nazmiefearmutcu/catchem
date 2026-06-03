@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from catchem.reviewers import ReviewerError
-from catchem.reviewers.registry import REVIEWER_DEEPSEEK_NARRATIVE
 from catchem.schemas import AwarenessCaptureView
-from catchem.supervisor import Supervisor
 from catchem.settings import Settings
+from catchem.supervisor import Supervisor
 
 
 @pytest.fixture

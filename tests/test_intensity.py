@@ -312,6 +312,7 @@ def test_finite_or_none_coverage() -> None:
 
 def test_compute_scope_buckets_empty_item_continue(monkeypatch) -> None:
     from collections import defaultdict
+
     import catchem.quant.intensity as intensity_mod
 
     def mock_defaultdict(*args, **kwargs):

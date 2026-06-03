@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
-import pytest
+
 import httpx
-from catchem.reviewers.deepseek import stream_chat_completion
+import pytest
+
+from catchem.reviewers.deepseek import DeepSeekReviewer, ReviewerError, stream_chat_completion
+from catchem.schemas import AwarenessCaptureView
+from catchem.taxonomy import default_taxonomy_path, load_taxonomy
 
 
 class MockAsyncResponse:
@@ -196,10 +201,6 @@ async def test_stream_own_client_creation(monkeypatch):
 
 # ── Synchronous & edge-case unit tests for DeepSeekReviewer ──────────────────
 
-import json
-from catchem.taxonomy import default_taxonomy_path, load_taxonomy
-from catchem.schemas import AwarenessCaptureView
-from catchem.reviewers.deepseek import DeepSeekReviewer, ReviewerError
 
 
 class _SyncMockResponse:

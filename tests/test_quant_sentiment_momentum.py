@@ -679,6 +679,7 @@ def test_created_at_fallback_when_published_ts_unparseable() -> None:
 def test_sentiment_momentum_edge_cases(monkeypatch) -> None:
     # 1. _floor_bucket with ts < anchor
     from datetime import datetime
+
     from catchem.quant.sentiment_momentum import _floor_bucket
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     ts = datetime(2024, 1, 1, 11, 0, tzinfo=UTC)
@@ -688,7 +689,6 @@ def test_sentiment_momentum_edge_cases(monkeypatch) -> None:
 
     # 2. _detect_flip with head_size < 1
     import math
-    original_ceil = math.ceil
 
     def mock_ceil(x):
         return 5

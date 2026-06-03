@@ -263,9 +263,10 @@ def test_api_process_one_accepts_extra_fields(
 
 
 def test_storage_extra_coverage(tmp_path: Path) -> None:
-    from unittest.mock import MagicMock, patch
-    from catchem.storage import _validate_tag
     import sqlite3
+    from unittest.mock import MagicMock, patch
+
+    from catchem.storage import _validate_tag
 
     # 1. validate_tag type check
     with pytest.raises(ValueError, match="tag must be a string"):

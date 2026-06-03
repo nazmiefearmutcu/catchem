@@ -145,7 +145,7 @@ def _make_fake_quarantined_root(tmp_path: Path) -> Path:
 
 @pytest.mark.guard
 def test_assert_protected_artifacts_unmodified_happy(tmp_path: Path) -> None:
-    from catchem.newsimpact_guarded_adapter import assert_protected_artifacts_unmodified, _sha256_file
+    from catchem.newsimpact_guarded_adapter import _sha256_file, assert_protected_artifacts_unmodified
     p1 = tmp_path / "file1.txt"
     p1.write_text("hello", encoding="utf-8")
     sha1 = _sha256_file(p1)
@@ -176,7 +176,7 @@ def test_snapshot_guard_state_corrupt_json(tmp_path: Path) -> None:
     idx_path = tmp_path / "models/governance_index/governance_index.json"
     idx_path.parent.mkdir(parents=True)
     idx_path.write_text("not json", encoding="utf-8")
-    with pytest.raises(NewsImpactGuardError, match="governance_index.json unreadable"):
+    with pytest.raises(NewsImpactGuardError, match=r"governance_index\.json unreadable"):
         snapshot_guard_state(tmp_path)
 
 
@@ -185,7 +185,7 @@ def test_snapshot_guard_state_no_candidates(tmp_path: Path) -> None:
     idx_path = tmp_path / "models/governance_index/governance_index.json"
     idx_path.parent.mkdir(parents=True)
     idx_path.write_text("{}", encoding="utf-8")
-    with pytest.raises(NewsImpactGuardError, match="governance_index.json contains no candidates"):
+    with pytest.raises(NewsImpactGuardError, match=r"governance_index\.json contains no candidates"):
         snapshot_guard_state(tmp_path)
 
 
@@ -224,7 +224,7 @@ def test_snapshot_missing_forbidden_operations(tmp_path: Path) -> None:
 
 @pytest.mark.guard
 def test_snapshot_guard_state_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(NewsImpactGuardError, match="governance_index.json missing"):
+    with pytest.raises(NewsImpactGuardError, match=r"governance_index\.json missing"):
         snapshot_guard_state(tmp_path)
 
 

@@ -166,10 +166,10 @@ def test_sentiment_stub_tie_returns_neutral() -> None:
 
 
 def test_sentiment_model_happy_path() -> None:
-    import sys
     from unittest.mock import MagicMock, patch
-    from catchem.sentiment import SentimentModel
+
     from catchem.schemas import SentimentLabel
+    from catchem.sentiment import SentimentModel
 
     mock_transformers = MagicMock()
     mock_pipeline = MagicMock()
@@ -229,8 +229,8 @@ def test_sentiment_model_happy_path() -> None:
 
 
 def test_make_sentiment_success() -> None:
-    import sys
     from unittest.mock import MagicMock, patch
+
     from catchem.sentiment import SentimentModel, make_sentiment
 
     mock_transformers = MagicMock()

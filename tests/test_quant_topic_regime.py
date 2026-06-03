@@ -571,7 +571,7 @@ def test_sparse_buckets_report_kl_but_do_not_fire_shift() -> None:
 
 
 def test_topic_regime_internal_helpers_coverage() -> None:
-    from catchem.quant.topic_regime import _smooth_pair, _kl_divergence
+    from catchem.quant.topic_regime import _kl_divergence, _smooth_pair
 
     # 1. _smooth_pair with negative values to cause total_p <= 0.0
     sp_p, sp_q = _smooth_pair({"a": -1.0}, {"b": -1.0})

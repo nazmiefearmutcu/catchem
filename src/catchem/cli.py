@@ -157,7 +157,7 @@ def serve(
     import uvicorn
 
     s = load_settings()
-    from .api import create_app, record_bind, _normalize_uvicorn_log_level
+    from .api import _normalize_uvicorn_log_level, create_app, record_bind
 
     # Resolve the actual host/port FIRST, then record it so /ui/sidecar-status
     # reports the bind truth rather than the static settings value. Without

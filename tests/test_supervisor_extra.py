@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+
 import pytest
+
+from catchem.demo import build_capture
+from catchem.schemas import FinancialImpactRecord
 from catchem.settings import load_settings, reload_settings
 from catchem.supervisor import Supervisor
-from catchem.schemas import AwarenessCaptureView, FinancialImpactRecord
-from catchem.demo import build_capture
+
 
 @pytest.fixture
 def supervisor(tmp_path, monkeypatch):
@@ -32,7 +34,7 @@ def test_webhook_serialize_failed(supervisor) -> None:
         def model_dump(self, *args, **kwargs):
             raise ValueError("mock serialize error")
 
-    base = datetime.now(UTC)
+    datetime.now(UTC)
     bad_rec = BadRecord(
         capture_id="cap-bad-1",
         doc_id="doc-bad-1",

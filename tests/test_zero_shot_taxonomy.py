@@ -151,10 +151,10 @@ def test_zero_shot_result_top_above() -> None:
 
 
 def test_zero_shot_model_happy_path() -> None:
-    import sys
     from unittest.mock import MagicMock, patch
-    from catchem.zero_shot_classifier import ZeroShotModel, make_zero_shot, ZeroShotStub
+
     from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+    from catchem.zero_shot_classifier import ZeroShotModel, ZeroShotStub, make_zero_shot
 
     mock_transformers = MagicMock()
     mock_pipeline = MagicMock()

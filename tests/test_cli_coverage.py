@@ -690,6 +690,7 @@ def test_serve_binds_and_invokes_uvicorn(monkeypatch) -> None:
     actually listens; assert the resolved port reached uvicorn.run."""
     import sys
     import types
+
     from catchem.settings import reload_settings
 
     captured: dict = {}

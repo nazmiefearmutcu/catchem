@@ -588,12 +588,12 @@ export function SourcesPage() {
             </div>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">
-            <Link to="/feed" className="btn" data-testid="sources-back-to-feed">
+            <Link to="/feed" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" data-testid="sources-back-to-feed">
               View Live Feed
             </Link>
             <button
               type="button"
-              className="btn"
+              className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               data-testid="sources-refresh"
               onClick={() => qc.invalidateQueries({ queryKey: ["news-sources"] })}
             >
@@ -791,7 +791,7 @@ export function SourcesPage() {
                             type="button"
                             data-testid={`sources-error-toggle-${s.name}`}
                             onClick={() => toggleExpand(s.name)}
-                            className="text-left text-bad hover:underline w-full"
+                            className="text-left text-bad hover:underline w-full focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                             aria-expanded={isExpanded}
                             title={isExpanded ? "Click to collapse" : "Click to expand full error"}
                           >
@@ -821,7 +821,7 @@ export function SourcesPage() {
                                 data-testid={`sources-probe-${s.name}`}
                                 onClick={() => handleProbe(s.url)}
                                 disabled={busy || !s.url}
-                                className="btn !px-2 !py-0.5 !text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="btn !px-2 !py-0.5 !text-[10px] disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                                 aria-busy={busy}
                                 aria-label={`Probe ${s.name} now`}
                                 title="Probe this feed now — bypasses cooldown"

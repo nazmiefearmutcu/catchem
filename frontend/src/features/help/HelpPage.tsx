@@ -89,7 +89,7 @@ export function HelpPage() {
             onClick={requestOpenOnboarding}
             data-testid="help-replay-tour"
             title="Replay the first-run welcome tour"
-            className="btn shrink-0 text-xs"
+            className="btn shrink-0 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             ↺ Replay welcome tour
           </button>
@@ -106,12 +106,12 @@ export function HelpPage() {
         <h2 className="label mb-2">quick start</h2>
         <ol className="grid gap-3 list-decimal pl-5 text-sm text-[color:var(--fg-dim)]">
           <li>
-            Open <Link className="text-accent hover:underline" to="/feed">Live Feed</Link> — the
+            Open <Link className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded" to="/feed">Live Feed</Link> — the
             news poller is already running. The status strip at the top shows whether ingestion is healthy.
           </li>
           <li>
             Want to test a specific article? Go to{" "}
-            <Link className="text-accent hover:underline" to="/replay">Replay/Upload</Link> →{" "}
+            <Link className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded" to="/replay">Replay/Upload</Link> →{" "}
             <strong>Paste article</strong>, paste the body, hit <strong>Analyze</strong>.
           </li>
           <li>
@@ -120,7 +120,7 @@ export function HelpPage() {
           </li>
           <li>
             Check the runtime state on{" "}
-            <Link className="text-accent hover:underline" to="/ops">Ops</Link> if a count looks off.
+            <Link className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded" to="/ops">Ops</Link> if a count looks off.
           </li>
         </ol>
       </section>
@@ -200,7 +200,7 @@ bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
             href="/api/docs"
             target="_blank"
             rel="noreferrer noopener"
-            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block"
+            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">swagger</div>
             <div className="mt-0.5 text-sm font-semibold text-accent">API reference →</div>
@@ -210,7 +210,7 @@ bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
             href="/api/redoc"
             target="_blank"
             rel="noreferrer noopener"
-            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block"
+            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">redoc</div>
             <div className="mt-0.5 text-sm font-semibold text-accent">Readable docs →</div>
@@ -220,7 +220,7 @@ bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
             href="/api/_index"
             target="_blank"
             rel="noreferrer noopener"
-            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block"
+            className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">json</div>
             <div className="mt-0.5 text-sm font-semibold text-accent">Route index →</div>
@@ -232,7 +232,7 @@ bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
       <section className="card">
         <div className="flex items-baseline justify-between gap-2 mb-2">
           <h2 className="label">build info</h2>
-          <Link to="/settings" className="text-[10px] text-accent hover:underline">
+          <Link to="/settings" className="text-[10px] text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded">
             keyboard shortcuts + theme →
           </Link>
         </div>
@@ -271,7 +271,7 @@ bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`}
 
 function HelpStat({ to, label, value, hint }: { to: string; label: string; value: string; hint?: string }) {
   return (
-    <Link to={to} className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block">
+    <Link to={to} className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elev2)]/40 px-3 py-2 hover:border-accent/60 hover:bg-[color:var(--bg-elev2)]/70 transition-colors block focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">
       <div className="text-[9px] uppercase tracking-wider text-[color:var(--fg-muted)]">{label}</div>
       <div className="mt-0.5 text-sm font-semibold text-accent">{value}</div>
       {hint && <div className="text-[10px] text-[color:var(--fg-dim)] truncate">{hint}</div>}

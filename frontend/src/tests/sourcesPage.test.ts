@@ -253,3 +253,70 @@ describe("SourcesPage blind-spots panel", () => {
     expect(within(panel).queryByTestId("blind-spots-all-covered")).not.toBeInTheDocument();
   });
 });
+
+describe("SourcesPage focus styles", () => {
+  beforeEach(() => {
+    Object.values(apiMock).forEach((fn) => fn.mockReset());
+    apiMock.newsSources.mockResolvedValue({
+      schema_version: 1,
+      generated_at: "2026-05-29T00:00:00Z",
+      configured: true,
+      total: 1,
+      healthy_count: 0,
+      degraded_count: 1,
+      sources: [
+        {
+          name: "Test RSS Feed",
+          url: "https://example.com/rss",
+          last_status: "error",
+          last_status_at: "2026-05-29T00:00:00Z",
+          polls: 5,
+          failures: 2,
+          success_rate: 0.6,
+          items_total: 10,
+          consecutive_errors: 2,
+          last_error: "Connection timeout",
+          last_status_code: 504,
+          cooldown_until: null,
+          adaptive_cadence: 1,
+          consecutive_empty: 0,
+          total_new_items: 2,
+        },
+      ],
+    });
+    apiMock.newsAwareness.mockResolvedValue(awarenessDisabled());
+    apiMock.newsCoverageGaps.mockResolvedValue(coverage({ gaps: [], covered: [] }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderSources();
+
+    // 1. View Live Feed link
+    const feedLink = await screen.findByTestId("sources-back-to-feed");
+    expect(feedLink).toHaveClass("focus:outline-none");
+    expect(feedLink).toHaveClass("focus-visible:ring-1");
+    expect(feedLink).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Refresh button
+    const refreshBtn = screen.getByTestId("sources-refresh");
+    expect(refreshBtn).toHaveClass("focus:outline-none");
+    expect(refreshBtn).toHaveClass("focus-visible:ring-1");
+    expect(refreshBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Error toggle button (on degraded source)
+    const errorToggle = await screen.findByTestId("sources-error-toggle-Test RSS Feed");
+    expect(errorToggle).toHaveClass("focus:outline-none");
+    expect(errorToggle).toHaveClass("focus-visible:ring-1");
+    expect(errorToggle).toHaveClass("focus-visible:ring-accent");
+
+    // 4. Probe button
+    const probeBtn = screen.getByTestId("sources-probe-Test RSS Feed");
+    expect(probeBtn).toHaveClass("focus:outline-none");
+    expect(probeBtn).toHaveClass("focus-visible:ring-1");
+    expect(probeBtn).toHaveClass("focus-visible:ring-accent");
+  });
+});

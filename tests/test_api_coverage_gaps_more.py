@@ -1501,3 +1501,191 @@ async def test_replay_spa_directly():
     with patch("catchem.api._render_spa_with_nonce", return_value=(None, None)):
         r = await route.endpoint()
         assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_lifespan_startup_failure_various_gaps():
+    from unittest.mock import MagicMock, patch
+
+    from catchem.api import lifespan
+    from catchem.settings import Settings
+
+    app = MagicMock()
+    app.state.catchem_settings = Settings()
+
+    with patch("catchem.api._build_news_poller", side_effect=ValueError("poller build error")):
+        with patch("catchem.api.Supervisor", return_value=None):
+            with pytest.raises(ValueError, match="poller build error"):
+                async with lifespan(app):
+                    pass
+
+
+@pytest.mark.asyncio
+async def test_live_read_stream_deepseek_all_branches():
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from catchem.api import create_app
+    from catchem.settings import Settings
+
+    app = create_app(Settings())
+    route = next(r for r in app.routes if r.path == "/api/quant/live-read-stream" and "GET" in r.methods)
+
+    mock_engine = MagicMock()
+    mock_engine.dashboard_snapshot.return_value = {"n_records_window": 10}
+    mock_sup = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.model = "deepseek-chat"
+    mock_client._base_url = "https://api.deepseek.com"
+    mock_client._api_key = "fake-key"
+    mock_client.estimate_usd.return_value = 0.05
+    mock_sup.reviewers.deepseek.return_value = mock_client
+    mock_sup.reviewers.budget_state.return_value.exhausted = False
+
+    # Branch 1: empty stream (loop body not entered)
+    async def mock_stream_empty(*args, **kwargs):
+        if False:
+            yield {}
+
+    mock_stream_1 = MagicMock(side_effect=mock_stream_empty)
+
+    with (
+        patch("catchem.api._QUANT_ENGINE", mock_engine),
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.reviewers.deepseek.stream_chat_completion", mock_stream_1),
+    ):
+        response = await route.endpoint(limit=1000)
+        events = []
+        async for item in response.body_iterator:
+            events.append(item)
+
+        mock_stream_1.assert_called_once()
+        assert any(e.get("event") == "start" for e in events)
+        done_event = next(e for e in events if e.get("event") == "done")
+        done_data = json.loads(done_event["data"])
+        assert done_data["source"] == "local"
+        assert done_data["fallback_reason"] == "no_content"
+
+    # Branch 2: non-empty stream (loop body entered, exits via break)
+    async def mock_stream_yields(*args, **kwargs):
+        yield {"type": "delta", "text": "streamed chunk"}
+        yield {"type": "usage", "usage": {"prompt_tokens": 10, "completion_tokens": 20}}
+        yield {"type": "done"}
+
+    mock_stream_2 = MagicMock(side_effect=mock_stream_yields)
+
+    with (
+        patch("catchem.api._QUANT_ENGINE", mock_engine),
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.reviewers.deepseek.stream_chat_completion", mock_stream_2),
+    ):
+        response = await route.endpoint(limit=1000)
+        events = []
+        async for item in response.body_iterator:
+            events.append(item)
+
+        mock_stream_2.assert_called_once()
+        assert any(e.get("event") == "start" for e in events)
+        chunks = [json.loads(e["data"])["text"] for e in events if e.get("event") == "chunk"]
+        assert "streamed chunk" in chunks
+        done_event2 = next(e for e in events if e.get("event") == "done")
+        done_data2 = json.loads(done_event2["data"])
+        assert done_data2["source"] == "deepseek"
+        assert done_data2.get("fallback_reason") is None
+
+    # Branch 3: yields delta chunk and finishes naturally (no done/error event)
+    async def mock_stream_natural_finish(*args, **kwargs):
+        yield {"type": "delta", "text": "natural finish chunk"}
+
+    mock_stream_3 = MagicMock(side_effect=mock_stream_natural_finish)
+
+    with (
+        patch("catchem.api._QUANT_ENGINE", mock_engine),
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.reviewers.deepseek.stream_chat_completion", mock_stream_3),
+    ):
+        response = await route.endpoint(limit=1000)
+        events = []
+        async for item in response.body_iterator:
+            events.append(item)
+
+        mock_stream_3.assert_called_once()
+        assert any(e.get("event") == "start" for e in events)
+        chunks3 = [json.loads(e["data"])["text"] for e in events if e.get("event") == "chunk"]
+        assert "natural finish chunk" in chunks3
+        done_event3 = next(e for e in events if e.get("event") == "done")
+        done_data3 = json.loads(done_event3["data"])
+        assert done_data3["source"] == "deepseek"
+        assert done_data3.get("fallback_reason") is None
+
+    # Branch 4: exception raised during iteration
+    async def mock_stream_raises(*args, **kwargs):
+
+        yield {"type": "delta", "text": "partial chunk"}
+        raise ValueError("stream connection lost")
+
+    mock_stream_4 = MagicMock(side_effect=mock_stream_raises)
+
+    with (
+        patch("catchem.api._QUANT_ENGINE", mock_engine),
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.reviewers.deepseek.stream_chat_completion", mock_stream_4),
+    ):
+        response = await route.endpoint(limit=1000)
+        events = []
+        async for item in response.body_iterator:
+            events.append(item)
+
+        mock_stream_4.assert_called_once()
+        assert any(e.get("event") == "start" for e in events)
+        # Check that we handled the exception correctly
+        done_event4 = next(e for e in events if e.get("event") == "done")
+        done_data4 = json.loads(done_event4["data"])
+        assert done_data4["source"] == "local"
+        assert "stream connection lost" in done_data4["fallback_reason"]
+
+
+def test_ui_log_tail_os_error(tmp_path):
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from catchem.api import create_app
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.paths.catchem_output_dir = tmp_path
+    s.logging.file = "data/logs/catchem.log"
+    log_file = tmp_path / "logs" / "catchem.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("line1\nline2\n", encoding="utf-8")
+
+    app = create_app(s)
+    client = TestClient(app)
+
+    with (
+        patch("catchem.api._SETTINGS", s),
+        patch("catchem.api.load_settings", return_value=s),
+        patch("pathlib.Path.read_text", side_effect=OSError("Permission denied")),
+    ):
+        r = client.get("/ui/log-tail?lines=2")
+        assert r.status_code == 200
+        assert r.json()["lines"] == []
+
+
+@pytest.mark.asyncio
+async def test_replay_spa_directly_with_html():
+    from unittest.mock import patch
+
+    from catchem.api import create_app
+    from catchem.settings import Settings
+
+    app = create_app(Settings())
+    route = next(r for r in app.routes if r.path == "/replay" and "GET" in r.methods)
+    with patch("catchem.api._render_spa_with_nonce", return_value=("<html>fake</html>", "fake-nonce")):
+        r = await route.endpoint()
+        assert r.status_code == 200
+        assert r.body == b"<html>fake</html>"
+        assert "Content-Security-Policy" in r.headers
+        assert "fake-nonce" in r.headers["Content-Security-Policy"]

@@ -268,5 +268,59 @@ describe("ReviewsComparePage", () => {
     // either, just assert *something* shows up under the empty branch.
     const empty = await screen.findAllByText(/no paired reviews yet/i, {}, { timeout: 4000 });
     expect(empty.length).toBeGreaterThan(0);
+    const settingsLink = screen.getByRole("link", { name: /open settings/i });
+    expect(settingsLink).toHaveClass("focus:outline-none");
+    expect(settingsLink).toHaveClass("focus-visible:ring-1");
+    expect(settingsLink).toHaveClass("focus-visible:ring-accent");
+  });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    render(createElement(ReviewsComparePage), { wrapper });
+    await screen.findByText("Hot disagreement story");
+
+    // Real news only checkbox
+    const excludeDemoCheckbox = screen.getByRole("checkbox", { name: /real news only/i });
+    expect(excludeDemoCheckbox).toHaveClass("focus:outline-none");
+    expect(excludeDemoCheckbox).toHaveClass("focus-visible:ring-1");
+    expect(excludeDemoCheckbox).toHaveClass("focus-visible:ring-accent");
+
+    // Sort buttons
+    const biggestGapBtn = screen.getByRole("button", { name: /biggest gap/i });
+    expect(biggestGapBtn).toHaveClass("focus:outline-none");
+    expect(biggestGapBtn).toHaveClass("focus-visible:ring-1");
+    expect(biggestGapBtn).toHaveClass("focus-visible:ring-accent");
+
+    // Show filter buttons
+    const allFilterBtn = screen.getByRole("button", { name: /all/i });
+    expect(allFilterBtn).toHaveClass("focus:outline-none");
+    expect(allFilterBtn).toHaveClass("focus-visible:ring-1");
+    expect(allFilterBtn).toHaveClass("focus-visible:ring-accent");
+
+    // CompareRow list item (keyboard focusable and keyboard interactive)
+    const compareRowItem = screen.getByText("Hot disagreement story").closest("li");
+    expect(compareRowItem).toHaveAttribute("tabIndex", "0");
+    expect(compareRowItem).toHaveClass("focus:outline-none");
+    expect(compareRowItem).toHaveClass("focus-visible:ring-1");
+    expect(compareRowItem).toHaveClass("focus-visible:ring-accent");
+
+    // Click to open drawer to test drawer controls
+    fireEvent.click(screen.getByText("Hot disagreement story"));
+    const drawer = await screen.findByLabelText(/review diff drawer/i);
+    const inDrawer = within(drawer);
+
+    const closeBtn = inDrawer.getByRole("button", { name: /close/i });
+    expect(closeBtn).toHaveClass("focus:outline-none");
+    expect(closeBtn).toHaveClass("focus-visible:ring-1");
+    expect(closeBtn).toHaveClass("focus-visible:ring-accent");
+
+    const rerunBtn = inDrawer.getByRole("button", { name: /re-run deepseek/i });
+    expect(rerunBtn).toHaveClass("focus:outline-none");
+    expect(rerunBtn).toHaveClass("focus-visible:ring-1");
+    expect(rerunBtn).toHaveClass("focus-visible:ring-accent");
+
+    const titleLink = inDrawer.getByRole("link", { name: "Hot disagreement story" });
+    expect(titleLink).toHaveClass("focus:outline-none");
+    expect(titleLink).toHaveClass("focus-visible:ring-1");
+    expect(titleLink).toHaveClass("focus-visible:ring-accent");
   });
 });

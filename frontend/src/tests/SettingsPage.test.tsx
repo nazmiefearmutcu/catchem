@@ -210,4 +210,71 @@ describe("SettingsPage — smoke", () => {
     expect(en).toHaveAttribute("aria-checked", "false");
     expect(window.localStorage.getItem(I18N_KEY)).toBe("tr");
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderSettings();
+
+    // Theme toggle
+    const themeBtn = await screen.findByRole("button", { name: /switch to/i });
+    expect(themeBtn).toHaveClass("focus:outline-none");
+    expect(themeBtn).toHaveClass("focus-visible:ring-1");
+    expect(themeBtn).toHaveClass("focus-visible:ring-accent");
+
+    // Accent swatches
+    const swatchBlue = await screen.findByTestId("accent-swatch-blue");
+    expect(swatchBlue).toHaveClass("focus:outline-none");
+    expect(swatchBlue).toHaveClass("focus-visible:ring-2");
+    expect(swatchBlue).toHaveClass("focus-visible:ring-accent");
+
+    // Language picker options
+    const languageBtn = await screen.findByTestId("language-option-en");
+    expect(languageBtn).toHaveClass("focus:outline-none");
+    expect(languageBtn).toHaveClass("focus-visible:ring-1");
+    expect(languageBtn).toHaveClass("focus-visible:ring-accent");
+
+    // DeepSeek reviewer card controls
+    const dsRateSlider = await screen.findByTestId("ds-sampling-slider");
+    expect(dsRateSlider).toHaveClass("focus:outline-none");
+    expect(dsRateSlider).toHaveClass("focus-visible:ring-1");
+    expect(dsRateSlider).toHaveClass("focus-visible:ring-accent");
+
+    const dsCapInput = await screen.findByTestId("ds-cap-input");
+    expect(dsCapInput).toHaveClass("focus:outline-none");
+    expect(dsCapInput).toHaveClass("focus-visible:ring-1");
+    expect(dsCapInput).toHaveClass("focus-visible:ring-accent");
+
+    // Webhook card controls
+    const webhookScoreSlider = await screen.findByTestId("webhook-score-slider");
+    expect(webhookScoreSlider).toHaveClass("focus:outline-none");
+    expect(webhookScoreSlider).toHaveClass("focus-visible:ring-1");
+    expect(webhookScoreSlider).toHaveClass("focus-visible:ring-accent");
+
+    const webhookAssetBtn = await screen.findByTestId("webhook-asset-equities");
+    expect(webhookAssetBtn).toHaveClass("focus:outline-none");
+    expect(webhookAssetBtn).toHaveClass("focus-visible:ring-1");
+    expect(webhookAssetBtn).toHaveClass("focus-visible:ring-accent");
+
+    // DB Backup controls
+    const dbExportLink = await screen.findByTestId("db-export-link");
+    expect(dbExportLink).toHaveClass("focus:outline-none");
+    expect(dbExportLink).toHaveClass("focus-visible:ring-1");
+    expect(dbExportLink).toHaveClass("focus-visible:ring-accent");
+
+    const dbImportPickBtn = await screen.findByTestId("db-import-pick");
+    expect(dbImportPickBtn).toHaveClass("focus:outline-none");
+    expect(dbImportPickBtn).toHaveClass("focus-visible:ring-1");
+    expect(dbImportPickBtn).toHaveClass("focus-visible:ring-accent");
+
+    // Workspace snapshot controls
+    const snapshotExportBtn = await screen.findByTestId("snapshot-export-btn");
+    expect(snapshotExportBtn).toHaveClass("focus:outline-none");
+    expect(snapshotExportBtn).toHaveClass("focus-visible:ring-1");
+    expect(snapshotExportBtn).toHaveClass("focus-visible:ring-accent");
+
+    // Reset preferences controls
+    const resetOpenBtn = await screen.findByTestId("reset-preferences-open-btn");
+    expect(resetOpenBtn).toHaveClass("focus:outline-none");
+    expect(resetOpenBtn).toHaveClass("focus-visible:ring-1");
+    expect(resetOpenBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

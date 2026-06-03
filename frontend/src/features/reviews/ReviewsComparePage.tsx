@@ -143,6 +143,7 @@ export function ReviewsComparePage() {
                   type="checkbox"
                   checked={excludeDemo}
                   onChange={(e) => setExcludeDemo(e.target.checked)}
+                  className="focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                 />
                 <span>real news only</span>
               </label>
@@ -152,7 +153,7 @@ export function ReviewsComparePage() {
                 <button
                   key={k}
                   type="button"
-                  className={`chip text-[10px] ${sortBy === k && diffFilter !== "largest_delta" ? "chip-active" : ""}`}
+                  className={`chip text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${sortBy === k && diffFilter !== "largest_delta" ? "chip-active" : ""}`}
                   onClick={() => setSortBy(k)}
                   disabled={diffFilter === "largest_delta"}
                   title={
@@ -182,7 +183,7 @@ export function ReviewsComparePage() {
               <button
                 key={k}
                 type="button"
-                className={`chip text-[10px] ${diffFilter === k ? "chip-active" : ""}`}
+                className={`chip text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${diffFilter === k ? "chip-active" : ""}`}
                 onClick={() => setDiffFilter(k)}
               >
                 {label}
@@ -201,7 +202,7 @@ export function ReviewsComparePage() {
             <EmptyState
               title="No paired reviews yet"
               hint="DeepSeek-sampled captures will appear here once the second-opinion reviewer fires. Enable + add the API key in Settings → DeepSeek."
-              action={<Link to="/settings" className="btn">Open Settings</Link>}
+              action={<Link to="/settings" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Settings</Link>}
             />
           ) : (
             <ul className="divide-y divide-[color:var(--border)] rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)]">
@@ -457,7 +458,7 @@ function ReviewsHero({
           />
           <button
             type="button"
-            className="chip hidden text-[10px] no-print hover:bg-[color:var(--bg-elev2)] sm:inline-flex"
+            className="chip hidden text-[10px] no-print hover:bg-[color:var(--bg-elev2)] sm:inline-flex focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => window.print()}
             title="Print this page or save as PDF"
           >
@@ -750,10 +751,17 @@ function CompareRow({
   const dsP = it.deepseek.payload as ReviewPayload;
   return (
     <li
-      className={`px-3 py-2 transition-colors cursor-pointer hover:bg-[color:var(--bg-elev2)] ${
+      className={`px-3 py-2 transition-colors cursor-pointer hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
         selected ? "bg-[color:var(--bg-elev2)]" : ""
       }`}
       onClick={onSelect}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
     >
       <div className="grid grid-cols-[90px_1fr_auto] gap-3 items-start">
         <div className="grid pl-1.5" title={it.deepseek.created_at}>
@@ -981,14 +989,14 @@ function DiffDrawer({ item, onClose }: { item: CompareItem; onClose: () => void 
       <header className="grid gap-1">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">diff · {item.capture_id.slice(0, 12)}…</h2>
-          <button type="button" className="btn text-[10px] py-0.5 px-2" onClick={onClose}>
+          <button type="button" className="btn text-[10px] py-0.5 px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={onClose}>
             close
           </button>
         </div>
         {item.title && (
           <p className="text-xs leading-snug">
             {href ? (
-              <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+              <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm">
                 {item.title}
               </a>
             ) : (
@@ -1010,7 +1018,7 @@ function DiffDrawer({ item, onClose }: { item: CompareItem; onClose: () => void 
       <div className="flex items-center gap-2 pt-2 border-t border-[color:var(--border-subtle)]">
         <button
           type="button"
-          className="btn btn-accent text-xs"
+          className="btn btn-accent text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           onClick={() => rerun.mutate()}
           disabled={rerun.isPending}
         >

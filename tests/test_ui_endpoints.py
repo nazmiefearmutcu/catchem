@@ -268,3 +268,30 @@ def test_archive_status_redacts_paths_to_tilde(
         # also be tilde-redacted.
         if data.get("current_csv_path"):
             assert data["current_csv_path"].startswith("~/")
+
+
+def test_ui_endpoints_sanitization(client_with_records: TestClient) -> None:
+    # Invalid symbol should return 400 Bad Request
+    r = client_with_records.get("/ui/symbol/AAPL;%20DROP%20TABLE")
+    assert r.status_code == 400
+
+    r = client_with_records.get("/ui/quote/AAPL<script>")
+    assert r.status_code == 400
+
+    # Invalid capture_id should return 400
+    r = client_with_records.get("/api/records/ui-1<script>/tags")
+    assert r.status_code == 400
+
+    r = client_with_records.get("/record/ui-1<script>")
+    assert r.status_code == 400
+
+    # Invalid tags, asset_classes, reasons
+    r = client_with_records.get("/api/tags/some_tag<script>/records")
+    assert r.status_code == 400
+
+    r = client_with_records.get("/records/by-asset-class/equity<script>")
+    assert r.status_code == 400
+
+    r = client_with_records.get("/records/by-reason/earnings<script>")
+    assert r.status_code == 400
+

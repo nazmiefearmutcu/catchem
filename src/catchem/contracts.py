@@ -214,8 +214,203 @@ class MarketQuoteBatchResponse(_CompactBase):
     generated_at: str
 
 
+class RelevanceMetric(_CompactBase):
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
+
+
+class BenchmarkItemDetails(_CompactBase):
+    capture_id: str
+    expected_finance_relevant: bool
+    predicted_finance_relevant: bool
+    score: float
+    expected_asset_classes: list[str] = []
+    predicted_asset_classes: list[str] = []
+    expected_reason_codes: list[str] = []
+    predicted_reason_codes: list[str] = []
+
+
+class UiBenchmarkLatestResponse(_CompactBase):
+    schema_version: int
+    dataset_name: str
+    generated_at: str
+    ran_at: str
+    relevance: RelevanceMetric
+    asset_class_f1: dict[str, float] = {}
+    reason_code_f1: dict[str, float] = {}
+    symbol_recall: float | None = None
+    sentiment_accuracy: float | None = None
+    n: int
+    per_item: list[BenchmarkItemDetails] = []
+
+
+class BenchmarkHistoryItem(_CompactBase):
+    schema_version: int
+    dataset_name: str
+    generated_at: str
+    relevance: RelevanceMetric
+    asset_class_f1: dict[str, float] = {}
+    reason_code_f1: dict[str, float] = {}
+    symbol_recall: float | None = None
+    sentiment_accuracy: float | None = None
+    n: int
+    per_item: list[BenchmarkItemDetails] = []
+
+
+class UiBenchmarkHistoryResponse(_CompactBase):
+    history: list[BenchmarkHistoryItem] = []
+
+
+class UiSummaryResponse(_CompactBase):
+    mode: str
+    is_production_safe: bool
+    diagnostic_allowed: bool
+    use_ml_stubs: bool
+    totals: dict[str, int]
+    diagnostic_count: int
+    asset_class_distribution: dict[str, int] = {}
+    reason_code_distribution: dict[str, int] = {}
+    sentiment_distribution: dict[str, int] = {}
+    recent_top: list[FinancialImpactDetail]
+    dlq: int
+    model_versions: dict[str, str] = {}
+    guards: GuardSummary
+    generated_at: str
+
+
+class UiFacetsResponse(_CompactBase):
+    window_total: int
+    window_relevant: int
+    asset_classes: list[tuple[str, int]] = []
+    reason_codes: list[tuple[str, int]] = []
+    symbols: list[tuple[str, int]] = []
+    domains: list[tuple[str, int]] = []
+    sentiments: list[tuple[str, int]] = []
+
+
+class TimelineSeriesEntry(_CompactBase):
+    ts: str
+    total: int
+    relevant: int
+
+
+class UiTimelineResponse(_CompactBase):
+    bucket_minutes: int
+    series: list[TimelineSeriesEntry]
+
+
+class TopSymbolEntry(_CompactBase):
+    symbol: str
+    count: int
+
+
+class UiTopSymbolsResponse(_CompactBase):
+    items: list[TopSymbolEntry]
+
+
+class TopReasonEntry(_CompactBase):
+    reason: str
+    count: int
+
+
+class UiTopReasonsResponse(_CompactBase):
+    items: list[TopReasonEntry]
+
+
+class UiTrendsResponse(_CompactBase):
+    buckets: list[str]
+    asset_classes: list[str]
+    series: dict[str, list[int]]
+
+
+class UiMatrixResponse(_CompactBase):
+    asset_classes: list[str]
+    reason_codes: list[str]
+    matrix: list[list[int]]
+
+
+class UiSymbolDetailResponse(_CompactBase):
+    symbol: str
+    count: int
+    reason_distribution: dict[str, int] = {}
+    sentiment_distribution: dict[str, int] = {}
+    items: list[FinancialImpactSummary]
+
+
+class NewsFeedHealthEntry(_CompactBase):
+    name: str
+    url: str
+    fallback_domain: str | None = None
+    ok: bool
+    backed_off: bool
+    status_code: int | None = None
+    error: str | None = None
+    item_count: int = 0
+    items_total: int = 0
+    last_fetch_at: str | None = None
+    elapsed_ms: float = 0.0
+    total_fetches: int = 0
+    total_errors: int = 0
+    consecutive_errors: int = 0
+    cooldown_until: str | None = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    consecutive_empty: int = 0
+    adaptive_cadence: int = 1
+    total_new_items: int = 0
+
+
+class UiNewsStatusResponse(_CompactBase):
+    enabled: bool
+    feeds: int
+    interval_seconds: int | None = None
+    last_run_at: str | None = None
+    next_run_at: str | None = None
+    last_ingested: int = 0
+    total_ingested: int = 0
+    last_error: str | None = None
+    is_polling: bool
+    last_new_at: str | None = None
+    empty_ticks: int = 0
+    last_avg_publisher_lag_seconds: float | None = None
+    last_median_publisher_lag_seconds: float | None = None
+    unhealthy_feeds: int = 0
+    backed_off_feeds: int = 0
+    feed_health: list[NewsFeedHealthEntry] = []
+    max_item_age_seconds: int | None = None
+    last_stale_skipped: int = 0
+
+
+class UiNewsPollNowResponse(_CompactBase):
+    ingested: int
+    total_ingested: int
+
+
+class UiArchiveStatusResponse(_CompactBase):
+    enabled: bool
+    drive_dir: str | None = None
+    interval_seconds: int | None = None
+    local_cap_rows: int | None = None
+    last_run_at: str | None = None
+    last_archived_count: int = 0
+    total_archived: int = 0
+    last_error: str | None = None
+    is_archiving: bool
+    current_csv_path: str | None = None
+
+
+class UiArchiveNowResponse(_CompactBase):
+    archived: int
+    csv_path: str | None = None
+    error: str | None = None
+    total_archived: int
+
+
 __all__ = [
     "AppInfoResponse",
+    "BenchmarkHistoryItem",
+    "BenchmarkItemDetails",
     "DemoRunResponse",
     "FinancialImpactDetail",
     "FinancialImpactSummary",
@@ -224,6 +419,25 @@ __all__ = [
     "MarketQuote",
     "MarketQuoteBatchResponse",
     "MetricsSummary",
+    "NewsFeedHealthEntry",
     "RecordListResponse",
+    "RelevanceMetric",
     "SidecarStatusResponse",
+    "TimelineSeriesEntry",
+    "TopReasonEntry",
+    "TopSymbolEntry",
+    "UiArchiveNowResponse",
+    "UiArchiveStatusResponse",
+    "UiBenchmarkHistoryResponse",
+    "UiBenchmarkLatestResponse",
+    "UiFacetsResponse",
+    "UiMatrixResponse",
+    "UiNewsPollNowResponse",
+    "UiNewsStatusResponse",
+    "UiSummaryResponse",
+    "UiSymbolDetailResponse",
+    "UiTimelineResponse",
+    "UiTopReasonsResponse",
+    "UiTopSymbolsResponse",
+    "UiTrendsResponse",
 ]

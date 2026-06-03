@@ -415,3 +415,100 @@ describe("debounce + min-length contract", () => {
     expect(screen.getByTestId("search-palette")).toBeInTheDocument();
   });
 });
+
+describe("Accessibility (O-10)", () => {
+  it("enforces combobox and listbox accessibility contracts", async () => {
+    apiMock.search.mockResolvedValueOnce(POPULATED_RESP);
+    renderShell();
+    
+    // Open the palette
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true }));
+    });
+    
+    const input = screen.getByTestId("search-palette-input") as HTMLInputElement;
+    
+    // Verify initial combobox attributes on input
+    expect(input).toHaveAttribute("role", "combobox");
+    expect(input).toHaveAttribute("aria-autocomplete", "list");
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    expect(input).toHaveAttribute("aria-controls", "search-palette-listbox");
+    expect(input).toHaveAttribute("aria-describedby", "search-palette-instructions");
+    
+    // Verify instruction element exists and describes list navigation
+    const instructions = document.getElementById("search-palette-instructions");
+    expect(instructions).toBeInTheDocument();
+    expect(instructions?.textContent).toContain("arrow keys");
+
+    // Perform query to get search results
+    fireEvent.change(input, { target: { value: "tesla" } });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    // Check listbox role and id
+    const listbox = screen.getByRole("listbox");
+    expect(listbox).toHaveAttribute("id", "search-palette-listbox");
+
+    // Check option list attributes (records, symbols, clusters)
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(3);
+
+    // Option 0 (Record)
+    expect(options[0]).toHaveAttribute("id", "search-palette-option-0");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).toHaveAttribute("aria-label", "Record: Tesla beats deliveries forecast (bloomberg.com)");
+
+    // Option 1 (Symbol)
+    expect(options[1]).toHaveAttribute("id", "search-palette-option-1");
+    expect(options[1]).toHaveAttribute("aria-selected", "false");
+    expect(options[1]).toHaveAttribute("aria-label", "Symbol: TSLA, 3 mentions");
+
+    // Option 2 (Cluster)
+    expect(options[2]).toHaveAttribute("id", "search-palette-option-2");
+    expect(options[2]).toHaveAttribute("aria-selected", "false");
+    expect(options[2]).toHaveAttribute("aria-label", "Cluster: #deadbeef, size 2, symbols: TSLA, GM");
+
+    // Navigate to next option (Symbol) and verify active descendant
+    act(() => {
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+    });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-palette-option-1");
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("applies correct focus outline and visible ring CSS classes to interactive controls", async () => {
+    apiMock.search.mockResolvedValueOnce(POPULATED_RESP);
+    renderShell();
+    
+    // Open the palette
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true }));
+    });
+    
+    const input = screen.getByTestId("search-palette-input") as HTMLInputElement;
+    const inputWrapper = input.parentElement;
+    expect(inputWrapper).toHaveClass("focus-within:ring-1");
+
+    const closeBtn = screen.getByLabelText("Close search palette");
+    expect(closeBtn).toHaveClass("focus-visible:ring-accent");
+
+    // Execute query to reveal Save button
+    fireEvent.change(input, { target: { value: "tesla" } });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    const saveBtn = screen.getByTestId("search-palette-save-button");
+    expect(saveBtn).toHaveClass("focus-visible:ring-accent");
+  });
+});
+

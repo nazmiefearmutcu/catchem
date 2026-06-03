@@ -176,6 +176,18 @@ _INLINE_SCRIPT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_FALLBACK_SPA_HTML = (
+    "<!doctype html><meta charset=utf-8><title>catchem</title>"
+    "<style>body{font-family:ui-monospace,monospace;background:#0e1014;color:#e7ebf0;"
+    "padding:48px;max-width:640px;line-height:1.6}h1{color:#5fb3ff;font-size:18px}"
+    "code{background:#161922;padding:2px 6px;border-radius:4px}a{color:#5fb3ff}</style>"
+    "<h1>catchem</h1>"
+    "<p>The premium UI bundle has not been built yet.</p>"
+    "<p>Run <code>bash scripts/catchem_bootstrap_and_run.sh</code> "
+    "or <code>(cd frontend && npm install && npm run build)</code>.</p>"
+    "<p>Legacy dashboard meanwhile: <a href=\"/legacy\">/legacy</a></p>"
+)
+
 
 def _csp_with_nonce(nonce: str) -> str:
     """The full Content-Security-Policy for SPA HTML responses.
@@ -1042,18 +1054,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Friendly fallback when the bundle hasn't been built yet. The
         # placeholder has no inline <script>, so the middleware's strict
         # default CSP (no nonce) is sufficient here.
-        msg = (
-            "<!doctype html><meta charset=utf-8><title>catchem</title>"
-            "<style>body{font-family:ui-monospace,monospace;background:#0e1014;color:#e7ebf0;"
-            "padding:48px;max-width:640px;line-height:1.6}h1{color:#5fb3ff;font-size:18px}"
-            "code{background:#161922;padding:2px 6px;border-radius:4px}a{color:#5fb3ff}</style>"
-            "<h1>catchem</h1>"
-            "<p>The premium UI bundle has not been built yet.</p>"
-            "<p>Run <code>bash scripts/catchem_bootstrap_and_run.sh</code> "
-            "or <code>(cd frontend && npm install && npm run build)</code>.</p>"
-            "<p>Legacy dashboard meanwhile: <a href=\"/legacy\">/legacy</a></p>"
-        )
-        return HTMLResponse(msg, status_code=200)
+        return HTMLResponse(_FALLBACK_SPA_HTML, status_code=200)
 
     # Mount the built bundle's static assets if they exist.
     # We resolve via the same package-resource helper so wheel installs work.
@@ -4718,7 +4719,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 html,
                 headers={"Content-Security-Policy": _csp_with_nonce(nonce)},
             )
-        raise HTTPException(status_code=404, detail="bundle_not_built")
+        return HTMLResponse(_FALLBACK_SPA_HTML, status_code=200)
 
     # The Catchem nav routes /replay => ReplayUploadPage. The existing
     # POST /replay endpoint stays for API consumers, but a bookmarked GET
@@ -4732,7 +4733,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 html,
                 headers={"Content-Security-Policy": _csp_with_nonce(nonce)},
             )
-        raise HTTPException(status_code=404, detail="bundle_not_built")
+        return HTMLResponse(_FALLBACK_SPA_HTML, status_code=200)
 
     return app
 

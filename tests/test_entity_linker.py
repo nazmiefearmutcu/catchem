@@ -106,3 +106,47 @@ def test_empty_text_returns_no_hits() -> None:
     e = EntityLinker()
     h = e.extract(title="", text="")
     assert h.hits == []
+
+
+def test_entity_linker_coverage_gaps() -> None:
+    # 1. Short and blank company aliases to cover _contains_alias early exits
+    e = EntityLinker(company_aliases={"A": "AAPL", " ": "GOOG", "": "MSFT"})
+    h = e.extract(title="A company", text="Another company")
+    # None of these short/blank aliases should map to tickers or companies
+    assert "AAPL" not in h.tickers
+    assert "A" not in h.by_kind("company")
+    assert "GOOG" not in h.tickers
+    assert "MSFT" not in h.tickers
+
+    # 2. Cashtags, tickers and unique_texts properties/methods on EntityHits
+    # We want to make sure the helper methods/properties are fully covered
+    e2 = EntityLinker(company_aliases={"Apple": "AAPL"})
+    h2 = e2.extract(title="$AAPL beats", text="Apple held an event and $MSFT rose. Also $AAPL rose.")
+    assert h2.cashtags == ["AAPL", "MSFT"]
+    assert h2.tickers == ["AAPL"]
+    assert h2.unique_texts() == ["AAPL", "MSFT", "Apple"]
+
+    # 3. Ticker denylist hit in paren regex
+    e3 = EntityLinker()
+    h3 = e3.extract(title="The CEO (CEO) resigned", text="The SEC (SEC) investigated Microsoft (MSFT).")
+    # (CEO) and (SEC) should be ignored, but (MSFT) should be detected
+    assert "CEO" not in h3.tickers
+    assert "SEC" not in h3.tickers
+    assert "MSFT" in h3.tickers
+
+
+    # 4. Known currencies detection
+    h4 = e3.extract(title="USD drops", text="EUR rises.")
+    assert "USD" in h4.by_kind("currency")
+    assert "EUR" in h4.by_kind("currency")
+
+    # 5. Known commodities detection
+    h5 = e3.extract(title="crude oil prices", text="gold rises.")
+    assert "crude" in h5.by_kind("commodity")
+    assert "gold" in h5.by_kind("commodity")
+
+    # 6. Known crypto detection
+    h6 = e3.extract(title="Bitcoin is up", text="BTC is also up.")
+    assert "Bitcoin" in h6.by_kind("crypto")
+    assert "BTC" in h6.by_kind("crypto")
+

@@ -174,4 +174,41 @@ describe("MarketMapPage smoke", () => {
     // Hero eyebrow renders regardless of query state.
     expect(screen.getByText(/analysis map · cross-asset news flow/i)).toBeInTheDocument();
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    apiMock.matrix.mockResolvedValue(makeMatrix());
+    apiMock.trends.mockResolvedValue(makeTrends());
+    apiMock.quantLiveRead.mockResolvedValue(makeLiveRead());
+    apiMock.quantRegime.mockResolvedValue(makeRegime());
+
+    renderPage();
+
+    // 1. Link to scan (full Quant Scan)
+    const scanLink = await screen.findByRole("link", { name: /full quant scan →/i });
+    expect(scanLink).toHaveClass("focus:outline-none");
+    expect(scanLink).toHaveClass("focus-visible:ring-1");
+    expect(scanLink).toHaveClass("focus-visible:ring-accent");
+  });
+
+  it("implements custom focus-visible ring styles on empty state links", async () => {
+    apiMock.matrix.mockResolvedValue(
+      makeMatrix({ asset_classes: [], reason_codes: [], matrix: [] }),
+    );
+    apiMock.trends.mockResolvedValue(
+      makeTrends({ buckets: [], asset_classes: [], series: {} }),
+    );
+    apiMock.quantLiveRead.mockResolvedValue(makeLiveRead());
+    apiMock.quantRegime.mockResolvedValue(makeRegime());
+
+    renderPage();
+
+    const emptyLinks = await screen.findAllByRole("link", { name: /open replay\/upload/i });
+    expect(emptyLinks.length).toBeGreaterThan(0);
+    emptyLinks.forEach((link) => {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    });
+  });
 });
+

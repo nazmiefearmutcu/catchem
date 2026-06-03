@@ -98,7 +98,7 @@ export function MarketMapPage() {
               </div>
             </div>
           </div>
-          <Link to="/scan" className="chip text-[10px] hover:bg-[color:var(--bg-elev2)]">
+          <Link to="/scan" className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">
             full Quant Scan →
           </Link>
         </div>
@@ -128,7 +128,7 @@ export function MarketMapPage() {
         <h2 className="label mb-2">news-impact map · asset class × reason code</h2>
         {matrix.isLoading ? <Skeleton className="h-72" /> :
           matrix.error ? <ErrorBox err={matrix.error} /> :
-          !matrix.data || matrix.data.asset_classes.length === 0 ? <EmptyState title="No matrix yet" hint="Run a replay first." action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} /> : (
+          !matrix.data || matrix.data.asset_classes.length === 0 ? <EmptyState title="No matrix yet" hint="Run a replay first." action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} /> : (
             <EChart
               height={Math.max(280, 24 * matrix.data.asset_classes.length + 80)}
               option={{
@@ -173,7 +173,7 @@ export function MarketMapPage() {
         </div>
         {trends.isLoading ? <Skeleton className="h-56" /> :
           trends.error ? <ErrorBox err={trends.error} /> :
-          trends.data && trends.data.buckets.length === 0 ? <EmptyState title="No timeline data" hint="Run a replay first." action={<Link to="/replay" className="btn">Open Replay/Upload</Link>} /> :
+          trends.data && trends.data.buckets.length === 0 ? <EmptyState title="No timeline data" hint="Run a replay first." action={<Link to="/replay" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">Open Replay/Upload</Link>} /> :
           trends.data && (
             <EChart
               height={300}

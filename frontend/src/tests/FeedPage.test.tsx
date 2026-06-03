@@ -219,4 +219,46 @@ describe("FeedPage (smoke)", () => {
     // "1 selected" also appears in the top select-all bar, so scope to the toolbar.
     expect(within(toolbar).getByText("1 selected")).toBeInTheDocument();
   });
+
+  it("implements aria-labels and keyboard focus classes on feed filters", async () => {
+    apiMock.facets.mockResolvedValue({
+      window_total: 5,
+      window_relevant: 2,
+      asset_classes: [["equity", 10]],
+      reason_codes: [["EARNINGS", 5]],
+      symbols: [["AAPL", 8]],
+      domains: [["reuters.com", 2]],
+      sentiments: [["positive", 4]],
+    });
+
+    renderWithProviders(createElement(FeedPage));
+
+    // Verify search input accessibility
+    const search = screen.getByPlaceholderText("title, domain, symbol…");
+    expect(search).toHaveAttribute("aria-label", "Search records");
+    expect(search).toHaveClass("focus-visible:ring-accent");
+
+    // Verify relevance filter accessibility
+    const relevanceOnly = screen.getByRole("button", { name: "Filter by: finance relevant only" });
+    const relevanceAll = screen.getByRole("button", { name: "Filter by: show all records" });
+    expect(relevanceOnly).toBeInTheDocument();
+    expect(relevanceAll).toBeInTheDocument();
+    expect(relevanceOnly).toHaveClass("focus-visible:ring-accent");
+    expect(relevanceAll).toHaveClass("focus-visible:ring-accent");
+
+    // Verify facet filters rendering and accessibility
+    const assetClassEquity = await screen.findByRole("button", { name: "Filter by asset class: equity (10 items)" });
+    expect(assetClassEquity).toBeInTheDocument();
+    expect(assetClassEquity).toHaveClass("focus-visible:ring-accent");
+    expect(assetClassEquity).toHaveAttribute("aria-pressed", "false");
+
+    // Clear all and copy link buttons accessibility
+    const clearAllBtn = screen.getByRole("button", { name: "Clear all active filters" });
+    const copyLinkBtn = screen.getByRole("button", { name: "Copy link to current filtered view" });
+    expect(clearAllBtn).toBeInTheDocument();
+    expect(copyLinkBtn).toBeInTheDocument();
+    expect(clearAllBtn).toHaveClass("focus-visible:ring-accent");
+    expect(copyLinkBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });
+

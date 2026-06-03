@@ -100,8 +100,11 @@ def test_render_demo_report_non_numeric_score_falls_back_to_dash() -> None:
     rec = _full_record()
     rec["finance_relevance_score"] = None
     result = DemoResult(
-        capture_id="demo-x", record=rec, jsonl_path=Path("/tmp/x.jsonl"),
-        processed=1, skipped=0,
+        capture_id="demo-x",
+        record=rec,
+        jsonl_path=Path("/tmp/x.jsonl"),
+        processed=1,
+        skipped=0,
     )
     report = render_demo_report(result)
     assert "score       —" in report
@@ -116,8 +119,11 @@ def test_render_demo_report_empty_lists_render_dash() -> None:
     rec["candidate_symbols"] = []
     rec["evidence_sentences"] = []
     result = DemoResult(
-        capture_id="demo-y", record=rec, jsonl_path=Path("/tmp/y.jsonl"),
-        processed=1, skipped=0,
+        capture_id="demo-y",
+        record=rec,
+        jsonl_path=Path("/tmp/y.jsonl"),
+        processed=1,
+        skipped=0,
     )
     report = render_demo_report(result)
     assert "asset_cls   —" in report
@@ -130,8 +136,11 @@ def test_render_demo_report_truncates_long_evidence_to_120_chars() -> None:
     rec = _full_record()
     rec["evidence_sentences"] = ["x" * 500]
     result = DemoResult(
-        capture_id="demo-z", record=rec, jsonl_path=Path("/tmp/z.jsonl"),
-        processed=1, skipped=0,
+        capture_id="demo-z",
+        record=rec,
+        jsonl_path=Path("/tmp/z.jsonl"),
+        processed=1,
+        skipped=0,
     )
     report = render_demo_report(result)
     # find the evidence line and confirm the rendered slice is exactly 120 chars
@@ -143,8 +152,11 @@ def test_render_demo_report_truncates_long_evidence_to_120_chars() -> None:
 def test_render_demo_report_empty_record_points_to_dlq() -> None:
     """Falsy record → the 'no record materialized' diagnostic block."""
     result = DemoResult(
-        capture_id="missing", record={}, jsonl_path=Path("/tmp/m.jsonl"),
-        processed=0, skipped=1,
+        capture_id="missing",
+        record={},
+        jsonl_path=Path("/tmp/m.jsonl"),
+        processed=0,
+        skipped=1,
     )
     report = render_demo_report(result)
     assert "no record materialized" in report
@@ -198,3 +210,18 @@ def test_run_demo_is_idempotent_for_identical_content(isolated_demo) -> None:
     assert a.capture_id == b.capture_id
     assert a.processed == 1
     assert b.record["capture_id"] == a.record["capture_id"]
+
+
+def test_run_demo_with_custom_settings(isolated_demo) -> None:
+    """run_demo accepts a custom settings object, exercising the branch where settings is not None."""
+    from catchem.settings import load_settings
+
+    custom_settings = load_settings()
+    result = run_demo(
+        title="Custom settings test",
+        text=FED_ARTICLE,
+        domain="custom.settings.local",
+        settings=custom_settings,
+    )
+    assert result.processed == 1
+    assert result.record["domain"] == "custom.settings.local"

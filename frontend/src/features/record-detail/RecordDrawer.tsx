@@ -64,7 +64,7 @@ export function RecordDrawer({ captureId, onClose }: Props) {
             <div className="text-[10px] uppercase tracking-[0.25em] text-accent font-semibold">RECORD · NEWS DETAIL</div>
             <div className="text-xs text-[color:var(--fg-dim)] truncate" title={captureId}>{captureId}</div>
           </div>
-          <button ref={closeRef} className="btn shrink-0" onClick={onClose} aria-label="Close">esc · close</button>
+          <button ref={closeRef} className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={onClose} aria-label="Close">esc · close</button>
         </header>
         <div className="p-4 grid gap-4">
           {isLoading && <DetailSkeleton />}
@@ -77,7 +77,7 @@ export function RecordDrawer({ captureId, onClose }: Props) {
                 </div>
                 <h2 className="text-lg font-semibold leading-snug">{data.title ?? "(untitled)"}</h2>
                 {safeHref(data.url) && (
-                  <a href={safeHref(data.url)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-accent hover:underline">
+                  <a href={safeHref(data.url)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-accent hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded">
                     open source
                     <Icon name="external" size={12} />
                   </a>
@@ -160,7 +160,7 @@ export function RecordDrawer({ captureId, onClose }: Props) {
               )}
 
               <section>
-                <button className="btn" onClick={() => setShowRaw((v) => !v)}>
+                <button className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={() => setShowRaw((v) => !v)}>
                   {showRaw ? "hide raw JSON" : "show raw JSON"}
                 </button>
                 {showRaw && (
@@ -344,7 +344,7 @@ export function TagsSection({ captureId }: { captureId: string }) {
           <button
             key={tag}
             type="button"
-            className="chip chip-active inline-flex items-center gap-1"
+            className="chip chip-active inline-flex items-center gap-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             onClick={() => removeMutation.mutate(tag)}
             disabled={removeMutation.isPending}
             data-testid={`tag-pill-${tag}`}
@@ -359,7 +359,7 @@ export function TagsSection({ captureId }: { captureId: string }) {
       <div className="mt-2 flex items-center gap-2">
         <input
           type="text"
-          className="input flex-1"
+          className="input flex-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           placeholder="add tag (a-z 0-9 _ - .)"
           value={draft}
           onChange={(e) => {
@@ -379,7 +379,7 @@ export function TagsSection({ captureId }: { captureId: string }) {
         />
         <button
           type="button"
-          className="btn"
+          className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           onClick={submitDraft}
           disabled={addMutation.isPending || !draft.trim()}
           data-testid="tag-add"

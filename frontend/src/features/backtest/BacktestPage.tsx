@@ -92,7 +92,7 @@ export function BacktestPage() {
               <span>sample</span>
               <select
                 aria-label="Sample size"
-                className="bg-[color:var(--bg-elev2)] border border-[color:var(--border)] rounded px-1.5 py-0.5 text-[11px]"
+                className="bg-[color:var(--bg-elev2)] border border-[color:var(--border)] rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 value={sampleSize}
                 onChange={(e) => setSampleSize(Number(e.target.value))}
                 disabled={isFetching}
@@ -105,7 +105,7 @@ export function BacktestPage() {
               </select>
             </label>
             <button
-              className="btn shrink-0"
+              className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={() => refetch()}
               disabled={isFetching}
               title="Re-evaluate against the latest paired reviews"

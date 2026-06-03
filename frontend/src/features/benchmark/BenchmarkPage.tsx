@@ -89,7 +89,7 @@ export function BenchmarkPage() {
           <div className="flex max-w-full flex-wrap items-center gap-2">
             <button
               type="button"
-              className="chip text-[10px] no-print hover:bg-[color:var(--bg-elev2)]"
+              className="chip text-[10px] no-print hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={() => window.print()}
               title="Print this page or save as PDF"
             >
@@ -99,7 +99,7 @@ export function BenchmarkPage() {
               </span>
             </button>
             <button
-              className="btn shrink-0"
+              className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={() => { refetch(); qc.invalidateQueries({ queryKey: ["bench-hist"] }); }}
               disabled={isFetching}
               title="Re-run the benchmark over the golden set"

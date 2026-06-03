@@ -159,4 +159,23 @@ describe("ModelControlsPage smoke", () => {
       expect(screen.getByText(/boom-appinfo/i)).toBeInTheDocument(),
     );
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    apiMock.appInfo.mockResolvedValue(makeAppInfo());
+    apiMock.sidecarStatus.mockResolvedValue(makeStatus());
+    apiMock.guards.mockResolvedValue(makeGuards());
+
+    renderPage();
+
+    const refreshBtn = await screen.findByRole("button", { name: /refresh/i });
+    const logsLink = await screen.findByRole("link", { name: /view logs/i });
+
+    expect(refreshBtn).toHaveClass("focus:outline-none");
+    expect(refreshBtn).toHaveClass("focus-visible:ring-1");
+    expect(refreshBtn).toHaveClass("focus-visible:ring-accent");
+
+    expect(logsLink).toHaveClass("focus:outline-none");
+    expect(logsLink).toHaveClass("focus-visible:ring-1");
+    expect(logsLink).toHaveClass("focus-visible:ring-accent");
+  });
 });

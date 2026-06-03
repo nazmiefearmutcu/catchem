@@ -46,7 +46,7 @@ def test_live_read_has_signal_value_error():
     client = TestClient(app)
     mock_engine = MagicMock()
     mock_engine.dashboard_snapshot.return_value = {
-        "n_records_window": "invalid_int", # this will trigger TypeError/ValueError in int() cast
+        "n_records_window": "invalid_int",  # this will trigger TypeError/ValueError in int() cast
         "n_clusters": 0,
     }
     mock_sup = MagicMock()
@@ -66,7 +66,7 @@ def test_healthz_poller_healthy():
     mock_poller.last_run_at = datetime.now(UTC)
     mock_poller.interval_seconds = 60
     mock_sup = MagicMock()
-    
+
     mock_conn = MagicMock()
     mock_conn.execute.return_value.fetchone.return_value = (1,)
     mock_sup.storage._connection.return_value.__enter__.return_value = mock_conn
@@ -81,10 +81,6 @@ def test_healthz_poller_healthy():
         assert r.status_code == 200
         body = r.json()
         assert body["checks"]["news_poller_ok"] is True
-
-
-
-
 
 
 def test_api_stats_budget_success():
@@ -262,7 +258,6 @@ def test_quant_velocity_market_heatmap():
         patch("catchem.quant.news_velocity.compute_velocity", return_value=mock_velocity),
         patch("catchem.quant.arrival_heatmap.compute_heatmap", return_value=mock_heatmap_res),
     ):
-
         r1 = client.get("/api/quant/news-velocity")
         assert r1.status_code == 200
         assert r1.json()["current_rate_per_min"] == 1.0
@@ -351,7 +346,6 @@ def test_quant_explain_various():
         r = client.post("/api/quant/explain", json={"kind": "anomaly", "payload": {"symbol": "BTC"}})
         assert r.status_code == 200
         assert r.json()["source"] == "local"
-
 
     # DeepSeek succeeds
     mock_ds = MagicMock()
@@ -515,3 +509,578 @@ def test_api_reviews_run_on_demand_stub_success():
         response = client.post("/api/reviews/glob-1/run")
         assert response.status_code == 200
         assert response.json()["ok"] is True
+
+
+def test_quant_engine_concurrent_init():
+    import catchem.api
+    from catchem.api import _get_quant_engine
+
+    catchem.api._QUANT_ENGINE = None
+
+    class MockLock:
+        def __enter__(self):
+            catchem.api._QUANT_ENGINE = MagicMock()
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    with patch("catchem.api._SUPERVISOR", MagicMock()), patch("catchem.api._QUANT_ENGINE_LOCK", MockLock()):
+        engine = _get_quant_engine()
+        assert engine is not None
+
+
+def test_build_news_poller_no_feeds():
+    from catchem.api import _build_news_poller
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.news.poller_enabled = True
+    s.news.feeds = []
+    sup = MagicMock()
+    poller = _build_news_poller(sup, s)
+    assert poller is not None
+
+
+def test_build_ws_channel_enabled():
+    from catchem.api import _build_ws_channel
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.news.websocket_enabled = True
+    sup = MagicMock()
+    ws = _build_ws_channel(sup, s)
+    assert ws is not None
+
+
+def test_build_archiver_no_drive_dir():
+    from catchem.api import _build_archiver
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.archive.enabled = True
+    s.archive.drive_dir = ""
+    sup = MagicMock()
+    archiver = _build_archiver(sup, s)
+    assert archiver is not None
+
+
+@pytest.mark.asyncio
+async def test_lifespan_startup_failure_all_components():
+    from unittest.mock import AsyncMock
+
+    from catchem.api import lifespan
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.news.poller_enabled = True
+    s.news.websocket_enabled = True
+    s.archive.enabled = True
+    s.archive.drive_dir = "/tmp/drive"
+
+    app = MagicMock()
+    app.state.catchem_settings = s
+
+    mock_poller = MagicMock()
+    mock_poller.stop = AsyncMock(side_effect=Exception("poller stop fail"))
+
+    mock_ws = MagicMock()
+    mock_ws.stop = AsyncMock(side_effect=Exception("ws stop fail"))
+
+    mock_archiver = MagicMock()
+    mock_archiver.start.side_effect = Exception("archiver start fail")
+    mock_archiver.stop = AsyncMock(side_effect=Exception("archiver stop fail"))
+
+    mock_sup = MagicMock()
+    mock_sup.close.side_effect = Exception("sup close fail")
+
+    with (
+        patch("catchem.api.Supervisor", return_value=mock_sup),
+        patch("catchem.api._build_news_poller", return_value=mock_poller),
+        patch("catchem.api._build_ws_channel", return_value=mock_ws),
+        patch("catchem.api._build_archiver", return_value=mock_archiver),
+    ):
+        with pytest.raises(Exception, match="archiver start fail"):
+            async with lifespan(app):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_lifespan_normal_shutdown_no_supervisor():
+    import catchem.api
+    from catchem.api import lifespan
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.news.poller_enabled = False
+    s.news.websocket_enabled = False
+    s.archive.enabled = False
+
+    app = MagicMock()
+    app.state.catchem_settings = s
+
+    async with lifespan(app):
+        catchem.api._SUPERVISOR = None
+
+
+def test_production_safe_endpoints():
+    from catchem.settings import CatchemMode, Settings
+
+    s = Settings()
+    s.mode = CatchemMode.PRODUCTION_SAFE
+    app = create_app(s)
+    client = TestClient(app)
+
+    mock_sup = MagicMock()
+    mock_sup.status.return_value = {"diagnostic_enabled": True}
+    full_rec = {
+        "capture_id": "1",
+        "doc_id": "doc-1",
+        "title": "Secret info",
+        "domain": "example.com",
+        "language": "en",
+        "url": "http://example.com",
+        "is_finance_relevant": True,
+        "finance_relevance_score": 0.9,
+        "asset_classes": ["equity"],
+        "impact_reason_codes": ["earnings"],
+        "candidate_symbols": ["AAPL"],
+        "sentiment_label": "positive",
+        "sentiment_score": 0.8,
+        "evidence_sentences": ["evidence line"],
+        "published_ts": "2026-06-03T12:00:00Z",
+        "created_at": "2026-06-03T12:00:00Z",
+    }
+    mock_sup.storage.recent_records.return_value = [full_rec]
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.api._is_production_safe", return_value=True),
+    ):
+        r1 = client.get("/metrics")
+        assert r1.status_code == 200
+        assert r1.json()["diagnostic_enabled"] is False
+
+        r2 = client.get("/dashboard")
+        assert r2.status_code == 200
+
+        r3 = client.get("/recent")
+        assert r3.status_code == 200
+
+
+def test_api_reviews_run_on_demand_success_with_stub():
+    app = create_app(Settings())
+    client = TestClient(app)
+
+    mock_sup = MagicMock()
+    mock_sup.storage.get_record.return_value = {"capture_id": "glob-1", "doc_id": "doc-1"}
+
+    mock_stub = MagicMock()
+    mock_stub.reviewer_id = "stub_reviewer"
+    mock_stub.reviewer_version = "1.0"
+    mock_sup.reviewers.stub.return_value = mock_stub
+
+    mock_client = MagicMock()
+    mock_client.model = "deepseek-chat"
+    mock_client._base_url = "https://api.deepseek.com"
+    mock_client._api_key = "fake-key"
+    mock_sup.reviewers.deepseek.return_value = mock_client
+
+    mock_sup.reviewers.budget_state.return_value.exhausted = False
+
+    mock_payload = MagicMock()
+    mock_payload.error_code = None
+    mock_payload.to_storage_row.return_value = {
+        "capture_id": "glob-1",
+        "reviewer_id": "deepseek",
+        "payload": {},
+    }
+    mock_sup.reviewers.run_and_persist_deepseek.return_value = mock_payload
+
+    mock_rec_instance = MagicMock()
+    mock_stub_payload = MagicMock()
+    mock_stub_payload.to_storage_row.return_value = {
+        "capture_id": "glob-1",
+        "reviewer_id": "stub_reviewer",
+        "payload": {},
+    }
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.schemas.FinancialImpactRecord", return_value=mock_rec_instance),
+        patch("catchem.reviewers.record_to_review_payload", return_value=mock_stub_payload),
+    ):
+        response = client.post("/api/reviews/glob-1/run")
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        mock_sup.storage.upsert_review.assert_called_with(mock_stub_payload.to_storage_row())
+
+
+@pytest.mark.asyncio
+async def test_live_read_stream_normal_exhaustion():
+    app = create_app(Settings())
+    client = TestClient(app)
+
+    mock_engine = MagicMock()
+    mock_engine.dashboard_snapshot.return_value = {"n_records_window": 10}
+    mock_sup = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.model = "deepseek-chat"
+    mock_client._base_url = "https://api.deepseek.com"
+    mock_client._api_key = "fake-key"
+    mock_client.estimate_usd.return_value = 0.05
+    mock_sup.reviewers.deepseek.return_value = mock_client
+    mock_sup.reviewers.budget_state.return_value.exhausted = False
+
+    async def mock_stream_normal(*args, **kwargs):
+        yield {"type": "delta", "text": "normal chunk"}
+
+    with (
+        patch("catchem.api._QUANT_ENGINE", mock_engine),
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.reviewers.deepseek.stream_chat_completion", side_effect=mock_stream_normal),
+    ):
+        r = client.get("/api/quant/live-read-stream")
+        assert r.status_code == 200
+        assert "normal chunk" in r.text
+
+
+def test_quant_symbol_correlation():
+    app = create_app(Settings())
+    client = TestClient(app)
+
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = []
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class DummyPair:
+        symbol_a: str
+        symbol_b: str
+        pearson_r: float
+        n_buckets: int
+        a_total: int
+        b_total: int
+
+    mock_pairs = [DummyPair("AAPL", "MSFT", 0.85, 10, 5, 6)]
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.quant.symbol_correlation.compute_pairs", return_value=mock_pairs),
+    ):
+        r = client.get("/api/quant/symbol-correlation")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["pairs"][0]["symbol_a"] == "AAPL"
+
+
+def test_quant_heatmap_records_more():
+    settings = Settings()
+    app = create_app(settings)
+    client = TestClient(app)
+
+    mock_sup = MagicMock()
+    mock_sup.storage.by_label.return_value = [
+        {"capture_id": "cap1", "impact_reason_codes": ["earnings", "mergers"]},
+        {"capture_id": "cap2", "impact_reason_codes": ["other"]},
+        {"capture_id": "cap3", "impact_reason_codes": ["earnings"]},
+    ]
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/quant/heatmap/records?asset=tech&reason=earnings&limit=5")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total_returned"] == 2
+
+
+def test_search_palette_empty_query():
+    from catchem.api import _rate_limit_search
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_search] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/search?q=  ")
+        assert r.status_code == 422
+        assert r.json()["detail"] == "q must be non-empty"
+
+
+def test_search_palette_symbols_break_limit():
+    from catchem.api import _rate_limit_search
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_search] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = [
+        {"candidate_symbols": ["AAPL", "AAPL", "AAPL"]},
+    ]
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/search?q=AAPL&limit=1")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["symbols"]) == 1
+
+
+def test_search_palette_clusters_exception():
+    from catchem.api import _rate_limit_search
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_search] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = []
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.api._get_quant_engine", side_effect=Exception("clusters fail")),
+    ):
+        r = client.get("/api/search?q=abc")
+        assert r.status_code == 200
+        assert r.json()["clusters"] == []
+
+
+def test_search_palette_clusters_matching():
+    from catchem.api import _rate_limit_search
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_search] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = []
+
+    mock_engine = MagicMock()
+    from dataclasses import dataclass
+
+    @dataclass
+    class DummyCluster:
+        cluster_id: str
+        size: int
+        dominant_symbols: list
+
+    mock_engine.clusters.return_value = [
+        DummyCluster("cluster_1", 2, ["AAPL"]),
+        DummyCluster("cluster_2", 3, ["AAPL"]),
+    ]
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.api._get_quant_engine", return_value=mock_engine),
+    ):
+        r = client.get("/api/search?q=AAPL&limit=1")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["clusters"]) == 1
+
+
+def test_export_records_with_filters():
+    from catchem.api import _rate_limit_db_export
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_db_export] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = [
+        {"capture_id": "1", "asset_classes": ["tech"], "impact_reason_codes": ["earnings"]},
+        {"capture_id": "2", "asset_classes": ["energy"], "impact_reason_codes": ["macro"]},
+    ]
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/export/records?format=json&asset_class=tech&reason_code=earnings")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] == 1
+
+
+def test_export_records_csv_non_standard_fields():
+    from catchem.api import _rate_limit_db_export
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_db_export] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = [
+        {
+            "capture_id": "1",
+            "asset_classes": None,
+            "title": None,
+            "impact_reason_codes": ["earnings"],
+            "candidate_symbols": ["AAPL"],
+        }
+    ]
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/export/records?format=csv")
+        assert r.status_code == 200
+        assert "earnings" in r.text
+
+
+def test_export_reviews_with_filters():
+    from catchem.api import _rate_limit_db_export
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_db_export] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+
+    stub_row = {
+        "capture_id": "1",
+        "payload": {
+            "asset_classes": ["tech"],
+            "impact_reason_codes": ["earnings"],
+            "candidate_symbols": ["AAPL"],
+            "finance_relevance_score": 0.8,
+        },
+    }
+    ds_row = {
+        "capture_id": "1",
+        "payload": {},
+    }
+    mock_sup.storage.reviews_with_pair.return_value = [(stub_row, ds_row)]
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get(
+            "/api/export/reviews?format=json&asset_class=tech&reason_code=earnings&symbol=AAPL&min_score=0.5"
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] == 1
+
+
+def test_db_info_not_exists():
+    app = create_app(Settings())
+    client = TestClient(app)
+    with patch("pathlib.Path.exists", return_value=False):
+        r = client.get("/api/db/info")
+        assert r.status_code == 200
+        assert r.json()["exists"] is False
+
+
+def test_db_stats_table_error():
+    from catchem.api import _rate_limit_db_export
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_db_export] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchall.side_effect = [
+        [("records",)],
+        [("index_1", "records")],
+    ]
+    mock_conn.execute.return_value.fetchone.side_effect = [
+        Exception("query error"),
+        (100,),
+        (4096,),
+    ]
+    mock_sup.storage._connection.return_value.__enter__.return_value = mock_conn
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/db/stats")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["tables"][0]["rows"] == -1
+
+
+def test_db_import_exceeds_max_bytes():
+    from catchem.api import _rate_limit_db_import, create_app
+    from catchem.settings import Settings
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_db_import] = lambda: None
+    client = TestClient(app)
+
+    class FakeLargeChunk:
+        def startswith(self, prefix):
+            return True
+
+        def __len__(self):
+            return 201 * 1024 * 1024
+
+    async def mock_read(*args, **kwargs):
+        return FakeLargeChunk()
+
+    with patch("starlette.datastructures.UploadFile.read", mock_read):
+        r = client.post("/api/db/import", files={"file": ("db.sqlite", b"SQLite format 3\x00")})
+        assert r.status_code == 413
+        assert r.json()["detail"] == "upload exceeds 200 MB cap"
+
+
+def test_ui_archive_status_disabled():
+    app = create_app(Settings())
+    client = TestClient(app)
+    with patch("catchem.api._ARCHIVER", None):
+        r = client.get("/ui/archive-status")
+        assert r.status_code == 200
+        assert r.json()["enabled"] is False
+
+
+def test_ui_archive_now_disabled():
+    app = create_app(Settings())
+    client = TestClient(app)
+    with patch("catchem.api._ARCHIVER", None):
+        r = client.post("/ui/archive-now")
+        assert r.status_code == 503
+        assert r.json()["detail"] == "archiver_disabled"
+
+
+@pytest.mark.asyncio
+async def test_ui_stream():
+    app = create_app(Settings())
+    client = TestClient(app)
+
+    mock_sup = MagicMock()
+    mock_sup.storage.count_records.return_value = {"total": 5, "dlq": 0}
+    mock_sup.storage.dlq_count.return_value = 0
+
+    from unittest.mock import AsyncMock
+
+    is_disconnected_mock = AsyncMock()
+    is_disconnected_mock.side_effect = [False, False, True]
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("starlette.requests.Request.is_disconnected", is_disconnected_mock),
+        patch("asyncio.sleep", return_value=None),
+    ):
+        with client.stream("GET", "/ui/stream") as r:
+            assert r.status_code == 200
+            lines = []
+            for line in r.iter_lines():
+                lines.append(line)
+                if len(lines) >= 6:
+                    break
+
+            text = "\n".join(lines)
+            assert "event: summary" in text
+            assert "event: tick" in text
+
+
+def test_spa_fallbacks():
+    app = create_app(Settings())
+    client = TestClient(app)
+
+    with patch("catchem.api._render_spa_with_nonce", return_value=(None, None)):
+        r = client.get("/replay")
+        assert r.status_code == 200
+        assert "catchem" in r.text
+
+    with patch("catchem.api._render_spa_with_nonce", return_value=("<html>rendered spa</html>", "nonce-123")):
+        r = client.get("/replay")
+        assert r.status_code == 200
+        assert "rendered spa" in r.text
+        assert "Content-Security-Policy" in r.headers
+
+    with patch("catchem.api._render_spa_with_nonce", return_value=(None, None)):
+        r = client.get("/some-custom-spa-route")
+        assert r.status_code == 200
+        assert "catchem" in r.text
+
+
+def test_ui_guards_unexpected_error():
+    app = create_app(Settings())
+    client = TestClient(app)
+    with patch("catchem.api.snapshot_guard_state", side_effect=Exception("unexpected error")):
+        r = client.get("/ui/guards")
+        assert r.status_code == 200
+        assert r.json()["ok"] is False

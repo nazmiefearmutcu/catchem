@@ -103,8 +103,6 @@ def extract_evidence(
         out.append(s)
         if len(out) >= top_k:
             break
-    if not out:
-        out = [sentences[0]]
     return out
 
 

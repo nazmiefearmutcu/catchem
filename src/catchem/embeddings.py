@@ -36,9 +36,15 @@ EMBED_DIM_STUB = 64   # blake2b max digest size
 
 class Embedder(Protocol):
     @property
-    def model_version(self) -> str: ...
-    def encode(self, text: str) -> np.ndarray: ...
-    def encode_many(self, texts: Iterable[str]) -> np.ndarray: ...
+    def model_version(self) -> str:
+        return ""
+
+    def encode(self, text: str) -> np.ndarray:
+        return np.zeros(0, dtype=np.float32)
+
+    def encode_many(self, texts: Iterable[str]) -> np.ndarray:
+        return np.zeros((0, 0), dtype=np.float32)
+
 
 
 class EmbedderStub:

@@ -221,4 +221,19 @@ describe("OpsPage smoke", () => {
       screen.getByText(/not configured on this machine/i),
     ).toBeInTheDocument();
   });
+
+  it("implements custom focus-visible ring styles on raw config payload buttons for keyboard navigation", async () => {
+    renderOps();
+
+    const copyBtn = await screen.findByRole("button", { name: /copy JSON/i });
+    const showBtn = await screen.findByRole("button", { name: /show/i });
+
+    expect(copyBtn).toHaveClass("focus:outline-none");
+    expect(copyBtn).toHaveClass("focus-visible:ring-1");
+    expect(copyBtn).toHaveClass("focus-visible:ring-accent");
+
+    expect(showBtn).toHaveClass("focus:outline-none");
+    expect(showBtn).toHaveClass("focus-visible:ring-1");
+    expect(showBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });

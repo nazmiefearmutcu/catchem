@@ -72,7 +72,7 @@ export function ModelControlsPage() {
               </div>
             </div>
           </div>
-          <button className="btn shrink-0" onClick={() => {
+          <button className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent" onClick={() => {
             qc.invalidateQueries({ queryKey: ["app-info"] });
             qc.invalidateQueries({ queryKey: ["sidecar-status"] });
           }}>refresh</button>
@@ -175,7 +175,7 @@ export function ModelControlsPage() {
           lives on the dedicated page.
         </p>
         <div className="mt-2">
-          <Link to="/logs" className="btn">View logs →</Link>
+          <Link to="/logs" className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent">View logs →</Link>
         </div>
       </section>
 

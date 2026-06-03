@@ -246,7 +246,7 @@ export function OpsPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="btn text-[10px] py-0.5 px-2"
+              className="btn text-[10px] py-0.5 px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={copyRaw}
               title="Copy the full JSON payload"
             >
@@ -254,7 +254,7 @@ export function OpsPage() {
             </button>
             <button
               type="button"
-              className="btn text-[10px] py-0.5 px-2"
+              className="btn text-[10px] py-0.5 px-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               onClick={() => setRawOpen((v) => !v)}
               aria-expanded={rawOpen}
             >

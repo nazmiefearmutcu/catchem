@@ -168,4 +168,45 @@ describe("SymbolDetailPage smoke", () => {
     // Velocity / trend sections fall through to their graceful empty copy.
     expect(screen.getAllByText(/No mentions|No sentiment data/).length).toBeGreaterThan(0);
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    renderDetail("AAPL");
+
+    // 1. Back link in hero
+    const allSymbolsLink = await screen.findByRole("link", { name: /← all symbols/i });
+    expect(allSymbolsLink).toHaveClass("focus:outline-none");
+    expect(allSymbolsLink).toHaveClass("focus-visible:ring-1");
+    expect(allSymbolsLink).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Records feed title link
+    const titleLink = screen.getByRole("link", { name: /Apple beats on earnings/i });
+    expect(titleLink).toHaveClass("focus:outline-none");
+    expect(titleLink).toHaveClass("focus-visible:ring-1");
+    expect(titleLink).toHaveClass("focus-visible:ring-accent");
+
+    // 3. External link
+    const externalLinks = screen.getAllByRole("link").filter(
+      (el) => el.getAttribute("href") === "https://example.com/a"
+    );
+    expect(externalLinks.length).toBeGreaterThan(0);
+    for (const link of externalLinks) {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    }
+  });
+
+  it("renders empty state action link with custom focus rings when no records found", async () => {
+    apiMock.symbol.mockResolvedValue(
+      symbolPayload({ count: 0, reason_distribution: {}, sentiment_distribution: {}, items: [] }),
+    );
+    apiMock.symbolSentimentTrend.mockResolvedValue({ symbol: "AAPL", days: 30, series: [] });
+
+    renderDetail("AAPL");
+
+    const backToSymbolsLink = await screen.findByRole("link", { name: /← back to symbols/i });
+    expect(backToSymbolsLink).toHaveClass("focus:outline-none");
+    expect(backToSymbolsLink).toHaveClass("focus-visible:ring-1");
+    expect(backToSymbolsLink).toHaveClass("focus-visible:ring-accent");
+  });
 });

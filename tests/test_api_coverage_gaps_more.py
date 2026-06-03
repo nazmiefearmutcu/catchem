@@ -1084,3 +1084,420 @@ def test_ui_guards_unexpected_error():
         r = client.get("/ui/guards")
         assert r.status_code == 200
         assert r.json()["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_lifespan_startup_failure_supervisor_fails():
+    from unittest.mock import MagicMock, patch
+
+    from catchem.api import lifespan
+    from catchem.settings import Settings
+
+    s = Settings()
+    app = MagicMock()
+    app.state.catchem_settings = s
+
+    with patch("catchem.api.Supervisor", side_effect=Exception("supervisor failed")):
+        with pytest.raises(Exception, match="supervisor failed"):
+            async with lifespan(app):
+                pass
+
+
+def test_production_safe_disabled_endpoints():
+    from unittest.mock import MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.status.return_value = {"diagnostic_enabled": True}
+    mock_sup.storage.recent_records.return_value = []
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.api._is_production_safe", return_value=False),
+    ):
+        r1 = client.get("/metrics")
+        assert r1.status_code == 200
+        assert r1.json()["diagnostic_enabled"] is True
+
+        r2 = client.get("/dashboard")
+        assert r2.status_code == 200
+
+
+def test_api_stats_no_registry():
+    from unittest.mock import MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage._connection.return_value.__enter__.return_value = MagicMock()
+    if hasattr(mock_sup, "reviewers"):
+        del mock_sup.reviewers
+
+    from catchem.api import _STATS_CACHE
+
+    _STATS_CACHE.clear()
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/stats")
+        assert r.status_code == 200
+        assert r.json()["reviewers"]["deepseek_usd_spent"] == 0.0
+
+
+def test_search_palette_clusters_more_branches():
+    from unittest.mock import MagicMock, patch
+
+    from catchem.api import _rate_limit_search
+
+    app = create_app(Settings())
+    app.dependency_overrides[_rate_limit_search] = lambda: None
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = []
+
+    mock_engine = MagicMock()
+    from dataclasses import dataclass
+
+    @dataclass
+    class DummyCluster:
+        cluster_id: str
+        size: int
+        dominant_symbols: list
+
+    mock_engine.clusters.return_value = [
+        DummyCluster("other", 2, ["MSFT"]),
+        DummyCluster("aapl_cluster", 3, ["AAPL"]),
+    ]
+
+    with (
+        patch("catchem.api._SUPERVISOR", mock_sup),
+        patch("catchem.api._get_quant_engine", return_value=mock_engine),
+    ):
+        r = client.get("/api/search?q=AAPL&limit=2")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["clusters"]) == 1
+
+
+def test_db_import_multi_chunk():
+    from unittest.mock import patch
+
+    from catchem.api import _rate_limit_db_import
+    from catchem.settings import Settings
+
+    s = Settings()
+    app = create_app(s)
+    app.dependency_overrides[_rate_limit_db_import] = lambda: None
+    client = TestClient(app)
+
+    chunks = [b"SQLite format 3\x00", b"some extra data", b""]
+
+    async def mock_read(*args, **kwargs):
+        if chunks:
+            return chunks.pop(0)
+        return b""
+
+    with (
+        patch("starlette.datastructures.UploadFile.read", mock_read),
+        patch("pathlib.Path.replace"),
+        patch("pathlib.Path.unlink"),
+        patch("os.fsync"),
+        patch("shutil.copy2"),
+    ):
+        r = client.post("/api/db/import", files={"file": ("db.sqlite", b"SQLite format 3\x00")})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+
+def test_log_tail_file_exists(tmp_path):
+    s = Settings()
+    s.paths.catchem_output_dir = tmp_path
+    s.logging.file = "data/logs/catchem.log"
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "catchem.log"
+    log_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    app = create_app(s)
+    client = TestClient(app)
+
+    with patch("catchem.api._SETTINGS", s), patch("catchem.api.load_settings", return_value=s):
+        r = client.get("/ui/log-tail?lines=2")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["lines"] == ["line2", "line3"]
+        assert body["total_lines"] == 3
+        assert body["truncated"] is True
+
+    s2 = Settings()
+    s2.paths.catchem_output_dir = tmp_path
+    s2.logging.file = str(log_file)
+
+    app2 = create_app(s2)
+    client2 = TestClient(app2)
+    with patch("catchem.api._SETTINGS", s2), patch("catchem.api.load_settings", return_value=s2):
+        r2 = client2.get("/ui/log-tail?lines=2")
+        assert r2.status_code == 200
+        assert r2.json()["total_lines"] == 3
+
+
+def test_ui_facets_and_timeline_missing_fields():
+    from unittest.mock import MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_sup = MagicMock()
+
+    mock_sup.storage.recent_records.return_value = [
+        {
+            "is_finance_relevant": True,
+            "domain": "bloomberg.com",
+            "sentiment_label": "positive",
+            "published_ts": "2026-06-03T12:00:00Z",
+            "asset_classes": ["equity"],
+            "impact_reason_codes": ["earnings"],
+            "candidate_symbols": ["AAPL"],
+        },
+        {
+            "is_finance_relevant": False,
+            "domain": None,
+            "sentiment_label": None,
+            "created_at": "2026-06-03T13:00:00+00:00",
+            "asset_classes": [],
+            "impact_reason_codes": [],
+            "candidate_symbols": [],
+        },
+        {
+            "is_finance_relevant": False,
+            "domain": None,
+            "sentiment_label": None,
+        },
+        {
+            "is_finance_relevant": False,
+            "published_ts": "invalid-date-format",
+        },
+        {
+            "is_finance_relevant": False,
+            "published_ts": "2026-06-03T14:00:00",
+        },
+    ]
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r_facets = client.get("/ui/facets")
+        assert r_facets.status_code == 200
+        body_facets = r_facets.json()
+        assert body_facets["window_total"] == 5
+        assert body_facets["window_relevant"] == 1
+
+        r_timeline = client.get("/ui/timeline")
+        assert r_timeline.status_code == 200
+        body_timeline = r_timeline.json()
+        assert len(body_timeline["series"]) == 3
+
+
+def test_ui_trends():
+    from unittest.mock import MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.recent_records.return_value = [
+        {
+            "published_ts": "2026-06-03T12:00:00Z",
+            "asset_classes": ["equity"],
+        },
+        {
+            "created_at": "2026-06-03T13:00:00Z",
+            "asset_classes": ["crypto"],
+        },
+        {
+            "published_ts": None,
+            "created_at": None,
+        },
+        {
+            "published_ts": "invalid-ts",
+        },
+    ]
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/ui/trends")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["buckets"]) == 2
+        assert "equity" in body["asset_classes"]
+
+
+def test_ui_benchmark_history_file_exists(tmp_path):
+    from catchem.settings import Settings
+
+    s = Settings()
+    s.paths.catchem_output_dir = tmp_path
+
+    results_dir = tmp_path / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    history_file = results_dir / "benchmark_history.jsonl"
+    history_file.write_text(
+        '{"schema_version": 1, "dataset_name": "t", "generated_at": "2026-06-03", "relevance": {}, "n": 10}\n\n{"invalid json\n',
+        encoding="utf-8",
+    )
+
+    app = create_app(s)
+    client = TestClient(app)
+
+    with patch("catchem.api._SETTINGS", s), patch("catchem.api.load_settings", return_value=s):
+        r = client.get("/ui/benchmark/history")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["history"]) == 1
+        assert body["history"][0]["n"] == 10
+
+
+def test_ui_symbol_missing_sentiment():
+    from unittest.mock import MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_sup.storage.by_label.return_value = [
+        {
+            "capture_id": "cap-1",
+            "doc_id": "doc-1",
+            "title": "A Title",
+            "domain": "google.com",
+            "impact_reason_codes": ["earnings"],
+            "sentiment_label": None,
+        }
+    ]
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/ui/symbol/AAPL")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["sentiment_distribution"] == {}
+
+
+def test_api_symbol_sentiment_trend_out_of_bounds():
+    from unittest.mock import MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_sup = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchall.return_value = [
+        {"day": "2026-06-10", "label": "extra_label", "cnt": 5}
+    ]
+    mock_sup.storage._connection.return_value.__enter__.return_value = mock_conn
+
+    with patch("catchem.api._SUPERVISOR", mock_sup):
+        r = client.get("/api/symbols/AAPL/sentiment-trend?days=1")
+        assert r.status_code == 200
+        body = r.json()
+        for s in body["series"]:
+            assert s["positive"] == 0
+
+
+def test_ui_news_status_and_poll_now_and_probe_error():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_poller = MagicMock()
+    mock_poller.feeds = []
+    mock_poller.interval_seconds = 60
+    mock_poller.last_run_at = None
+    mock_poller.next_run_at = None
+    mock_poller.feed_health_snapshot.return_value = [
+        {"name": "Feed 1", "url": "http://feed1", "backed_off": True, "ok": True}
+    ]
+    mock_poller.poll_now = AsyncMock(return_value=1)
+    mock_poller.last_error = None
+    mock_poller.last_new_at = None
+    mock_poller.max_item_age_seconds = None
+    mock_poller.last_stale_skipped = 0
+    mock_poller.last_avg_publisher_lag_seconds = None
+    mock_poller.last_median_publisher_lag_seconds = None
+    mock_poller.empty_ticks = 0
+    mock_poller.total_ingested = 10
+    mock_poller.last_ingested = 5
+    mock_poller.is_polling = False
+
+    with patch("catchem.api._NEWS_POLLER", mock_poller):
+        r = client.get("/ui/news-status")
+        assert r.status_code == 200
+        assert r.json()["enabled"] is True
+
+        r_poll = client.post("/ui/news-poll-now")
+        assert r_poll.status_code == 200
+        assert r_poll.json()["ingested"] == 1
+
+        r_sources = client.get("/api/news/sources")
+        assert r_sources.status_code == 200
+        assert r_sources.json()["sources"][0]["last_status"] == "backed_off"
+
+    with patch("catchem.api._NEWS_POLLER", None):
+        r_poll_disabled = client.post("/ui/news-poll-now")
+        assert r_poll_disabled.status_code == 503
+
+    mock_poller_probe = MagicMock()
+    mock_spec = MagicMock()
+    mock_spec.url = "http://feed1"
+    mock_poller_probe.feeds = [mock_spec]
+    mock_poller_probe.probe_feed_async = AsyncMock(side_effect=Exception("probe error"))
+    with patch("catchem.api._NEWS_POLLER", mock_poller_probe):
+        r_probe = client.post("/api/news/sources/probe", json={"url": "http://feed1"})
+        assert r_probe.status_code == 200
+        assert r_probe.json()["ok"] is False
+        assert r_probe.json()["error"] == "probe error"
+
+
+def test_global_tone_cache_hit():
+    import time
+
+    from catchem.api import _GLOBAL_TONE_CACHE
+
+    app = create_app(Settings())
+    client = TestClient(app)
+
+    _GLOBAL_TONE_CACHE["payload"] = {"cached": "data"}
+    _GLOBAL_TONE_CACHE["expires_at"] = time.monotonic() + 100
+
+    r = client.get("/api/quant/global-tone")
+    assert r.status_code == 200
+    assert r.json() == {"cached": "data"}
+
+
+def test_ui_archive_now_active():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    app = create_app(Settings())
+    client = TestClient(app)
+    mock_archiver = MagicMock()
+    from dataclasses import dataclass
+
+    @dataclass
+    class DummyResult:
+        archived: int
+        csv_path: str
+        error: str
+
+    mock_archiver.archive_now = AsyncMock(return_value=DummyResult(5, "/path/to.csv", None))
+    mock_archiver.total_archived = 10
+
+    with patch("catchem.api._ARCHIVER", mock_archiver):
+        r = client.post("/ui/archive-now")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["archived"] == 5
+        assert body["total_archived"] == 10
+
+
+@pytest.mark.asyncio
+async def test_replay_spa_directly():
+    from unittest.mock import patch
+
+    app = create_app(Settings())
+    route = next(r for r in app.routes if r.path == "/replay" and "GET" in r.methods)
+    with patch("catchem.api._render_spa_with_nonce", return_value=(None, None)):
+        r = await route.endpoint()
+        assert r.status_code == 200

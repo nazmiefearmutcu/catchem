@@ -52,6 +52,11 @@ export function ExportMenu({
     lockBody: false,
   });
 
+  const singleDescId = `export-menu-single-desc:${surfaceId}`;
+  const inlineDescId = `export-menu-inline-desc:${surfaceId}`;
+  const triggerDescId = `export-menu-trigger-desc:${surfaceId}`;
+  const menuDescId = `export-menu-desc:${surfaceId}`;
+
   // Click-outside close. Escape is delegated to the global overlay
   // coordinator so stacked overlays behave consistently.
   useEffect(() => {
@@ -68,31 +73,41 @@ export function ExportMenu({
   if (formats.length === 1) {
     const fmt = formats[0]!;
     return (
-      <a
-        href={buildUrl(fmt)}
-        download={filenameHint ?? true}
-        className="chip text-[10px] hover:bg-[color:var(--bg-elev2)]"
-        title={title ?? `Download ${fmt.toUpperCase()}`}
-        data-testid={testId}
-      >
-        <span className="inline-flex items-center gap-1">
-          <Icon name="download" />
-          {label} {fmt.toUpperCase()}
+      <>
+        <span id={singleDescId} className="sr-only">
+          Direct download link for {fmt.toUpperCase()} format.
         </span>
-      </a>
+        <a
+          href={buildUrl(fmt)}
+          download={filenameHint ?? true}
+          className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
+          title={title ?? `Download ${fmt.toUpperCase()}`}
+          aria-describedby={singleDescId}
+          data-testid={testId}
+        >
+          <span className="inline-flex items-center gap-1">
+            <Icon name="download" />
+            {label} {fmt.toUpperCase()}
+          </span>
+        </a>
+      </>
     );
   }
   if (inline) {
     return (
       <span className="inline-flex items-center gap-1">
+        <span id={inlineDescId} className="sr-only">
+          Export options for {label}.
+        </span>
         <span className="text-[10px] text-[color:var(--fg-muted)]">{label}</span>
         {formats.map((f) => (
           <a
             key={f}
             href={buildUrl(f)}
             download={filenameHint ?? true}
-            className="chip text-[10px] hover:bg-[color:var(--bg-elev2)]"
+            className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
             title={title ?? `Download ${f.toUpperCase()}`}
+            aria-describedby={inlineDescId}
             data-testid={testId ? `${testId}-${f}` : undefined}
           >
             {f.toUpperCase()}
@@ -103,9 +118,12 @@ export function ExportMenu({
   }
   return (
     <div ref={wrapRef} className="relative inline-block">
+      <span id={triggerDescId} className="sr-only">
+        Press to open the export formats menu.
+      </span>
       <button
         type="button"
-        className="chip text-[10px] hover:bg-[color:var(--bg-elev2)]"
+        className="chip text-[10px] hover:bg-[color:var(--bg-elev2)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
         onClick={() => {
           if (open) {
             setOpen(false);
@@ -116,6 +134,7 @@ export function ExportMenu({
         }}
         aria-expanded={open}
         aria-haspopup="menu"
+        aria-describedby={triggerDescId}
         title={title ?? "Download filtered export"}
         data-testid={testId}
       >
@@ -127,8 +146,12 @@ export function ExportMenu({
       {open && (
         <div
           role="menu"
+          aria-describedby={menuDescId}
           className="absolute right-0 z-20 mt-1 min-w-[160px] rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev2)] p-1.5 shadow-lg"
         >
+          <span id={menuDescId} className="sr-only">
+            {hint ? `${hint}. ` : ""}Use arrow keys or tab to navigate the export formats list. Click or press Enter to download.
+          </span>
           {hint && (
             <p className="px-1 pb-1 text-[10px] text-[color:var(--fg-muted)]">{hint}</p>
           )}
@@ -139,7 +162,7 @@ export function ExportMenu({
                 role="menuitem"
                 href={buildUrl(f)}
                 download={filenameHint ?? true}
-                className="block rounded-sm px-2 py-1 text-[11px] hover:bg-[color:var(--bg-elev)] text-[color:var(--fg)]"
+                className="block rounded-sm px-2 py-1 text-[11px] hover:bg-[color:var(--bg-elev)] text-[color:var(--fg)] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm"
                 onClick={() => setOpen(false)}
                 data-testid={testId ? `${testId}-${f}` : undefined}
               >

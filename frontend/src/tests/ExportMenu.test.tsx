@@ -125,4 +125,50 @@ describe("ExportMenu", () => {
     expect(json).toHaveAttribute("href", "https://x.invalid/export.json");
     expect(json).toHaveTextContent("JSON");
   });
+
+  it("supports accessibility attributes and focus indicators in all flavors", () => {
+    // 1. Menu flavor
+    const { rerender } = render(<ExportMenu buildUrl={buildUrl} testId="exp" hint="Filtered records" />);
+    
+    const trigger = screen.getByTestId("exp");
+    expect(trigger).toHaveAttribute("aria-describedby");
+    const triggerDescId = trigger.getAttribute("aria-describedby");
+    const triggerDesc = document.getElementById(triggerDescId!);
+    expect(triggerDesc).toHaveClass("sr-only");
+    expect(triggerDesc).toHaveTextContent("Press to open the export formats menu.");
+    expect(trigger).toHaveClass("focus-visible:ring-accent");
+
+    // Open menu
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    expect(menu).toHaveAttribute("aria-describedby");
+    const menuDescId = menu.getAttribute("aria-describedby");
+    const menuDesc = document.getElementById(menuDescId!);
+    expect(menuDesc).toHaveClass("sr-only");
+    expect(menuDesc).toHaveTextContent("Filtered records. Use arrow keys or tab to navigate the export formats list. Click or press Enter to download.");
+    
+    // Check menuitem focus class
+    const csvItem = screen.getByTestId("exp-csv");
+    expect(csvItem).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Single format flavor
+    rerender(<ExportMenu buildUrl={buildUrl} formats={["json"]} testId="single" />);
+    const singleLink = screen.getByTestId("single");
+    expect(singleLink).toHaveAttribute("aria-describedby");
+    const singleDescId = singleLink.getAttribute("aria-describedby");
+    const singleDesc = document.getElementById(singleDescId!);
+    expect(singleDesc).toHaveClass("sr-only");
+    expect(singleDesc).toHaveTextContent("Direct download link for JSON format.");
+    expect(singleLink).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Inline flavor
+    rerender(<ExportMenu buildUrl={buildUrl} inline label="download" testId="inl" />);
+    const inlineCsvLink = screen.getByTestId("inl-csv");
+    expect(inlineCsvLink).toHaveAttribute("aria-describedby");
+    const inlineDescId = inlineCsvLink.getAttribute("aria-describedby");
+    const inlineDesc = document.getElementById(inlineDescId!);
+    expect(inlineDesc).toHaveClass("sr-only");
+    expect(inlineDesc).toHaveTextContent("Export options for download.");
+    expect(inlineCsvLink).toHaveClass("focus-visible:ring-accent");
+  });
 });

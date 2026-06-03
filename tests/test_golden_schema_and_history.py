@@ -17,9 +17,14 @@ from catchem.golden import (
     REQUIRED_GOLDEN_FIELDS,
     SYNTHETIC,
     BenchmarkReport,
+    GoldenItem,
+    LabelStats,
+    _stats_for_set,
     load_extended,
+    run_benchmark,
     validate_golden_row,
 )
+from catchem.schemas import FinancialImpactRecord, SentimentLabel
 
 
 def test_required_golden_fields_constant_exposes_contract() -> None:
@@ -116,3 +121,152 @@ def test_synthetic_golden_set_covers_diverse_asset_classes() -> None:
     assert "equities" in positive_ac
     assert "crypto" in positive_ac
     assert "commodities" in positive_ac
+
+
+def test_stats_for_set_fn() -> None:
+    bucket = {}
+    _stats_for_set(predicted={"a"}, expected={"a", "b"}, bucket=bucket)
+    assert "b" in bucket
+    assert bucket["b"].fn == 1
+    assert bucket["b"].tp == 0
+    assert bucket["b"].fp == 0
+
+
+def test_load_extended_with_whitespace_and_blank_lines(tmp_path: Path) -> None:
+    p = tmp_path / "extended.jsonl"
+    p.write_text(
+        "\n"
+        "   \n"
+        '{"capture_id": "ok", "title": "t", "text": "b", "expected_finance_relevant": true}\n'
+        "\t\n",
+        encoding="utf-8"
+    )
+    items = load_extended(p, strict=True)
+    assert len(items) == 1
+    assert items[0].capture_id == "ok"
+
+
+def test_load_extended_with_null_and_missing_optional_fields(tmp_path: Path) -> None:
+    p = tmp_path / "extended.jsonl"
+    p.write_text(
+        '{"capture_id": "ok", "title": "t", "text": "b", "expected_finance_relevant": true, "expected_asset_classes": null}\n',
+        encoding="utf-8"
+    )
+    items = load_extended(p, strict=True)
+    assert len(items) == 1
+    assert items[0].expected_asset_classes == ()
+
+
+def test_label_stats_division_by_zero() -> None:
+    stats = LabelStats(tp=0, fp=0, fn=0)
+    assert stats.precision == 0.0
+    assert stats.recall == 0.0
+    assert stats.f1 == 0.0
+
+    stats2 = LabelStats(tp=0, fp=1, fn=1)
+    assert stats2.precision == 0.0
+    assert stats2.recall == 0.0
+    assert stats2.f1 == 0.0
+
+
+class MockService:
+    def __init__(self, callback):
+        self.callback = callback
+
+    def process(self, cap):
+        return self.callback(cap)
+
+
+def test_run_benchmark_mismatches() -> None:
+    item = GoldenItem(
+        capture_id="mock-1",
+        title="Mock Title",
+        text="Mock Text",
+        domain="mock.com",
+        source_type="rss",
+        expected_finance_relevant=True,
+        expected_asset_classes=("equities",),
+        expected_reason_codes=("earnings",),
+        expected_symbols=("AAPL",),
+        expected_sentiment="positive",
+    )
+
+    def process_1(cap):
+        return FinancialImpactRecord(
+            capture_id=cap.capture_id,
+            doc_id=cap.doc_id,
+            title=cap.title,
+            text_excerpt=cap.text,
+            domain=cap.domain,
+            language=cap.language,
+            url=cap.url,
+            is_finance_relevant=False,
+            finance_relevance_score=0.1,
+            asset_classes=["rates"],
+            impact_reason_codes=["inflation"],
+            candidate_symbols=["MSFT"],
+            sentiment_label=SentimentLabel.NEGATIVE,
+            sentiment_score=0.9,
+            processing_mode="research_diagnostic",
+        )
+
+    svc = MockService(process_1)
+    rep = run_benchmark(svc, [item])
+    assert rep.relevance.fn == 1
+    assert rep.relevance.tp == 0
+    assert rep.relevance.fp == 0
+    assert rep.symbol_recall_hits == 0
+    assert rep.symbol_recall_total == 1
+    assert rep.sentiment_correct == 0
+    assert rep.sentiment_total == 1
+
+    item_non_fin = GoldenItem(
+        capture_id="mock-2",
+        title="Non Fin",
+        text="Non Fin Text",
+        domain="mock.com",
+        source_type="rss",
+        expected_finance_relevant=False,
+    )
+
+    def process_2(cap):
+        return FinancialImpactRecord(
+            capture_id=cap.capture_id,
+            doc_id=cap.doc_id,
+            title=cap.title,
+            text_excerpt=cap.text,
+            domain=cap.domain,
+            language=cap.language,
+            url=cap.url,
+            is_finance_relevant=True,
+            finance_relevance_score=0.9,
+            processing_mode="research_diagnostic",
+        )
+
+    svc2 = MockService(process_2)
+    rep2 = run_benchmark(svc2, [item_non_fin])
+    assert rep2.relevance.fp == 1
+    assert rep2.relevance.tp == 0
+    assert rep2.relevance.fn == 0
+
+
+def test_benchmark_to_dict_fully_populated() -> None:
+    rep = BenchmarkReport()
+    rep.relevance.tp = 1
+    rep.relevance.fp = 1
+    rep.relevance.fn = 1
+    rep.asset_class["equities"] = LabelStats(tp=1, fp=0, fn=0)
+    rep.reason_code["earnings"] = LabelStats(tp=1, fp=0, fn=0)
+    rep.symbol_recall_hits = 1
+    rep.symbol_recall_total = 2
+    rep.sentiment_correct = 1
+    rep.sentiment_total = 2
+    rep.per_item.append({"capture_id": "test"})
+
+    out = rep.to_dict()
+    assert out["relevance"]["f1"] == 0.5
+    assert out["asset_class_f1"]["equities"] == 1.0
+    assert out["reason_code_f1"]["earnings"] == 1.0
+    assert out["symbol_recall"] == 0.5
+    assert out["sentiment_accuracy"] == 0.5
+    assert out["n"] == 1

@@ -243,4 +243,74 @@ describe("Shell overlay behavior", () => {
     expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
     expect(router.state.location.pathname).toBe("/");
   });
+
+  it("applies custom focus-visible ring styles to global navigation and header interactive controls", async () => {
+    renderShell();
+
+    // 1. Skip-to-content link
+    const skipLink = screen.getByRole("link", { name: "Skip to main content" });
+    expect(skipLink).toHaveClass("focus:outline-none");
+    expect(skipLink).toHaveClass("focus-visible:ring-1");
+    expect(skipLink).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Mobile navigation trigger (on header)
+    const mobileTrigger = screen.getByRole("button", { name: "Open navigation" });
+    expect(mobileTrigger).toHaveClass("focus:outline-none");
+    expect(mobileTrigger).toHaveClass("focus-visible:ring-1");
+    expect(mobileTrigger).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Header buttons (bell, theme, command palette, search palette)
+    const bellBtn = screen.getByTestId("notification-bell");
+    expect(bellBtn).toHaveClass("focus:outline-none");
+    expect(bellBtn).toHaveClass("focus-visible:ring-1");
+    expect(bellBtn).toHaveClass("focus-visible:ring-accent");
+
+    const themeBtn = screen.getByRole("button", { name: /Switch to/ });
+    expect(themeBtn).toHaveClass("focus:outline-none");
+    expect(themeBtn).toHaveClass("focus-visible:ring-1");
+    expect(themeBtn).toHaveClass("focus-visible:ring-accent");
+
+    const cmdBtn = screen.getByRole("button", { name: "Open command palette" });
+    expect(cmdBtn).toHaveClass("focus:outline-none");
+    expect(cmdBtn).toHaveClass("focus-visible:ring-1");
+    expect(cmdBtn).toHaveClass("focus-visible:ring-accent");
+
+    const searchBtn = screen.getByRole("button", { name: "Open search palette" });
+    expect(searchBtn).toHaveClass("focus:outline-none");
+    expect(searchBtn).toHaveClass("focus-visible:ring-1");
+    expect(searchBtn).toHaveClass("focus-visible:ring-accent");
+
+    // 4. Primary nav links
+    const overviewLinks = screen.getAllByRole("link", { name: "Overview" });
+    overviewLinks.forEach((link) => {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    });
+
+    const feedLinks = screen.getAllByRole("link", { name: "Live Feed" });
+    feedLinks.forEach((link) => {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    });
+
+    const legacyLinks = screen.getAllByRole("link", { name: "Legacy dashboard" });
+    legacyLinks.forEach((link) => {
+      expect(link).toHaveClass("focus:outline-none");
+      expect(link).toHaveClass("focus-visible:ring-1");
+      expect(link).toHaveClass("focus-visible:ring-accent");
+    });
+
+    // 5. Open mobile menu and verify mobile nav controls focus styling
+    await act(async () => {
+      fireEvent.click(mobileTrigger);
+    });
+
+    const closeBtn = screen.getByRole("button", { name: "Close navigation panel" });
+    expect(closeBtn).toHaveClass("focus:outline-none");
+    expect(closeBtn).toHaveClass("focus-visible:ring-1");
+    expect(closeBtn).toHaveClass("focus-visible:ring-accent");
+  });
 });
+

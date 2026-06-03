@@ -211,9 +211,14 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
         role="dialog"
         aria-modal="false"
         aria-labelledby="notification-center-title"
+        aria-describedby="notification-center-instructions"
         data-testid="notification-center-card"
         className="relative w-full max-w-2xl rounded-xl border border-accent/40 hero-gradient shadow-soft animate-modal-enter overflow-hidden"
       >
+        <div id="notification-center-instructions" className="sr-only">
+          Notification center. Use tab to navigate between filters, notification entries, and close buttons. Press Escape to close.
+        </div>
+
         {/* Accent blob — matches OnboardingModal / ShortcutOverlay aesthetic. */}
         <div
           aria-hidden
@@ -239,7 +244,7 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
             onClick={onClose}
             aria-label="Close notifications"
             data-testid="notification-center-close"
-            className="btn shrink-0"
+            className="btn shrink-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             <Icon name="close" size={12} />
           </button>
@@ -247,6 +252,8 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
 
         {/* Filter chips */}
         <div
+          role="tablist"
+          aria-label="Filter notifications by category"
           className="relative flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-[color:var(--border-subtle)]"
           data-testid="notification-center-filters"
         >
@@ -256,9 +263,10 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
               type="button"
               role="tab"
               aria-selected={filter === f}
+              aria-controls="notification-center-listbox"
               data-testid={`notif-filter-${f}`}
               onClick={() => setFilter(f)}
-              className={`chip cursor-pointer ${filter === f ? "chip-active" : ""}`}
+              className={`chip cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${filter === f ? "chip-active" : ""}`}
             >
               {FILTER_LABEL[f]}
               <span className="ml-1 text-[10px] opacity-70 tabular-nums">{counts[f]}</span>
@@ -281,7 +289,7 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
                 : `No ${FILTER_LABEL[filter].toLowerCase()} notifications in history.`}
             </p>
           ) : (
-            <ul className="grid gap-1">
+            <ul id="notification-center-listbox" role="listbox" aria-label="Notification list" className="grid gap-1">
               {filtered.map((entry) => {
                 const sev = severityFor(entry);
                 // Defensive: persisted entries may predate the current schema
@@ -293,15 +301,24 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
                 const isUnread = openedAt != null && created > openedAt;
                 const clickable = cat === "toast" && Boolean(entry.id);
                 return (
-                  <li key={`${entry.id}-${created}`}>
+                  <li key={`${entry.id}-${created}`} role="presentation">
                     <button
                       type="button"
+                      role="option"
+                      aria-selected={isUnread}
+                      aria-label={`${isUnread ? "Unread " : ""}${CATEGORY_LABEL[cat]} notification: ${entry.title}. ${
+                        entry.domain ? `Domain: ${entry.domain}.` : ""
+                      } ${
+                        symbols.length > 0 ? `Symbols: ${symbols.join(", ")}.` : ""
+                      } ${entry.score > 0 ? `Score: ${entry.score.toFixed(2)}.` : ""} ${
+                        created ? `Received ${fmtRelTime(created)}.` : ""
+                      }`}
                       onClick={() => clickable && handleRowClick(entry)}
                       disabled={!clickable}
                       data-testid="notification-row"
                       data-category={cat}
                       data-unread={isUnread ? "1" : "0"}
-                      className={`w-full text-left rounded-md border-l-2 ${SEV_BORDER[sev]} px-3 py-2 transition-colors ${
+                      className={`w-full text-left rounded-md border-l-2 ${SEV_BORDER[sev]} px-3 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                         clickable
                           ? "hover:bg-[color:var(--bg-elev2)]/60 hover:border-l-accent cursor-pointer"
                           : "cursor-default"
@@ -358,7 +375,7 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
             onClick={handleClearAll}
             disabled={history.length === 0}
             data-testid="notification-center-clear"
-            className="btn disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             Clear all
           </button>
@@ -371,7 +388,7 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
               onClose();
             }}
             data-testid="notification-center-settings-link"
-            className="text-[color:var(--fg-dim)] hover:text-accent inline-flex items-center gap-1"
+            className="text-[color:var(--fg-dim)] hover:text-accent inline-flex items-center gap-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           >
             Settings: alert preferences
             <Icon name="arrowRight" size={11} />

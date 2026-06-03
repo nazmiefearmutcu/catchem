@@ -317,4 +317,62 @@ describe("notification center", () => {
     clearNotificationHistory();
     expect(window.localStorage.getItem(HISTORY_STORAGE_KEY)).toBe("[]");
   });
+
+  it("satisfies ARIA roles, descriptions, and tab/listbox accessibility contracts", () => {
+    act(() => {
+      pushToast({
+        id: "cap-a11y",
+        title: "A11y Test Item",
+        domain: "a11y.com",
+        score: 0.9,
+        reasons: [],
+        symbols: ["AAPL"],
+      });
+    });
+
+    renderCenter(true);
+
+    // 1. Dialog accessibility description
+    const card = screen.getByTestId("notification-center-card");
+    expect(card).toHaveAttribute("aria-describedby", "notification-center-instructions");
+    const instructions = document.getElementById("notification-center-instructions");
+    expect(instructions).toBeInTheDocument();
+    expect(instructions).toHaveTextContent(/use tab to navigate/i);
+
+    // 2. Tablist and Filter chips attributes/roles
+    const filterContainer = screen.getByTestId("notification-center-filters");
+    expect(filterContainer).toHaveAttribute("role", "tablist");
+    expect(filterContainer).toHaveAttribute("aria-label", "Filter notifications by category");
+
+    const activeFilterChip = screen.getByTestId("notif-filter-all");
+    expect(activeFilterChip).toHaveAttribute("role", "tab");
+    expect(activeFilterChip).toHaveAttribute("aria-selected", "true");
+    expect(activeFilterChip).toHaveAttribute("aria-controls", "notification-center-listbox");
+
+    // 3. Listbox and Options attributes/roles
+    const listbox = screen.getByRole("listbox");
+    expect(listbox).toHaveAttribute("id", "notification-center-listbox");
+    expect(listbox).toHaveAttribute("aria-label", "Notification list");
+
+    const rows = screen.getAllByTestId("notification-row");
+    expect(rows[0]).toHaveAttribute("role", "option");
+    expect(rows[0]).toHaveAttribute("aria-selected");
+    expect(rows[0]).toHaveAttribute("aria-label");
+    expect(rows[0].getAttribute("aria-label")).toContain("arrival notification: A11y Test Item");
+    expect(rows[0].getAttribute("aria-label")).toContain("Domain: a11y.com");
+    expect(rows[0].getAttribute("aria-label")).toContain("Symbols: AAPL");
+    expect(rows[0].getAttribute("aria-label")).toContain("Score: 0.90");
+
+    // 4. Interactive controls focus ring styles
+    const closeBtn = screen.getByTestId("notification-center-close");
+    expect(closeBtn.className).toContain("focus-visible:ring-accent");
+    expect(activeFilterChip.className).toContain("focus-visible:ring-accent");
+    expect(rows[0].className).toContain("focus-visible:ring-accent");
+
+    const clearBtn = screen.getByTestId("notification-center-clear");
+    expect(clearBtn.className).toContain("focus-visible:ring-accent");
+
+    const settingsLink = screen.getByTestId("notification-center-settings-link");
+    expect(settingsLink.className).toContain("focus-visible:ring-accent");
+  });
 });

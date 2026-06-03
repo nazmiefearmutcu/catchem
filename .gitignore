@@ -68,3 +68,5 @@ videos/
 
 # Playwright CLI captures are local verification artifacts.
 .playwright-cli/
+.ralph/
+cache/

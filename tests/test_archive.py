@@ -384,3 +384,246 @@ def test_row_to_csv_dict_leaves_ordinary_values_untouched() -> None:
     assert out["domain"] == "reuters.com"
     assert out["url"] == "https://reuters.com/x"
     assert out["symbols"] == "AAPL, MSFT"
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Extra Coverage / Branch Target Tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+import asyncio
+
+def test_detect_drive_dir_various_cloud_providers(monkeypatch) -> None:
+    # Set up basic fake home path
+    fake_home = Path("/fake/home")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    
+    # We will mock Path.is_dir and Path.glob to simulate different setups
+    is_dir_registry = set()
+    glob_registry = {}
+    
+    original_is_dir = Path.is_dir
+    def fake_is_dir(self):
+        if str(self) in is_dir_registry:
+            return True
+        return original_is_dir(self)
+        
+    def fake_glob(self, pattern):
+        return glob_registry.get((str(self), pattern), [])
+        
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
+    monkeypatch.setattr(Path, "glob", fake_glob)
+    
+    # 1. CloudStorage dir exists and has Google Drive with My Drive
+    is_dir_registry.clear()
+    glob_registry.clear()
+    is_dir_registry.add("/fake/home/Library/CloudStorage")
+    is_dir_registry.add("/fake/home/Library/CloudStorage/GoogleDrive-user")
+    is_dir_registry.add("/fake/home/Library/CloudStorage/GoogleDrive-user/My Drive")
+    glob_registry[("/fake/home/Library/CloudStorage", "GoogleDrive-*")] = [
+        Path("/fake/home/Library/CloudStorage/GoogleDrive-user")
+    ]
+    assert detect_drive_dir() == Path("/fake/home/Library/CloudStorage/GoogleDrive-user/My Drive/Catchem")
+    
+    # 2. Google Drive without My Drive
+    is_dir_registry.remove("/fake/home/Library/CloudStorage/GoogleDrive-user/My Drive")
+    assert detect_drive_dir() == Path("/fake/home/Library/CloudStorage/GoogleDrive-user/Catchem")
+    
+    # 3. OneDrive
+    is_dir_registry.clear()
+    glob_registry.clear()
+    is_dir_registry.add("/fake/home/Library/CloudStorage")
+    is_dir_registry.add("/fake/home/Library/CloudStorage/OneDrive-personal")
+    glob_registry[("/fake/home/Library/CloudStorage", "OneDrive-*")] = [
+        Path("/fake/home/Library/CloudStorage/OneDrive-personal")
+    ]
+    assert detect_drive_dir() == Path("/fake/home/Library/CloudStorage/OneDrive-personal/Catchem")
+    
+    # 4. Dropbox
+    is_dir_registry.clear()
+    glob_registry.clear()
+    is_dir_registry.add("/fake/home/Library/CloudStorage")
+    is_dir_registry.add("/fake/home/Library/CloudStorage/Dropbox-user")
+    glob_registry[("/fake/home/Library/CloudStorage", "Dropbox*")] = [
+        Path("/fake/home/Library/CloudStorage/Dropbox-user")
+    ]
+    assert detect_drive_dir() == Path("/fake/home/Library/CloudStorage/Dropbox-user/Catchem")
+
+
+def test_fallback_drive_dir(monkeypatch, tmp_path) -> None:
+    from catchem.archive import fallback_drive_dir
+    fake_home = tmp_path / "fakehome"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    assert fallback_drive_dir() == fake_home / "Documents" / "Catchem"
+
+
+def test_archived_capture_ids_edge_cases(tmp_path) -> None:
+    from catchem.archive import _archived_capture_ids
+    
+    # 1. OSError on non-existent file
+    assert _archived_capture_ids(tmp_path / "does_not_exist") == set()
+    
+    # 2. Empty capture_id or missing field
+    csv_file = tmp_path / "test.csv"
+    with csv_file.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["title", "capture_id"])
+        writer.writerow(["Sample A", ""])
+        writer.writerow(["Sample B", "  "])
+        writer.writerow(["Sample C", "id-1"])
+    
+    assert _archived_capture_ids(csv_file) == {"id-1"}
+
+
+def test_row_to_csv_dict_json_errors() -> None:
+    # evidence_json not valid json list
+    row = {
+        "evidence_json": "invalid-json",
+        "asset_classes_json": "not-a-list-json",
+    }
+    out = row_to_csv_dict(row)
+    assert out["reasoning"] == ""
+    assert out["asset_classes"] == ""
+    
+    row2 = {
+        "asset_classes_json": "123", # Not a list
+    }
+    out2 = row_to_csv_dict(row2)
+    assert out2["asset_classes"] == ""
+
+
+def test_archiver_start_twice_and_stop_not_running(archiver_with_records) -> None:
+    archiver, _, _ = archiver_with_records
+    
+    # Call stop on unstarted archiver (no-op / line 318)
+    async def run_stop():
+        await archiver.stop()
+    asyncio.run(run_stop())
+    
+    # Start it once
+    async def run_start_and_double():
+        archiver.start()
+        # Start again when already running (returns immediately / line 299)
+        archiver.start()
+        await archiver.stop()
+        
+    asyncio.run(run_start_and_double())
+
+
+def test_archiver_mkdir_oserror_handling(archiver_with_records, monkeypatch) -> None:
+    archiver, _, _ = archiver_with_records
+    
+    # Mock mkdir to raise OSError
+    def fake_mkdir(*args, **kwargs):
+        raise OSError("Permission Denied")
+        
+    monkeypatch.setattr(Path, "mkdir", fake_mkdir)
+    
+    # Calling start should log a warning but not raise
+    async def run_start_and_stop():
+        archiver.start()
+        await archiver.stop()
+    asyncio.run(run_start_and_stop())
+
+
+def test_archiver_run_loop_exceptions(archiver_with_records, monkeypatch) -> None:
+    archiver, _, _ = archiver_with_records
+    
+    # Mock _archive_once to raise Exception
+    def fake_archive_once():
+        raise RuntimeError("DB Crash")
+        
+    monkeypatch.setattr(archiver, "_archive_once", fake_archive_once)
+    
+    # Use short interval
+    archiver._interval = 0.01
+    
+    # Mock wait_for to raise TimeoutError immediately for the 5s grace period
+    original_wait_for = asyncio.wait_for
+    async def fake_wait_for(aw, timeout, **kwargs):
+        if timeout == 5.0:
+            raise TimeoutError()
+        return await original_wait_for(aw, timeout, **kwargs)
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+    
+    # Run loop briefly and cancel
+    async def run_briefly():
+        archiver.start()
+        await asyncio.sleep(0.05)
+        await archiver.stop()
+        
+    asyncio.run(run_briefly())
+    assert "DB Crash" in archiver.last_error
+
+
+def test_archiver_already_running_result(archiver_with_records) -> None:
+    archiver, _, _ = archiver_with_records
+    
+    # Mock lock object entirely since RLock attributes are read-only
+    class FakeLock:
+        def acquire(self, blocking=True):
+            return False
+        def release(self):
+            pass
+            
+    archiver._run_lock = FakeLock()
+    res = archiver._archive_once()
+    assert res.archived == 0
+    assert res.error == "already running"
+
+
+
+def test_archiver_mkdir_fallback_failure(archiver_with_records, monkeypatch) -> None:
+    archiver, _, _ = archiver_with_records
+    
+    # Force primary and fallback mkdir to fail
+    def fake_mkdir(*args, **kwargs):
+        raise OSError("Disk Read-Only")
+        
+    monkeypatch.setattr(Path, "mkdir", fake_mkdir)
+    monkeypatch.setattr(archiver, "_drive_dir", Path("/invalid/path"))
+    
+    import catchem.archive as archive_mod
+    monkeypatch.setattr(archive_mod, "fallback_drive_dir", lambda: Path("/invalid/fallback"))
+    
+    res = archiver._archive_once()
+    assert res.archived == 0
+    assert "mkdir failed" in res.error or "fallback mkdir failed" in res.error
+
+
+def test_archiver_mtime_vector_skip(archiver_with_records, tmp_path) -> None:
+    archiver, sup, _ = archiver_with_records
+    
+    # Set up vector index mockup with root path
+    class FakeVectorIndex:
+        def __init__(self, root):
+            self.root = root
+        def delete(self, cid):
+            pass
+            
+    vec_root = tmp_path / "vectors"
+    vec_root.mkdir()
+    sup.vector_index = FakeVectorIndex(vec_root)
+    
+    # Create a vector file for a capture_id
+    with sup.storage.cursor() as cur:
+        cur.execute("SELECT capture_id FROM records LIMIT 1")
+        cid = cur.fetchone()[0]
+        
+    npy_file = vec_root / f"{cid}.npy"
+    npy_file.parent.mkdir(parents=True, exist_ok=True)
+    npy_file.write_text("dummy")
+    
+    # Set mtime to current time (which is >= sweep_started)
+    import os
+    import time
+    os.utime(npy_file, (time.time() + 10, time.time() + 10))
+    
+    # Perform archive sweep
+    res = archiver._archive_once()
+    assert res.archived == 150
+    assert res.error is None
+    # The file should still exist since its mtime was >= sweep_started
+    assert npy_file.exists()
+
+

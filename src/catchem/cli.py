@@ -27,13 +27,16 @@ logger = get_logger("catchem.cli")
 def _override_mode(mode: str | None) -> None:
     if mode is not None:
         import os
+
         os.environ["CATCHEM_MODE"] = mode
         reload_settings()
 
 
 @app.command()
 def run(
-    mode: str = typer.Option("replay_existing", help="production_safe | replay_existing | live_tail | research_diagnostic"),
+    mode: str = typer.Option(
+        "replay_existing", help="production_safe | replay_existing | live_tail | research_diagnostic"
+    ),
     max_records: int | None = typer.Option(None, help="Replay limit (replay mode only)."),
 ) -> None:
     """Run the pipeline in one of the supported modes."""
@@ -87,7 +90,9 @@ def inspect(capture_id: str = typer.Option(..., "--capture-id")) -> None:
 @app.command()
 def benchmark(
     limit: int = typer.Option(200, help="Replay record cap for throughput test."),
-    golden: bool = typer.Option(False, "--golden", help="Run the curated golden-set evaluation instead of throughput."),
+    golden: bool = typer.Option(
+        False, "--golden", help="Run the curated golden-set evaluation instead of throughput."
+    ),
     extended: Path | None = typer.Option(None, help="Optional path to a JSONL of extra golden items."),
 ) -> None:
     """Throughput sanity check OR golden-set precision/recall/F1."""
@@ -189,10 +194,14 @@ def bootstrap_init(skip_warm: bool = typer.Option(True, help="Skip HF model warm
 @app.command()
 def demo(
     title: str = typer.Option(..., "--title", "-t", help="Headline of the article to ingest."),
-    text: str | None = typer.Option(None, "--text", help="Article body. If omitted, read from --text-file or stdin."),
+    text: str | None = typer.Option(
+        None, "--text", help="Article body. If omitted, read from --text-file or stdin."
+    ),
     text_file: Path | None = typer.Option(None, "--text-file", help="Read article body from this file."),
     domain: str = typer.Option("demo.local", "--domain", help="Source domain (sets the domain prior)."),
-    url: str | None = typer.Option(None, "--url", help="Canonical URL (sanity-checked by the safeHref filter in UI)."),
+    url: str | None = typer.Option(
+        None, "--url", help="Canonical URL (sanity-checked by the safeHref filter in UI)."
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit the raw record JSON instead of the report."),
 ) -> None:
     """End-to-end demo: paste one news article, write the same JSONL Awareness
@@ -251,11 +260,11 @@ def _format_size(n: int) -> str:
     """Human-readable byte count for db-info / db-backup output."""
     units = ["B", "KB", "MB", "GB"]
     size = float(n)
-    for unit in units:
-        if size < 1024.0 or unit == units[-1]:
+    for unit in units[:-1]:
+        if size < 1024.0:
             return f"{size:,.1f} {unit}" if unit != "B" else f"{int(size):,} {unit}"
         size /= 1024.0
-    return f"{n} B"
+    return f"{size:,.1f} GB"
 
 
 @app.command("db-info")
@@ -286,15 +295,20 @@ def cli_db_info(json_out: bool = typer.Option(False, "--json", help="Emit JSON i
     target = max_known_version()
 
     if json_out:
-        typer.echo(json.dumps({
-            "path": str(db_path),
-            "size_bytes": stat.st_size,
-            "modified": modified,
-            "schema_version": applied,
-            "schema_target": target,
-            "records_total": total,
-            "records_relevant": relevant,
-        }, indent=2))
+        typer.echo(
+            json.dumps(
+                {
+                    "path": str(db_path),
+                    "size_bytes": stat.st_size,
+                    "modified": modified,
+                    "schema_version": applied,
+                    "schema_target": target,
+                    "records_total": total,
+                    "records_relevant": relevant,
+                },
+                indent=2,
+            )
+        )
         return
 
     typer.echo(f"Path:           {db_path}")
@@ -306,7 +320,9 @@ def cli_db_info(json_out: bool = typer.Option(False, "--json", help="Emit JSON i
 
 @app.command("db-backup")
 def cli_db_backup(
-    output: Path | None = typer.Option(None, "--output", "-o", help="Backup file path (defaults to ./catchem-backup-<timestamp>.sqlite3)."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Backup file path (defaults to ./catchem-backup-<timestamp>.sqlite3)."
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
 ) -> None:
     """Copy the SQLite database to a backup file (uses sqlite3 backup API)."""
@@ -341,11 +357,16 @@ def cli_db_backup(
 
     size = target.stat().st_size
     if json_out:
-        typer.echo(json.dumps({
-            "source": str(src),
-            "backup": str(target),
-            "size_bytes": size,
-        }, indent=2))
+        typer.echo(
+            json.dumps(
+                {
+                    "source": str(src),
+                    "backup": str(target),
+                    "size_bytes": size,
+                },
+                indent=2,
+            )
+        )
         return
 
     typer.echo(f"Source: {src}")
@@ -382,7 +403,9 @@ def cli_bench(
 
     relevance = payload["relevance"]
     typer.echo(f"Dataset:        {payload['dataset_name']} (n={payload['n']})")
-    typer.echo(f"Relevance P/R/F1: {relevance['precision']:.3f} / {relevance['recall']:.3f} / {relevance['f1']:.3f}")
+    typer.echo(
+        f"Relevance P/R/F1: {relevance['precision']:.3f} / {relevance['recall']:.3f} / {relevance['f1']:.3f}"
+    )
     sym = payload.get("symbol_recall")
     if sym is not None:
         typer.echo(f"Symbol recall:  {sym:.3f}")
@@ -426,13 +449,15 @@ def cli_search(
         title = (r.get("title") or "").lower()
         domain = (r.get("domain") or "").lower()
         if q_lower in title or q_lower in domain:
-            matched_records.append({
-                "capture_id": r.get("capture_id"),
-                "title": r.get("title"),
-                "domain": r.get("domain"),
-                "score": float(r.get("finance_relevance_score") or 0.0),
-                "published_ts": r.get("published_ts"),
-            })
+            matched_records.append(
+                {
+                    "capture_id": r.get("capture_id"),
+                    "title": r.get("title"),
+                    "domain": r.get("domain"),
+                    "score": float(r.get("finance_relevance_score") or 0.0),
+                    "published_ts": r.get("published_ts"),
+                }
+            )
             if len(matched_records) >= limit:
                 break
 
@@ -462,23 +487,31 @@ def cli_search(
             cid = (c.cluster_id or "").lower()
             symbols = tuple(c.dominant_symbols or ())
             if q_lower in cid or any(q_lower in (s or "").lower() for s in symbols):
-                matched_clusters.append({
-                    "cluster_id": c.cluster_id,
-                    "size": int(c.size),
-                    "symbols": list(symbols),
-                })
+                matched_clusters.append(
+                    {
+                        "cluster_id": c.cluster_id,
+                        "size": int(c.size),
+                        "symbols": list(symbols),
+                    }
+                )
                 if len(matched_clusters) >= limit:
                     break
     finally:
         sup2.close()
 
     if json_out:
-        typer.echo(json.dumps({
-            "query": query,
-            "records": matched_records,
-            "symbols": matched_symbols,
-            "clusters": matched_clusters,
-        }, indent=2, default=str))
+        typer.echo(
+            json.dumps(
+                {
+                    "query": query,
+                    "records": matched_records,
+                    "symbols": matched_symbols,
+                    "clusters": matched_clusters,
+                },
+                indent=2,
+                default=str,
+            )
+        )
         return
 
     typer.echo(f"Records ({len(matched_records)}):")
@@ -508,9 +541,13 @@ def cli_export(
     asset_class: str | None = typer.Option(None, "--asset-class", help="Filter by asset class label."),
     reason_code: str | None = typer.Option(None, "--reason-code", help="Filter by impact reason code."),
     symbol: str | None = typer.Option(None, "--symbol", help="Filter by candidate symbol."),
-    min_score: float | None = typer.Option(None, "--min-score", help="Drop records with score below this floor."),
+    min_score: float | None = typer.Option(
+        None, "--min-score", help="Drop records with score below this floor."
+    ),
     limit: int = typer.Option(5000, "--limit", help="Cap on rows read from storage."),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path (default: ./catchem-records-<ts>.<ext>)."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Output file path (default: ./catchem-records-<ts>.<ext>)."
+    ),
 ) -> None:
     """Filtered CSV/JSON export — mirrors /api/export/records to disk."""
     fmt_lower = fmt.strip().lower()
@@ -570,10 +607,19 @@ def cli_export(
         from .archive import _csv_safe
 
         fields = (
-            "capture_id", "title", "domain", "url", "published_ts", "created_at",
-            "is_finance_relevant", "finance_relevance_score",
-            "sentiment_label", "sentiment_score",
-            "asset_classes", "impact_reason_codes", "candidate_symbols",
+            "capture_id",
+            "title",
+            "domain",
+            "url",
+            "published_ts",
+            "created_at",
+            "is_finance_relevant",
+            "finance_relevance_score",
+            "sentiment_label",
+            "sentiment_score",
+            "asset_classes",
+            "impact_reason_codes",
+            "candidate_symbols",
             "processing_mode",
         )
         _text_fields = ("title", "domain", "url", "asset_classes", "impact_reason_codes", "candidate_symbols")
@@ -776,7 +822,9 @@ def _print_holdings_text(holdings: list[dict]) -> None:
         cost = h.get("cost_basis")
         cost_str = f"{float(cost):g}" if cost is not None else "—"
         added = (h.get("added_at") or "")[:19] or "?"
-        typer.echo(f"  [{hid}] {sym:<10} {label:<16} shares={shares_str:<10} cost={cost_str:<10} added={added}")
+        typer.echo(
+            f"  [{hid}] {sym:<10} {label:<16} shares={shares_str:<10} cost={cost_str:<10} added={added}"
+        )
 
 
 @portfolio_app.callback(invoke_without_command=True)
@@ -801,11 +849,16 @@ def _portfolio_list_impl(json_out: bool) -> None:
     finally:
         storage.close()
     if json_out:
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "holdings": holdings,
-        }, default=str))
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "holdings": holdings,
+                },
+                default=str,
+            )
+        )
         return
     _print_holdings_text(holdings)
 
@@ -814,7 +867,8 @@ def _portfolio_list_impl(json_out: bool) -> None:
 def cli_portfolio_list(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
     enriched: bool = typer.Option(
-        False, "--enriched",
+        False,
+        "--enriched",
         help="Run the awareness + quote join (same as `portfolio show`).",
     ),
 ) -> None:
@@ -905,11 +959,16 @@ def _portfolio_show_impl(json_out: bool, *, window_seconds: float, record_limit:
     )
 
     if json_out:
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "holdings": enriched,
-        }, default=str))
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "holdings": enriched,
+                },
+                default=str,
+            )
+        )
         return
 
     if not enriched:
@@ -929,23 +988,29 @@ def _portfolio_show_impl(json_out: bool, *, window_seconds: float, record_limit:
         cov_str = "covered" if cov.get("covered") else "BLIND SPOT"
         news_n = int(h.get("recent_news_count") or 0)
         top = h.get("recent_top") or []
-        headline = (top[0].get("title") if top and top[0].get("title") else "—")
+        headline = top[0].get("title") if top and top[0].get("title") else "—"
         if headline and len(headline) > 60:
             headline = headline[:57] + "..."
         typer.echo(
-            f"  [{h.get('id')}] {sym:<10} {price_str:<22} {cov_str:<11} "
-            f"news={news_n:<3} top={headline}"
+            f"  [{h.get('id')}] {sym:<10} {price_str:<22} {cov_str:<11} news={news_n:<3} top={headline}"
         )
 
 
 @portfolio_app.command("show")
 def cli_portfolio_show(
     window_seconds: float = typer.Option(
-        86400.0, "--window-seconds", "-w", min=1.0,
+        86400.0,
+        "--window-seconds",
+        "-w",
+        min=1.0,
         help="Coverage / news-count horizon in seconds (default 24h).",
     ),
     record_limit: int = typer.Option(
-        500, "--record-limit", "-l", min=1, max=5000,
+        500,
+        "--record-limit",
+        "-l",
+        min=1,
+        max=5000,
         help="Records pulled from storage for the enrichment join.",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
@@ -959,7 +1024,9 @@ def cli_portfolio_show(
 
 @app.command("watch")
 def cli_watch(
-    interval: float = typer.Option(3.0, "--interval", "-n", min=0.5, max=60.0, help="Refresh cadence in seconds."),
+    interval: float = typer.Option(
+        3.0, "--interval", "-n", min=0.5, max=60.0, help="Refresh cadence in seconds."
+    ),
     limit: int = typer.Option(8, "--limit", "-l", help="Number of top-recent rows to show."),
     min_score: float = typer.Option(0.5, "--min-score", "-m", help="Minimum finance score."),
 ) -> None:
@@ -1040,7 +1107,7 @@ def cli_db_stats(
                 # Quote identifier defensively — same rationale as api.py
                 # db_stats: SQLite can't parameterize names but does honor
                 # double-quotes; strip embedded `"` first.
-                safe_name = r[0].replace('"', '')
+                safe_name = r[0].replace('"', "")
                 try:
                     n = conn.execute(f'SELECT COUNT(*) FROM "{safe_name}"').fetchone()[0]
                 except Exception:
@@ -1058,22 +1125,28 @@ def cli_db_stats(
 
     size_bytes = page_count * page_size
     if json_out:
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "tables": tables,
-            "indexes": indexes,
-            "total_tables": len(tables),
-            "total_indexes": len(indexes),
-            "page_count": page_count,
-            "page_size_bytes": page_size,
-            "estimated_size_bytes": size_bytes,
-        }))
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "tables": tables,
+                    "indexes": indexes,
+                    "total_tables": len(tables),
+                    "total_indexes": len(indexes),
+                    "page_count": page_count,
+                    "page_size_bytes": page_size,
+                    "estimated_size_bytes": size_bytes,
+                }
+            )
+        )
         return
 
-    typer.echo(f"catchem db-stats · {len(tables)} tables · {len(indexes)} indexes · {size_bytes / 1024 / 1024:.1f} MB on disk\n")
+    typer.echo(
+        f"catchem db-stats · {len(tables)} tables · {len(indexes)} indexes · {size_bytes / 1024 / 1024:.1f} MB on disk\n"
+    )
     typer.echo("tables:")
     for t in tables:
-        rows_str = f"{t['rows']:,}" if t['rows'] >= 0 else "ERR"
+        rows_str = f"{t['rows']:,}" if t["rows"] >= 0 else "ERR"
         typer.echo(f"  {rows_str:>10}  {t['name']}")
     if indexes:
         typer.echo("\nindexes:")
@@ -1242,18 +1315,20 @@ def cli_awareness(
     interval = settings.news.poll_interval_seconds
 
     if json_out:
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "configured": True,
-            "sources_total": len(feeds),
-            "sources_by_parser": sources_by_parser,
-            "poll_interval_seconds": interval,
-        }))
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "configured": True,
+                    "sources_total": len(feeds),
+                    "sources_by_parser": sources_by_parser,
+                    "poll_interval_seconds": interval,
+                }
+            )
+        )
         return
 
-    typer.echo(
-        f"catchem awareness · {len(feeds)} sources · poll every {interval:.0f}s\n"
-    )
+    typer.echo(f"catchem awareness · {len(feeds)} sources · poll every {interval:.0f}s\n")
     typer.echo("sources by parser:")
     for parser, count in sorted(sources_by_parser.items(), key=lambda kv: -kv[1]):
         typer.echo(f"  {parser:<12}  {count:>4}")
@@ -1313,14 +1388,15 @@ def cli_signals(
         ("backtest", "/api/backtest", "Stub-vs-DeepSeek calibration vs ground truth"),
     ]
     if json_out:
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "count": len(catalog),
-            "signals": [
-                {"name": n, "endpoint": e, "summary": s}
-                for (n, e, s) in catalog
-            ],
-        }))
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "count": len(catalog),
+                    "signals": [{"name": n, "endpoint": e, "summary": s} for (n, e, s) in catalog],
+                }
+            )
+        )
         return
     typer.echo(f"catchem quant signals · {len(catalog)} entries\n")
     for name, endpoint, summary in catalog:
@@ -1345,10 +1421,7 @@ def cli_top_recent(
     finally:
         storage.close()
 
-    filtered = [
-        r for r in records
-        if (r.get("finance_relevance_score") or 0.0) >= min_score
-    ]
+    filtered = [r for r in records if (r.get("finance_relevance_score") or 0.0) >= min_score]
     filtered.sort(key=lambda r: float(r.get("finance_relevance_score") or 0.0), reverse=True)
     top = filtered[:limit]
 
@@ -1391,18 +1464,31 @@ def cli_top_recent(
 # yet — verbatim from api.py's `_DEFAULT_WATCH_TERMS` so the CLI and the HTTP
 # twin (/api/news/coverage-gaps) answer against the same out-of-the-box set.
 _DEFAULT_WATCH_TERMS: tuple[str, ...] = (
-    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "TSLA",
 )
 
 
 @app.command("coverage-gaps")
 def cli_coverage_gaps(
     window_hours: float = typer.Option(
-        24.0, "--window-hours", "-w", min=0.1,
+        24.0,
+        "--window-hours",
+        "-w",
+        min=0.1,
         help="Coverage horizon in hours — a watched term with no mention this fresh is a blind spot.",
     ),
     limit: int = typer.Option(
-        500, "--limit", "-l", min=1, max=2000,
+        500,
+        "--limit",
+        "-l",
+        min=1,
+        max=2000,
         help="Records pulled from storage for the scan.",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
@@ -1516,6 +1602,7 @@ def cli_status(
     sidecar_ok = False
     try:
         import httpx
+
         settings = load_settings()
         # v66 audit fix: the sub-model lives at `settings.api.host/port`, NOT
         # top-level. Pre-fix this fell through to defaults silently and reported
@@ -1550,14 +1637,14 @@ def cli_status(
         return
 
     sidecar_str = (
-        f"sidecar: ok pid {sidecar_pid}" if sidecar_ok and sidecar_pid
-        else "sidecar: ok" if sidecar_ok
+        f"sidecar: ok pid {sidecar_pid}"
+        if sidecar_ok and sidecar_pid
+        else "sidecar: ok"
+        if sidecar_ok
         else "sidecar: stopped"
     )
     last_str = f" · last {last_record[:19]}" if last_record else ""
-    typer.echo(
-        f"[catchem v{schema_version}] {records:,} records · {tags:,} tags · {sidecar_str}{last_str}"
-    )
+    typer.echo(f"[catchem v{schema_version}] {records:,} records · {tags:,} tags · {sidecar_str}{last_str}")
 
 
 @app.command("ping-deepseek")
@@ -1575,7 +1662,9 @@ def cli_ping_deepseek(
     settings = load_settings()
     cfg = settings.reviewers.deepseek
     if not cfg.api_key:
-        typer.echo("error: no DeepSeek api key configured (set CATCHEM_REVIEWERS__DEEPSEEK__API_KEY)", err=True)
+        typer.echo(
+            "error: no DeepSeek api key configured (set CATCHEM_REVIEWERS__DEEPSEEK__API_KEY)", err=True
+        )
         raise typer.Exit(1)
 
     body = {
@@ -1615,7 +1704,9 @@ def cli_ping_deepseek(
         if ok:
             typer.echo(f"ok: DeepSeek accepted credentials (model={cfg.model}, http {resp.status_code})")
         else:
-            typer.echo(f"fail: DeepSeek http {resp.status_code} — {result.get('error') or '(no body)'}", err=True)
+            typer.echo(
+                f"fail: DeepSeek http {resp.status_code} — {result.get('error') or '(no body)'}", err=True
+            )
 
     if not ok:
         raise typer.Exit(1)

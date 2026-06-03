@@ -521,8 +521,6 @@ def _compute_agreement(stub_payload: dict[str, Any], ds_payload: dict[str, Any])
         if not sa and not sb:
             return 1.0
         union = sa | sb
-        if not union:
-            return 1.0
         return round(len(sa & sb) / len(union), 4)
 
     relevance_match = bool(stub_payload.get("is_finance_relevant")) == bool(

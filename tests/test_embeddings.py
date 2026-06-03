@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
+import pytest
 
 from catchem.embeddings import EmbedderStub, VectorIndex, cosine
 
@@ -162,3 +165,124 @@ def test_vector_index_cache_is_lru_capped(tmp_path, monkeypatch) -> None:
     assert len(idx._cache) <= 5, "cache must stay within the LRU cap"
     assert idx.load("c11") is not None, "most-recent write resident"
     assert idx.load("c0") is not None, "evicted entry re-loads from durable .npy"
+
+
+def test_stub_empty_or_no_tokens() -> None:
+    e = EmbedderStub()
+    assert np.allclose(e.encode(""), np.zeros(64))
+    assert np.allclose(e.encode(",,,"), np.zeros(64))
+
+
+def test_stub_encode_many() -> None:
+    e = EmbedderStub()
+    res = e.encode_many(["hello", "world"])
+    assert res.shape == (2, 64)
+    res_empty = e.encode_many([])
+    assert res_empty.shape == (0, 64)
+
+
+def test_cosine_mismatch() -> None:
+    a = np.zeros(64)
+    b = np.zeros(384)
+    assert cosine(a, b) == 0.0
+
+
+def test_vector_index_delete_and_missing_load(tmp_path) -> None:
+    idx = VectorIndex(tmp_path / "v")
+    idx.save("c1", np.zeros(64))
+    assert idx.load("c1") is not None
+    idx.delete("c1")
+    assert idx.load("c1") is None
+    # loading a totally random missing one
+    assert idx.load("c_missing") is None
+
+
+def test_vector_index_save_exception_cleanup(tmp_path, monkeypatch) -> None:
+    idx = VectorIndex(tmp_path / "v")
+    def mock_replace(src, dst):
+        raise OSError("Mock replace error")
+    monkeypatch.setattr(os, "replace", mock_replace)
+    
+    with pytest.raises(OSError, match="Mock replace error"):
+        idx.save("c1", np.zeros(64))
+    
+    # Ensure no leftover temp files remain in directory
+    temp_files = list((tmp_path / "v").glob("*.npytmp"))
+    assert len(temp_files) == 0
+
+
+def test_make_embedder_modes() -> None:
+    from catchem.embeddings import make_embedder
+    # 1. use_stub is True
+    stub = make_embedder("some_model", use_stub=True)
+    assert isinstance(stub, EmbedderStub)
+    
+    # 2. use_stub is False, but SentenceTransformer is not mockable/fails
+    # (should fall back to EmbedderStub)
+    stub_fallback = make_embedder("nonexistent_model_name", use_stub=False)
+    assert isinstance(stub_fallback, EmbedderStub)
+
+
+def test_embedder_model_happy_path(monkeypatch) -> None:
+    # Mock sentence_transformers module
+    import sys
+    from unittest.mock import MagicMock
+    
+    mock_model = MagicMock()
+    mock_model.get_sentence_embedding_dimension.return_value = 384
+    mock_model.encode.side_effect = lambda texts, **kwargs: (
+        np.zeros((len(texts), 384)) if isinstance(texts, list) else np.zeros(384)
+    )
+    
+    mock_st_class = MagicMock(return_value=mock_model)
+    
+    # Inject our mock into sys.modules
+    mock_st_module = MagicMock()
+    mock_st_module.SentenceTransformer = mock_st_class
+    monkeypatch.setitem(sys.modules, "sentence_transformers", mock_st_module)
+    
+    # Now test EmbedderModel
+    from catchem.embeddings import EmbedderModel, make_embedder
+    model = EmbedderModel("mock-model")
+    assert model.model_version == "hf:mock-model"
+    
+    # Test encode single
+    v = model.encode("hello")
+    assert v.shape == (384,)
+    
+    # Test encode_many
+    res = model.encode_many(["hello", "world"])
+    assert res.shape == (2, 384)
+    
+    # Test encode_many empty
+    res_empty = model.encode_many([])
+    assert res_empty.shape == (0, 384)
+    
+    # Test make_embedder with mock working
+    model_instance = make_embedder("mock-model", use_stub=False)
+    assert isinstance(model_instance, EmbedderModel)
+
+
+def test_vector_index_nearest_vanished_file(tmp_path, monkeypatch) -> None:
+    idx = VectorIndex(tmp_path / "v")
+    e = EmbedderStub()
+    # Save a file, so it exists in glob
+    idx.save("c1", e.encode("hello"))
+    # Evict it from cache so nearest() tries to reload it
+    with idx._cache_lock:
+        idx._cache.pop("c1", None)
+    
+    # Mock np.load to raise FileNotFoundError when reading c1
+    original_load = np.load
+    def mock_np_load(path, *args, **kwargs):
+        if "c1.npy" in str(path):
+            raise FileNotFoundError("Mock vanished file")
+        return original_load(path, *args, **kwargs)
+    
+    monkeypatch.setattr(np, "load", mock_np_load)
+    
+    # nearest should not fail but skip it
+    results = idx.nearest(e.encode("query"), k=5)
+    assert len(results) == 0
+
+

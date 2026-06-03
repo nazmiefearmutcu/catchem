@@ -265,10 +265,8 @@ def parse_ws_message(raw: str | bytes, fallback_domain: str = "") -> ParsedItem 
             break
     title = _strip_html(title_raw) or _strip_html(body_raw)
     text = _strip_html(body_raw) or title
-    if not title and not text:
-        return None
     if not title:
-        title = text[:120].rstrip()
+        return None
 
     if not url:
         # URL-less squawk frame: synthesize a deterministic pseudo-URL so the

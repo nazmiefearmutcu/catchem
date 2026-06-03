@@ -77,7 +77,7 @@ describe("ToastTray", () => {
     expect(screen.getByText("Apple earnings beat consensus")).toBeInTheDocument();
     expect(screen.getByText("reuters.com")).toBeInTheDocument();
     // score is formatted to two decimals.
-    expect(screen.getByText(/score 0\.60/)).toBeInTheDocument();
+    expect(screen.getByText(/score 0\.60/, { selector: "span" })).toBeInTheDocument();
     // reason + symbol pills render.
     expect(screen.getByText("earnings")).toBeInTheDocument();
     expect(screen.getByText("AAPL")).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("ToastTray", () => {
   it("uses an assertive live region for critical (sticky) toasts", () => {
     renderTray();
     push(baseToast({ id: "crit-1", score: STICKY_SCORE_THRESHOLD + 0.05 }));
-    expect(screen.getByText(/critical arrival/i)).toBeInTheDocument();
+    expect(screen.getByText(/critical arrival/i, { selector: "span" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "assertive");
   });
 
@@ -178,5 +178,32 @@ describe("ToastTray", () => {
     expect(screen.getByText("First arrival")).toBeInTheDocument();
     expect(screen.getByText("Second arrival")).toBeInTheDocument();
     expect(screen.getAllByRole("status").length).toBe(2);
+  });
+
+  it("includes region role and tray instructions on the outer wrapper", () => {
+    renderTray();
+    push(baseToast({ id: "aria-a" }));
+    const region = screen.getByRole("region", { name: /high-relevance arrivals/i });
+    expect(region).toBeInTheDocument();
+    expect(region).toHaveAttribute("aria-describedby", "toast-tray-instructions");
+    expect(screen.getByText("Active toast notifications. Press tab to navigate between toasts.")).toBeInTheDocument();
+  });
+
+  it("includes status description and focus classes in the toast item buttons", () => {
+    renderTray();
+    push(baseToast({ id: "aria-b", title: "Test Toast Title", score: 0.85 }));
+    const status = screen.getByRole("status");
+    expect(status).toHaveAttribute("aria-describedby", "toast-desc-aria-b");
+    expect(screen.getByText(/watchlist alert for Test Toast Title with score 0\.85/i)).toBeInTheDocument();
+
+    const openBtn = screen.getByRole("button", { name: /Test Toast Title/i });
+    expect(openBtn).toHaveClass("focus:outline-none");
+    expect(openBtn).toHaveClass("focus-visible:ring-1");
+    expect(openBtn).toHaveClass("focus-visible:ring-accent");
+
+    const closeBtn = screen.getByRole("button", { name: /dismiss/i });
+    expect(closeBtn).toHaveClass("focus:outline-none");
+    expect(closeBtn).toHaveClass("focus-visible:ring-1");
+    expect(closeBtn).toHaveClass("focus-visible:ring-accent");
   });
 });

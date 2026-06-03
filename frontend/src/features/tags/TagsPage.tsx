@@ -98,7 +98,7 @@ export function TagsPage() {
           {totalTags > 0 && (
             <Link
               to="/feed"
-              className="chip text-accent hover:bg-accent/10"
+              className="chip text-accent hover:bg-accent/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               data-testid="tags-open-feed"
             >
               Open Feed →
@@ -144,7 +144,7 @@ export function TagsPage() {
           action={
             <Link
               to="/help"
-              className="btn"
+              className="btn focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               data-testid="tags-help-link"
             >
               How to tag records →
@@ -189,7 +189,7 @@ export function TagsPage() {
                 <li key={it.tag}>
                   <Link
                     to={`/feed?tag=${encodeURIComponent(it.tag)}`}
-                    className="card flex items-center justify-between hover:bg-[color:var(--bg-elev2)] transition-colors"
+                    className="card flex items-center justify-between hover:bg-[color:var(--bg-elev2)] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                     data-testid={`tags-row-${it.tag}`}
                   >
                     <span className="font-semibold text-good">{it.tag}</span>
@@ -304,7 +304,7 @@ export function TagCloud({
           <Link
             key={it.tag}
             to={`/feed?tag=${encodeURIComponent(it.tag)}`}
-            className={`tag-cloud-chip ${sizeClass} inline-flex items-baseline gap-1 rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 font-semibold text-accent hover:bg-accent/20 hover:border-accent/60 transition-colors`}
+            className={`tag-cloud-chip ${sizeClass} inline-flex items-baseline gap-1 rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 font-semibold text-accent hover:bg-accent/20 hover:border-accent/60 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent`}
             style={{ fontSize: `${fontSizePx.toFixed(1)}px`, opacity }}
             data-testid={`tag-cloud-chip-${it.tag}`}
             title={`${it.tag} · ${it.count.toLocaleString()} record${it.count === 1 ? "" : "s"}`}

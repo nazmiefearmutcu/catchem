@@ -175,4 +175,39 @@ describe("TagsPage", () => {
     expect(rows[0].textContent).toMatch(/earnings/);
     expect(rows[rows.length - 1].textContent).toMatch(/noise/);
   });
+
+  it("implements custom focus-visible ring styles on all interactive controls for keyboard navigation", async () => {
+    render(createElement(TagsPage), { wrapper });
+    
+    // 1. Open Feed chip (only renders when tags exist)
+    const openFeed = await screen.findByTestId("tags-open-feed");
+    expect(openFeed).toHaveClass("focus:outline-none");
+    expect(openFeed).toHaveClass("focus-visible:ring-1");
+    expect(openFeed).toHaveClass("focus-visible:ring-accent");
+
+    // 2. Tag cloud chip
+    const cloud = screen.getByTestId("tag-cloud");
+    const earningsChip = within(cloud).getByTestId("tag-cloud-chip-earnings");
+    expect(earningsChip).toHaveClass("focus:outline-none");
+    expect(earningsChip).toHaveClass("focus-visible:ring-1");
+    expect(earningsChip).toHaveClass("focus-visible:ring-accent");
+
+    // 3. Detail row link
+    const earningsRow = screen.getByTestId("tags-row-earnings");
+    expect(earningsRow).toHaveClass("focus:outline-none");
+    expect(earningsRow).toHaveClass("focus-visible:ring-1");
+    expect(earningsRow).toHaveClass("focus-visible:ring-accent");
+  });
+
+  it("implements custom focus-visible ring style on help link in empty state", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ items: [] })),
+    );
+    render(createElement(TagsPage), { wrapper });
+    const helpLink = await screen.findByTestId("tags-help-link");
+    expect(helpLink).toHaveClass("focus:outline-none");
+    expect(helpLink).toHaveClass("focus-visible:ring-1");
+    expect(helpLink).toHaveClass("focus-visible:ring-accent");
+  });
 });

@@ -529,10 +529,9 @@ def _parse_ts(value: str | None) -> datetime:
         # Try RFC 822 (RSS) and ISO 8601 (Atom).
         try:
             dt = parsedate_to_datetime(value)
-            if dt is not None:
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=UTC)
-                return dt.astimezone(UTC)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(UTC)
         except (TypeError, ValueError):
             pass
         for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f%z"):

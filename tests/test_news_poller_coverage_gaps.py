@@ -66,6 +66,11 @@ def test_parse_ts_edge_cases():
             dt = _parse_ts("some-value")
             assert dt.tzinfo == UTC
 
+    # Fallthrough when all strptime formats fail (538->546)
+    dt_invalid = _parse_ts("completely-invalid-date-string")
+    assert isinstance(dt_invalid, datetime)
+    assert dt_invalid.tzinfo == UTC
+
 
 # 6. _is_stale_published_ts when max_age_seconds <= 0 (551)
 def test_is_stale_published_ts_disabled():
@@ -323,6 +328,14 @@ async def test_newspoller_run_and_tick(tmp_path):
         
     await stop_task
 
+    # 11d. Stop during tick to trigger break (1024)
+    poller._stop.clear()
+    async def set_stop_during_tick(client):
+        poller._stop.set()
+    with patch.object(poller, "_run_one_tick", side_effect=set_stop_during_tick):
+        poller._grace = 0.001
+        await poller._run()
+
 
 # 12. NewsPoller._poll_once (1094-1095, 1104->1116, 1145-1146, 1149, 1153)
 @pytest.mark.asyncio
@@ -330,12 +343,16 @@ async def test_newspoller_poll_once_edge_cases(tmp_path):
     spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
     poller, sup = _make_poller(tmp_path, feeds=[spec])
     
-    # 12a. Cooldown validation with ValueError (1094-1095)
+    # 12a. Cooldown validation with ValueError (1094-1095) and (1104->1116)
     poller.feed_health[spec.name] = {
         "cooldown_until": "invalid-iso-date-string",
         "backed_off": True,
     }
-    
+    mock_result_empty = FeedFetchResult(spec=spec, items=(), status_code=200, elapsed_ms=5.0)
+    with patch("catchem.news_poller.fetch_feed_result", return_value=mock_result_empty):
+        n = await poller._poll_once(None)
+        assert n == 0
+
     # 12b. Cooldown expired (1104->1116)
     poller.feed_health[spec.name] = {
         "cooldown_until": (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),

@@ -1,31 +1,28 @@
 ---
-description: Start the NEVER-STOPPING Ralph engine on THIS repo. /ralphloop launches the headless daemon (ralph start --daemon) that improves the repo FOREVER — fresh-context iterations, a metric ratchet that auto-reverts regressions, and automatic recovery from any agy stall/timeout. It does NOT stop until you run `ralph stop`.
+description: Start the NEVER-STOPPING Ralph engine on THIS repo. /ralphloop launches the background daemon (ralph start --daemon) that improves the repo FOREVER, auto-recovers from any agy stall/timeout, and opens a LIVE monitor window (status + per-iteration journal). Stop it any time with /ralphstop. It does NOT stop until you do.
 ---
-# /ralphloop — start the never-stop engine
+# /ralphloop — start the never-stop engine (opens a live monitor; stop with /ralphstop)
 
 When the user types /ralphloop they want THIS repo to start improving itself FOREVER and to NOT stop
-until they stop it. A single agy chat session cannot do that — it stalls or ends — so DO NOT try to
-loop inside this conversation. Instead LAUNCH THE EXTERNAL DAEMON: it is immortal, runs in fresh
-contexts, auto-reverts regressions via a metric ratchet, and AUTO-RECOVERS from any agy stall/timeout.
+until they stop it. A single agy chat session CANNOT do that (it stalls/ends), so DO NOT loop here —
+LAUNCH THE EXTERNAL DAEMON: it runs in the BACKGROUND (that is what makes it never-stop + stall-proof)
+and a LIVE monitor window shows the user what it does each iteration.
 
-Do EXACTLY this, in order. Run each in the FOREGROUND; each returns immediately (never background-poll):
+Do EXACTLY this, in order. Each command runs in the FOREGROUND and returns immediately (never background-poll):
+1. ralph init "$PWD" 2>/dev/null || true        # scaffold if needed (no-op otherwise)
+2. ralph start "$PWD" --daemon                  # start the never-stopping background daemon (idempotent)
+3. ralph status "$PWD"                           # confirm ALIVE + show pid/iteration
+4. ralph watch "$PWD"                            # OPEN a live monitor WINDOW (status + per-iteration journal); returns immediately
 
-1. Scaffold if needed (no-op if already set up):
-       ralph init "$PWD" 2>/dev/null || true
-2. Start the never-stopping daemon (idempotent — if one is already running it just says so):
-       ralph start "$PWD" --daemon
-3. Confirm it is ALIVE and show pid + current iteration:
-       ralph status "$PWD"
-4. Show recent progress so the user sees it working:
-       tail -n 20 "$PWD/.ralph/PROGRESS.md" 2>/dev/null || true
+Then tell the user EXACTLY this:
+  "✅ Never-stop Ralph engine is running in the background (pid + iteration above), and a LIVE monitor
+   window just opened — it shows the status AND what it did each iteration (Task/Changes/Verification/
+   Decision from .ralph/PROGRESS.md), refreshing live. It keeps improving this repo FOREVER and
+   auto-recovers from any agy stall/timeout.
+     • If the window didn't open, run in a terminal:  ralph watch \"$PWD\"
+     • Raw engine log stream:                          ralph tail \"$PWD\"
+     • STOP it any time:  type /ralphstop   (or run:  ralph stop \"$PWD\")"
 
-Then tell the user briefly:
-  "✅ Never-stop Ralph engine is running (pid + iteration above). It keeps improving this repo FOREVER
-   and auto-recovers from any agy stall/timeout — it will NOT stop until you stop it.
-     • Watch:  ralph status \"$PWD\"   ·   tail -f .ralph/logs/supervisor.log   ·   .ralph/PROGRESS.md
-     • Stop:   ralph stop \"$PWD\"      (or: touch .ralph/STOP)"
-
-You are DONE after that. The daemon owns the loop and runs even after this chat closes — do NOT iterate
-here, do NOT poll/wait, do NOT keep summarizing. If `ralph status` shows it is NOT alive (e.g. the
-sandbox blocked the background launch), tell the user to run `ralph start "$PWD" --daemon` once in a
-plain terminal — then it runs forever. (`ralph` = the antigravity-ralph repo's bin/ralph if not on PATH.)
+You are DONE after that — do NOT iterate/poll/summarize here; the daemon owns the loop and survives
+this chat closing. If `ralph status` shows NOT alive (sandbox blocked the launch), tell the user to run
+`ralph start "$PWD" --daemon` once in a plain terminal. (`ralph` = the antigravity-ralph repo's bin/ralph.)

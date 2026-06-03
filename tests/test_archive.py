@@ -627,3 +627,289 @@ def test_archiver_mtime_vector_skip(archiver_with_records, tmp_path) -> None:
     assert npy_file.exists()
 
 
+def test_detect_drive_dir_more_branches(monkeypatch) -> None:
+    fake_home = Path("/fake/home")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    
+    is_dir_registry = set()
+    glob_registry = {}
+    
+    def fake_is_dir(self):
+        if str(self) in is_dir_registry:
+            return True
+        return False
+        
+    def fake_glob(self, pattern):
+        return glob_registry.get((str(self), pattern), [])
+        
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
+    monkeypatch.setattr(Path, "glob", fake_glob)
+    
+    # Set up cloud storage dir
+    is_dir_registry.add("/fake/home/Library/CloudStorage")
+    
+    # GoogleDrive-* matches, but d is not a dir (and mydrive is not a dir)
+    glob_registry[("/fake/home/Library/CloudStorage", "GoogleDrive-*")] = [
+        Path("/fake/home/Library/CloudStorage/GoogleDrive-1"),
+        Path("/fake/home/Library/CloudStorage/GoogleDrive-2")
+    ]
+    # OneDrive-* matches, but d is not a dir
+    glob_registry[("/fake/home/Library/CloudStorage", "OneDrive-*")] = [
+        Path("/fake/home/Library/CloudStorage/OneDrive-1")
+    ]
+    # Dropbox* matches, but d is not a dir
+    glob_registry[("/fake/home/Library/CloudStorage", "Dropbox*")] = [
+        Path("/fake/home/Library/CloudStorage/Dropbox-1")
+    ]
+    
+    # Run detect_drive_dir. It should glob everything, find no valid directories,
+    # and finally return the fallback: /fake/home/Documents/Catchem.
+    assert detect_drive_dir() == Path("/fake/home/Documents/Catchem")
+
+
+def test_row_to_csv_dict_evidence_not_list() -> None:
+    row = {
+        "evidence_json": "123",
+    }
+    out = row_to_csv_dict(row)
+    assert out["reasoning"] == ""
+    
+    row2 = {
+        "evidence_json": '{"a": 1}',
+    }
+    out2 = row_to_csv_dict(row2)
+    assert out2["reasoning"] == ""
+
+
+def test_archiver_property_getters(archiver_with_records) -> None:
+    archiver, _, _ = archiver_with_records
+    assert isinstance(archiver.drive_dir, Path)
+    assert archiver.local_cap == 100
+    assert archiver.interval_seconds == 15.0
+
+
+def test_archiver_archive_now(archiver_with_records) -> None:
+    archiver, _, _ = archiver_with_records
+    async def run_archive_now():
+        res = await archiver.archive_now()
+        assert res.error is None
+    asyncio.run(run_archive_now())
+
+
+def test_archiver_run_loop_comprehensive(archiver_with_records, monkeypatch) -> None:
+    archiver, _, _ = archiver_with_records
+    original_wait_for = asyncio.wait_for
+    
+    # 1. Test normal grace period return
+    async def test_grace_period_exit():
+        archiver.start()
+        archiver._stop.set()
+        await archiver._task
+    asyncio.run(test_grace_period_exit())
+    
+    # Reset
+    archiver._task = None
+    archiver._stop.clear()
+    
+    # 2. Test loop check evaluates to False
+    async def mock_wait_for_false_loop(aw, timeout, **kwargs):
+        if timeout == 5.0:
+            archiver._stop.set()
+            raise TimeoutError()
+        return await original_wait_for(aw, timeout, **kwargs)
+        
+    monkeypatch.setattr(asyncio, "wait_for", mock_wait_for_false_loop)
+    
+    async def test_loop_false_exit():
+        archiver.start()
+        await archiver._task
+    asyncio.run(test_loop_false_exit())
+    
+    # Reset
+    archiver._task = None
+    archiver._stop.clear()
+    
+    # 3. Test successful execution of _archive_once from the background run loop
+    interval_calls = 0
+    async def mock_wait_for_success(aw, timeout, **kwargs):
+        nonlocal interval_calls
+        if timeout == 5.0:
+            raise TimeoutError()
+        elif timeout == archiver._interval:
+            interval_calls += 1
+            if interval_calls == 1:
+                raise TimeoutError()
+            else:
+                return None
+        return await original_wait_for(aw, timeout, **kwargs)
+        
+    monkeypatch.setattr(asyncio, "wait_for", mock_wait_for_success)
+    
+    archive_once_called = 0
+    original_archive_once = archiver._archive_once
+    def mock_archive_once():
+        nonlocal archive_once_called
+        archive_once_called += 1
+        return original_archive_once()
+    monkeypatch.setattr(archiver, "_archive_once", mock_archive_once)
+    
+    async def test_loop_success_execution():
+        archiver.start()
+        await archiver._task
+        assert archive_once_called == 2
+    asyncio.run(test_loop_success_execution())
+    
+    # Reset
+    archiver._task = None
+    archiver._stop.clear()
+    
+    # 4. Test CancelledError during loop execution
+    def mock_archive_once_cancel():
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(archiver, "_archive_once", mock_archive_once_cancel)
+    
+    async def mock_wait_for_cancel(aw, timeout, **kwargs):
+        if timeout == 5.0:
+            raise TimeoutError()
+        return await original_wait_for(aw, timeout, **kwargs)
+        
+    monkeypatch.setattr(asyncio, "wait_for", mock_wait_for_cancel)
+    
+    async def test_loop_cancel_execution():
+        archiver.start()
+        with pytest.raises(asyncio.CancelledError):
+            await archiver._task
+    asyncio.run(test_loop_cancel_execution())
+
+
+def test_archiver_mkdir_already_fallback_fails(archiver_with_records, monkeypatch) -> None:
+    archiver, _, _ = archiver_with_records
+    
+    fallback_path = Path("/invalid/fallback/path")
+    import catchem.archive as archive_mod
+    monkeypatch.setattr(archive_mod, "fallback_drive_dir", lambda: fallback_path)
+    archiver._drive_dir = fallback_path
+    
+    def fake_mkdir(*args, **kwargs):
+        raise OSError("Permission Denied")
+    monkeypatch.setattr(Path, "mkdir", fake_mkdir)
+    
+    res = archiver._archive_once()
+    assert res.archived == 0
+    assert "mkdir failed" in res.error
+
+
+def test_archive_once_skips_already_written_capture_ids(archiver_with_records) -> None:
+    archiver, sup, drive_dir = archiver_with_records
+    
+    drive_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = csv_path_for_today(drive_dir)
+    
+    with sup.storage.cursor() as cur:
+        cur.execute("SELECT capture_id FROM records LIMIT 1")
+        cid = cur.fetchone()[0]
+        
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(CSV_COLUMNS))
+        writer.writeheader()
+        writer.writerow({col: "dummy" if col != "capture_id" else cid for col in CSV_COLUMNS})
+        
+    res = archiver._archive_once()
+    assert res.error is None
+    
+    with csv_path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 150
+
+
+def test_archive_once_write_oserror_handling(archiver_with_records) -> None:
+    archiver, _, drive_dir = archiver_with_records
+    
+    drive_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = csv_path_for_today(drive_dir)
+    csv_path.mkdir()
+    
+    res = archiver._archive_once()
+    assert res.archived == 0
+    assert "write failed" in res.error
+
+
+def test_archive_once_no_vector_index(archiver_with_records) -> None:
+    archiver, sup, _ = archiver_with_records
+    sup.vector_index = None
+    res = archiver._archive_once()
+    assert res.error is None
+    assert res.archived == 150
+
+
+def test_archive_once_vector_skip_still_present(archiver_with_records, monkeypatch) -> None:
+    archiver, sup, _ = archiver_with_records
+    original_connection = sup.storage._connection
+    
+    class WrappedConnection:
+        def __init__(self, real_conn):
+            self._real = real_conn
+    
+        def execute(self, sql, *args, **kwargs):
+            if sql.strip().startswith("SELECT 1 FROM records WHERE capture_id = ?"):
+                class MockCursor:
+                    def fetchone(self):
+                        return (1,)
+                return MockCursor()
+            return self._real.execute(sql, *args, **kwargs)
+    
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+    
+        def __enter__(self):
+            self._real.__enter__()
+            return self
+    
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return self._real.__exit__(exc_type, exc_val, exc_tb)
+            
+    from contextlib import contextmanager
+    @contextmanager
+    def mock_connection_ctx():
+        with original_connection() as conn:
+            yield WrappedConnection(conn)
+            
+    monkeypatch.setattr(sup.storage, "_connection", mock_connection_ctx)
+    
+    class FakeVectorIndex:
+        def __init__(self):
+            self.root = None
+            self.deleted_ids = []
+        def delete(self, cid):
+            self.deleted_ids.append(cid)
+            
+    fake_vec = FakeVectorIndex()
+    sup.vector_index = fake_vec
+    
+    res = archiver._archive_once()
+    assert res.error is None
+    assert res.archived == 150
+    assert len(fake_vec.deleted_ids) == 0
+
+
+def test_archive_once_vector_no_root(archiver_with_records) -> None:
+    archiver, sup, _ = archiver_with_records
+    
+    class FakeVectorIndex:
+        def __init__(self):
+            self.root = None
+            self.deleted_ids = []
+        def delete(self, cid):
+            self.deleted_ids.append(cid)
+            
+    fake_vec = FakeVectorIndex()
+    sup.vector_index = fake_vec
+    
+    res = archiver._archive_once()
+    assert res.error is None
+    assert res.archived == 150
+    assert len(fake_vec.deleted_ids) == 150
+
+
+
+

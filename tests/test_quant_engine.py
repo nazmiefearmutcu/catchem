@@ -219,8 +219,10 @@ def test_diagnostics_ring_buffer_bounded_at_50() -> None:
     assert _SIGNAL_FAILURES.maxlen == 50
 
     for i in range(75):  # overflow by 25
+
         def crash(idx: int = i) -> Any:
             raise RuntimeError(f"burst-{idx}")
+
         _safe_call(crash, label=f"signal_{i % 3}")
 
     snap = _diagnostics_snapshot()
@@ -683,3 +685,147 @@ def test_cache_is_thread_safe_under_concurrent_signal_fanout(
     # Engine still usable + cache internally consistent after the storm.
     snap = loaded_engine.dashboard_snapshot(limit=500)
     assert "n_clusters" in snap
+
+
+def test_dataclass_to_dict_tuple_and_fallback() -> None:
+    # Tuple serialization
+    val_tuple = (1, _Nested(2), "three")
+    assert _dataclass_to_dict(val_tuple) == [1, {"x": 2}, "three"]
+
+    # Custom non-dataclass fallback class
+    class CustomNonData:
+        def __init__(self):
+            self.foo = "bar"
+
+    cnd = CustomNonData()
+    assert _dataclass_to_dict(cnd) is cnd
+
+
+def test_quant_engine_cached_concurrency_and_failure_branches() -> None:
+    import threading
+
+    from catchem.quant.engine import QuantEngine
+
+    storage = _StubStorage([])
+    engine = QuantEngine(storage=storage)
+
+    # 1. Test success = False in finally (exception raised)
+    def failing_build() -> Any:
+        raise ValueError("simulated build failure")
+
+    with pytest.raises(ValueError, match="simulated build failure"):
+        engine._cached("failed_key", failing_build)
+
+    # Verify that key is not in cache and not in pending
+    assert "failed_key" not in engine._cache
+    assert "failed_key" not in engine._pending_events
+
+    # 2. Test event_to_wait is not None and value gets retrieved successfully
+    barrier = threading.Barrier(2)
+    step = threading.Event()
+    results = {}
+
+    def long_build() -> str:
+        barrier.wait()  # synchronize start
+        step.wait()  # wait for main thread's signal
+        return "slow_value"
+
+    def thread_1_run() -> None:
+        try:
+            results["t1"] = engine._cached("slow_key", long_build)
+        except Exception as e:
+            results["t1_err"] = e
+
+    t1 = threading.Thread(target=thread_1_run)
+    t1.start()
+
+    # Wait for thread 1 to reach build and lock
+    barrier.wait()
+
+    # Now key must be in pending events
+    assert "slow_key" in engine._pending_events
+
+    # Thread 2 queries the cache for the same key. It should wait on the event.
+    def thread_2_run() -> None:
+        try:
+            results["t2"] = engine._cached("slow_key", lambda: "fallback_value")
+        except Exception as e:
+            results["t2_err"] = e
+
+    t2 = threading.Thread(target=thread_2_run)
+    t2.start()
+
+    # Let Thread 1 complete
+    step.set()
+    t1.join()
+    t2.join()
+
+    assert results.get("t1") == "slow_value"
+    assert results.get("t2") == "slow_value"  # Thread 2 got cached value
+    assert "slow_key" not in engine._pending_events
+
+    # 3. Test event_to_wait is not None but value is missing (builder failed)
+    step_fail = threading.Event()
+    barrier_fail = threading.Barrier(2)
+
+    def long_failing_build() -> None:
+        barrier_fail.wait()
+        step_fail.wait()
+        raise RuntimeError("builder failed")
+
+    def thread_3_run() -> None:
+        try:
+            engine._cached("fail_wait_key", long_failing_build)
+        except Exception:
+            pass
+
+    t3 = threading.Thread(target=thread_3_run)
+    t3.start()
+
+    barrier_fail.wait()
+    assert "fail_wait_key" in engine._pending_events
+
+    # Thread 4 queries and gets blocked
+    results_t4 = {}
+
+    def thread_4_run() -> None:
+        # Thread 4 should run its own fallback build when t3 fails
+        results_t4["val"] = engine._cached("fail_wait_key", lambda: "fallback_after_fail")
+
+    t4 = threading.Thread(target=thread_4_run)
+    t4.start()
+
+    step_fail.set()
+    t3.join()
+    t4.join()
+
+    assert results_t4.get("val") == "fallback_after_fail"
+
+
+def test_quant_engine_double_check_under_lock() -> None:
+    import time
+
+    from catchem.quant.engine import QuantEngine
+
+    storage = _StubStorage([])
+    engine = QuantEngine(storage=storage)
+
+    # We want lock-free get to return None, but double-check under lock to find a valid hit.
+    class MockCache(dict):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.call_count = 0
+
+        def get(self, key: str, default: Any = None) -> Any:
+            self.call_count += 1
+            if self.call_count == 1:
+                # First call (lock-free) returns None to force it to proceed to the lock
+                return None
+            # Subsequent calls (under lock) return a valid hit
+            return (time.time(), "double_checked_val")
+
+    engine._cache = MockCache()
+
+    result = engine._cached("test_key", lambda: "original_val")
+    assert result == "double_checked_val"
+    assert engine._cache.call_count >= 2

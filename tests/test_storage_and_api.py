@@ -45,8 +45,7 @@ def _record(capture_id: str = "c1") -> FinancialImpactRecord:
 
 
 def test_storage_round_trip(tmp_path: Path) -> None:
-    s = Storage(db_path=tmp_path / "catchem.sqlite3",
-                parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
+    s = Storage(db_path=tmp_path / "catchem.sqlite3", parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
     rec = _record("c-rt")
     s.insert_record(rec)
     fetched = s.get_record("c-rt")
@@ -136,9 +135,7 @@ def test_api_process_one_rejects_malformed_input_with_422(
         assert {"capture_id", "doc_id", "text"} <= missing, missing
 
 
-def test_storage_prune_dlq_keeps_most_recent_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_storage_prune_dlq_keeps_most_recent_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pre-fix: `record_failure` only inserted — no prune. On a long-running
     deployment with many handler failures, the `dlq` table grew unbounded
     (one row per failure, 4 KB+ payload excerpt each). This test pins the
@@ -200,12 +197,10 @@ def test_crypto_only_text_does_not_get_equities_tag(
         assert r.status_code == 200, r.text
         rec = r.json()
         assert "equities" not in rec["asset_classes"], (
-            f"Crypto-only text must not be tagged equities. "
-            f"asset_classes={rec['asset_classes']}"
+            f"Crypto-only text must not be tagged equities. asset_classes={rec['asset_classes']}"
         )
         assert "crypto" in rec["asset_classes"], (
-            f"Crypto-only text must surface crypto. "
-            f"asset_classes={rec['asset_classes']}"
+            f"Crypto-only text must surface crypto. asset_classes={rec['asset_classes']}"
         )
 
 
@@ -263,6 +258,7 @@ def test_api_process_one_accepts_extra_fields(
 
 
 def test_storage_extra_coverage(tmp_path: Path) -> None:
+    import queue
     import sqlite3
     from unittest.mock import MagicMock, patch
 
@@ -295,18 +291,20 @@ def test_storage_extra_coverage(tmp_path: Path) -> None:
     assert len(s._pending_rows) == 0
 
     # 5. recent_reviews
-    s.upsert_review({
-        "capture_id": "c-parq",
-        "reviewer_id": "rev-1",
-        "reviewer_version": "v1.0",
-        "payload_json": {"some": "json"},
-        "input_tokens": 10,
-        "output_tokens": 20,
-        "usd_cost": 0.01,
-        "latency_ms": 100,
-        "created_at": "2026-06-03T00:00:00",
-        "error_code": None,
-    })
+    s.upsert_review(
+        {
+            "capture_id": "c-parq",
+            "reviewer_id": "rev-1",
+            "reviewer_version": "v1.0",
+            "payload_json": {"some": "json"},
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "usd_cost": 0.01,
+            "latency_ms": 100,
+            "created_at": "2026-06-03T00:00:00",
+            "error_code": None,
+        }
+    )
     revs = s.recent_reviews("rev-1")
 
     assert len(revs) == 1
@@ -315,11 +313,14 @@ def test_storage_extra_coverage(tmp_path: Path) -> None:
     # 6. review_token_totals with None row (unreachable branch in sqlite covered via mock)
     mock_conn = MagicMock()
     mock_conn.execute.return_value.fetchone.return_value = None
+
     class DummyCM:
         def __enter__(self):
             return mock_conn
+
         def __exit__(self, exc_type, exc_val, exc_tb):
             pass
+
     with patch.object(s, "_connection", return_value=DummyCM()):
         totals = s.review_token_totals("dummy-rev")
         assert totals == {"input": 0, "output": 0, "calls": 0, "errors": 0}
@@ -342,11 +343,120 @@ def test_storage_extra_coverage(tmp_path: Path) -> None:
         conn.execute(
             """INSERT INTO reviews (capture_id, reviewer_id, reviewer_version, payload_json, input_tokens, output_tokens, usd_cost, latency_ms, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("c-invalid-json", "rev-2", "v1.0", "invalid json string", 0, 0, 0.0, 0, "2026-06-03T00:00:00")
+            ("c-invalid-json", "rev-2", "v1.0", "invalid json string", 0, 0, 0.0, 0, "2026-06-03T00:00:00"),
         )
     revs_invalid = s.get_reviews_for_capture("c-invalid-json")
     assert len(revs_invalid) == 1
     assert revs_invalid[0]["payload"] == {}
 
-    s.close()
+    # 10. Connection pool and monkeypatched _connect logic
+    # Check regular pool reuse
+    conn1 = s._get_conn()
+    s._return_conn(conn1)
+    conn2 = s._get_conn()
+    assert conn2 is conn1
+    s._return_conn(conn2)
 
+    # Monkeypatch s._connect to be a plain function (without __func__) to trigger AttributeError and test is_monkeypatched = True
+    def dummy_connect():
+        return sqlite3.connect(":memory:")
+
+    original_connect = s._connect
+    s._connect = dummy_connect  # type: ignore[assignment]
+
+    conn3 = s._get_conn()
+    assert conn3 is not conn1
+    s._return_conn(conn3)
+    conn3.close()
+
+    s._connect = original_connect
+
+    # 11. _fast_json_loads cases
+    from catchem.storage import _fast_json_loads
+
+    assert _fast_json_loads("[]") == []
+    assert _fast_json_loads("{}") == {}
+    assert _fast_json_loads('{"a": 1}') == {"a": 1}
+
+    # 12. _row_to_payload diagnostic_json is "[]" or "{}" or None
+    from catchem.storage import _row_to_payload
+
+    r_empty_list = {
+        "capture_id": "c-rt",
+        "doc_id": "d-c-rt",
+        "title": "T",
+        "text_excerpt": "x",
+        "domain": "d",
+        "language": "en",
+        "url": "url",
+        "is_finance_relevant": 1,
+        "finance_relevance_score": 0.5,
+        "asset_classes_json": "[]",
+        "impact_reason_codes_json": "[]",
+        "candidate_symbols_json": "[]",
+        "candidate_entities_json": "[]",
+        "impact_horizons_json": "[]",
+        "sentiment_label": "positive",
+        "sentiment_score": 0.5,
+        "evidence_json": "[]",
+        "reason_text": "reason",
+        "component_scores_json": "{}",
+        "diagnostic_enabled": 1,
+        "diagnostic_json": "[]",
+        "processing_mode": "live_tail",
+        "model_versions_json": "{}",
+        "published_ts": None,
+        "created_at": "2026-06-03T00:00:00",
+    }
+    payload_empty_list = _row_to_payload(r_empty_list)
+    assert payload_empty_list["diagnostic_multimodal_result"] == []
+
+    r_empty_dict = dict(r_empty_list)
+    r_empty_dict["diagnostic_json"] = "{}"
+    payload_empty_dict = _row_to_payload(r_empty_dict)
+    assert payload_empty_dict["diagnostic_multimodal_result"] == {}
+
+    # 13. reviews with "[]" and "{}" to cover payload_text == "[]" and "{}" in _row_to_review and reviews_with_pair
+    with s._connection() as conn:
+        conn.execute(
+            """INSERT INTO reviews (capture_id, reviewer_id, reviewer_version, payload_json, input_tokens, output_tokens, usd_cost, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("c-empty-list", "rev-a", "v1.0", "[]", 0, 0, 0.0, 0, "2026-06-03T00:00:00"),
+        )
+        conn.execute(
+            """INSERT INTO reviews (capture_id, reviewer_id, reviewer_version, payload_json, input_tokens, output_tokens, usd_cost, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("c-empty-list", "rev-b", "v1.0", "{}", 0, 0, 0.0, 0, "2026-06-03T00:00:00"),
+        )
+        conn.execute(
+            """INSERT INTO reviews (capture_id, reviewer_id, reviewer_version, payload_json, input_tokens, output_tokens, usd_cost, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("c-empty-list-2", "rev-a", "v1.0", "{}", 0, 0, 0.0, 0, "2026-06-03T00:00:00"),
+        )
+        conn.execute(
+            """INSERT INTO reviews (capture_id, reviewer_id, reviewer_version, payload_json, input_tokens, output_tokens, usd_cost, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("c-empty-list-2", "rev-b", "v1.0", "[]", 0, 0, 0.0, 0, "2026-06-03T00:00:00"),
+        )
+    revs_list = s.get_reviews_for_capture("c-empty-list")
+    assert len(revs_list) == 2
+    assert revs_list[0]["payload"] == []
+    assert revs_list[1]["payload"] == {}
+
+    pairs = s.reviews_with_pair("rev-a", "rev-b")
+    assert len(pairs) == 2
+    assert pairs[0][0]["payload"] == []
+    assert pairs[0][1]["payload"] == {}
+    assert pairs[1][0]["payload"] == {}
+    assert pairs[1][1]["payload"] == []
+
+    # 14. queue.Empty inside s.close()
+    while not s._conn_pool.empty():
+        conn = s._conn_pool.get_nowait()
+        conn.close()
+
+    dummy_conn = sqlite3.connect(":memory:")
+    s._conn_pool.put(dummy_conn)
+    s._conn_pool.get_nowait = MagicMock(side_effect=queue.Empty)
+    s.close()
+    dummy_conn.close()

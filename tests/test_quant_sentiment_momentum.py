@@ -157,9 +157,7 @@ def test_all_positive_aapl_is_stable_no_flip() -> None:
         _pos("2024-01-01T08:30:00Z"),
         _pos("2024-01-01T09:30:00Z"),
     ]
-    report = compute_sentiment_momentum(
-        records, bucket_minutes=240, min_mentions=4
-    )
+    report = compute_sentiment_momentum(records, bucket_minutes=240, min_mentions=4)
     aapl = _find(report, "AAPL")
     assert aapl is not None
     assert len(aapl.buckets) == 3
@@ -185,9 +183,7 @@ def test_aapl_flips_from_positive_to_negative() -> None:
         _neg("2024-01-01T16:30:00Z"),
         _neg("2024-01-01T20:30:00Z"),
     ]
-    report = compute_sentiment_momentum(
-        records, bucket_minutes=240, min_mentions=4
-    )
+    report = compute_sentiment_momentum(records, bucket_minutes=240, min_mentions=4)
     aapl = _find(report, "AAPL")
     assert aapl is not None
     assert len(aapl.buckets) == 6
@@ -327,13 +323,9 @@ def test_max_tickers_caps_output() -> None:
     # Three calm tickers: all neutral ⇒ momentum 0.
     for sym in ("GOOG", "AMZN", "NVDA"):
         for h in range(4):
-            records.append(
-                _neu(f"2024-01-01T0{h}:00:00Z", sym=sym, score=0.5)
-            )
+            records.append(_neu(f"2024-01-01T0{h}:00:00Z", sym=sym, score=0.5))
 
-    report = compute_sentiment_momentum(
-        records, bucket_minutes=60, min_mentions=4, max_tickers=2
-    )
+    report = compute_sentiment_momentum(records, bucket_minutes=60, min_mentions=4, max_tickers=2)
     assert len(report.tickers) == 2
     assert {t.symbol for t in report.tickers} == {"AAPL", "MSFT"}
     # Sort key is abs(momentum) DESC — both are 2.0, tie-broken on symbol asc.
@@ -680,12 +672,18 @@ def test_sentiment_momentum_edge_cases(monkeypatch) -> None:
     # 1. _floor_bucket with ts < anchor
     from datetime import datetime
 
-    from catchem.quant.sentiment_momentum import _floor_bucket
+    from catchem.quant.sentiment_momentum import _floor_bucket, _safe_float
+
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     ts = datetime(2024, 1, 1, 11, 0, tzinfo=UTC)
     # This should trigger delta_seconds < 0 -> delta_seconds = 0
     res = _floor_bucket(ts, anchor, bucket_minutes=60)
     assert res == anchor
+
+    # Trigger delta_seconds >= 0 branch in _floor_bucket
+    ts_after = datetime(2024, 1, 1, 13, 0, tzinfo=UTC)
+    res_after = _floor_bucket(ts_after, anchor, bucket_minutes=60)
+    assert res_after == datetime(2024, 1, 1, 13, 0, tzinfo=UTC)
 
     # 2. _detect_flip with head_size < 1
     import math
@@ -697,5 +695,25 @@ def test_sentiment_momentum_edge_cases(monkeypatch) -> None:
 
     # We call _detect_flip with nets of length 5
     from catchem.quant.sentiment_momentum import _detect_flip
+
     assert _detect_flip([1.0, 2.0, 3.0, 4.0, 5.0]) is False
 
+    # 3. _safe_float with string representations of NaN/inf to hit line 233
+    assert _safe_float("nan") is None
+    assert _safe_float("inf") is None
+    assert _safe_float("-inf") is None
+
+    # 4. Trigger delta_seconds < 0 in compute_sentiment_momentum
+    class CustomFloat(float):
+        def __sub__(self, other):
+            return -10.0
+
+    import catchem.quant.sentiment_momentum as sm
+
+    monkeypatch.setattr(sm, "_get_timestamp", lambda dt: CustomFloat(1000.0))
+
+    records = [
+        _record("2024-01-01T00:00:00Z", candidate_symbols=["AAPL"]),
+        _record("2024-01-01T00:01:00Z", candidate_symbols=["AAPL"]),
+    ]
+    sm.compute_sentiment_momentum(records, min_mentions=2)

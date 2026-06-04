@@ -116,6 +116,8 @@ class Supervisor:
         with suppress(Exception):
             self._webhook_pool.shutdown(wait=False, cancel_futures=True)
         with suppress(Exception):
+            self.service.close()
+        with suppress(Exception):
             self.storage.close()
 
     # ── single-capture path (used by API /process-one) ───────────────────

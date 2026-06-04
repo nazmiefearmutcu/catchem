@@ -60,6 +60,11 @@ class ModelConfig(BaseModel):
     embedding: str = "sentence-transformers/all-MiniLM-L6-v2"
     reranker: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
     use_ml_stubs: bool = True
+    isolation_enabled: bool | None = None
+    isolation_processes: int = 2
+    isolation_memory_limit_mb: int | None = None
+    isolation_nice: int = 10
+    cache_maxsize: int = 256
 
 
 class GuardConfig(BaseModel):

@@ -3,9 +3,14 @@ produces one FinancialImpactRecord. The supervisor wraps this for batch/live."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import threading
+from collections.abc import Iterable, Mapping
+from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 from .chart_context import ChartContextReader
 from .embeddings import Embedder, VectorIndex, make_embedder
@@ -22,11 +27,11 @@ from .schemas import (
     SentimentLabel,
 )
 from .scoring import ScoringInputs, estimate_entity_density, score
-from .sentiment import SentimentClassifier, make_sentiment
+from .sentiment import SentimentClassifier, SentimentResult, make_sentiment
 from .settings import CatchemMode, Settings
 from .symbol_mapper import SymbolMapper
 from .taxonomy import Taxonomy, default_taxonomy_path, load_taxonomy
-from .zero_shot_classifier import ZeroShot, make_zero_shot
+from .zero_shot_classifier import ZeroShot, ZeroShotResult, make_zero_shot
 
 logger = get_logger("catchem.service")
 
@@ -37,6 +42,221 @@ _MODE_MAP = {
     CatchemMode.LIVE_TAIL: ProcessingMode.LIVE_TAIL,
     CatchemMode.RESEARCH_DIAGNOSTIC: ProcessingMode.RESEARCH_DIAGNOSTIC,
 }
+
+
+# ── Process Isolation Worker State & Helpers ─────────────────────────────────
+
+_worker_zero_shot = None
+_worker_sentiment = None
+_worker_embedder = None
+_worker_reranker = None
+
+
+def _init_worker(
+    zero_shot_model_name: str,
+    sentiment_model_name: str,
+    embedding_model_name: str,
+    reranker_model_name: str,
+    use_ml_stubs: bool,
+    taxonomy: Taxonomy,
+    nice_value: int,
+    memory_limit_mb: int | None,
+) -> None:
+    import os
+    if hasattr(os, "nice"):
+        try:
+            os.nice(nice_value)
+        except OSError:
+            pass
+
+    if memory_limit_mb is not None:
+        try:
+            import resource
+            limit_bytes = memory_limit_mb * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+        except (OSError, ValueError, ImportError):
+            pass
+
+    global _worker_zero_shot, _worker_sentiment, _worker_embedder, _worker_reranker
+    from .embeddings import make_embedder
+    from .reranker import make_reranker
+    from .sentiment import make_sentiment
+    from .zero_shot_classifier import make_zero_shot
+
+    _worker_zero_shot = make_zero_shot(taxonomy, zero_shot_model_name, use_ml_stubs)
+    _worker_sentiment = make_sentiment(sentiment_model_name, use_ml_stubs)
+    _worker_embedder = make_embedder(embedding_model_name, use_ml_stubs)
+    _worker_reranker = make_reranker(reranker_model_name, use_ml_stubs)
+
+
+def _worker_classify_zero_shot(cap: AwarenessCaptureView) -> ZeroShotResult:
+    global _worker_zero_shot
+    if _worker_zero_shot is None:
+        raise RuntimeError("Worker zero_shot model not initialized")
+    return _worker_zero_shot.classify(cap)
+
+
+def _worker_classify_sentiment(cap: AwarenessCaptureView) -> SentimentResult:
+    global _worker_sentiment
+    if _worker_sentiment is None:
+        raise RuntimeError("Worker sentiment model not initialized")
+    return _worker_sentiment.classify(cap)
+
+
+def _worker_encode_embedding(text: str) -> np.ndarray:
+    global _worker_embedder
+    if _worker_embedder is None:
+        raise RuntimeError("Worker embedder model not initialized")
+    return _worker_embedder.encode(text)
+
+
+def _worker_encode_many_embedding(texts: list[str]) -> np.ndarray:
+    global _worker_embedder
+    if _worker_embedder is None:
+        raise RuntimeError("Worker embedder model not initialized")
+    return _worker_embedder.encode_many(texts)
+
+
+def _worker_rank_reranker(query: str, candidates: list[str]) -> list[tuple[str, float]]:
+    global _worker_reranker
+    if _worker_reranker is None:
+        raise RuntimeError("Worker reranker model not initialized")
+    return _worker_reranker.rank(query, candidates)
+
+
+# ── Thread-Safe FIFO Cache ──────────────────────────────────────────────────
+
+class FIFOCache:
+    def __init__(self, maxsize: int = 256) -> None:
+        self._maxsize = maxsize
+        self._cache: dict[Any, Any] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: Any) -> Any:
+        with self._lock:
+            return self._cache.get(key)
+
+    def set(self, key: Any, value: Any) -> None:
+        if self._maxsize <= 0:
+            return
+        with self._lock:
+            if key in self._cache:
+                self._cache[key] = value
+                return
+            if len(self._cache) >= self._maxsize:
+                first_key = next(iter(self._cache))
+                self._cache.pop(first_key)
+            self._cache[key] = value
+
+
+# ── Process Isolated Delegates ───────────────────────────────────────────────
+
+class ProcessIsolatedZeroShot:
+    def __init__(self, pool: Executor, taxonomy: Taxonomy, model_version: str, cache_maxsize: int = 256) -> None:
+        self._pool = pool
+        self._taxonomy = taxonomy
+        self._model_version = model_version
+        self._cache = FIFOCache(cache_maxsize)
+
+    @property
+    def model_version(self) -> str:
+        return self._model_version
+
+    def classify(self, cap: AwarenessCaptureView) -> ZeroShotResult:
+        key = cap.capture_id
+        val = self._cache.get(key)
+        if val is not None:
+            return val
+        res = self._pool.submit(_worker_classify_zero_shot, cap).result()
+        self._cache.set(key, res)
+        return res
+
+
+class ProcessIsolatedSentiment:
+    def __init__(self, pool: Executor, model_version: str, cache_maxsize: int = 256) -> None:
+        self._pool = pool
+        self._model_version = model_version
+        self._cache = FIFOCache(cache_maxsize)
+
+    @property
+    def model_version(self) -> str:
+        return self._model_version
+
+    def classify(self, cap: AwarenessCaptureView) -> SentimentResult:
+        key = cap.capture_id
+        val = self._cache.get(key)
+        if val is not None:
+            return val
+        res = self._pool.submit(_worker_classify_sentiment, cap).result()
+        self._cache.set(key, res)
+        return res
+
+
+class ProcessIsolatedEmbedder:
+    def __init__(self, pool: Executor, model_version: str, cache_maxsize: int = 256) -> None:
+        self._pool = pool
+        self._model_version = model_version
+        self._cache = FIFOCache(cache_maxsize)
+
+    @property
+    def model_version(self) -> str:
+        return self._model_version
+
+    def encode(self, text: str) -> np.ndarray:
+        val = self._cache.get(text)
+        if val is not None:
+            return val
+        res = self._pool.submit(_worker_encode_embedding, text).result()
+        self._cache.set(text, res)
+        return res
+
+    def encode_many(self, texts: Iterable[str]) -> np.ndarray:
+        texts_list = list(texts)
+        if not texts_list:
+            dim = len(self.encode(""))
+            return np.zeros((0, dim), dtype=np.float32)
+
+        results = [None] * len(texts_list)
+        missing_indices = []
+        missing_texts = []
+
+        for idx, text in enumerate(texts_list):
+            cached_val = self._cache.get(text)
+            if cached_val is not None:
+                results[idx] = cached_val
+            else:
+                missing_indices.append(idx)
+                missing_texts.append(text)
+
+        if missing_texts:
+            encoded_missing = self._pool.submit(_worker_encode_many_embedding, missing_texts).result()
+            for idx, missing_idx in enumerate(missing_indices):
+                val = encoded_missing[idx]
+                results[missing_idx] = val
+                self._cache.set(texts_list[missing_idx], val)
+
+        return np.stack(results)
+
+
+class ProcessIsolatedReranker:
+    def __init__(self, pool: Executor, model_version: str, cache_maxsize: int = 256) -> None:
+        self._pool = pool
+        self._model_version = model_version
+        self._cache = FIFOCache(cache_maxsize)
+
+    @property
+    def model_version(self) -> str:
+        return self._model_version
+
+    def rank(self, query: str, candidates: Iterable[str]) -> list[tuple[str, float]]:
+        candidates_list = list(candidates)
+        key = (query, tuple(candidates_list))
+        val = self._cache.get(key)
+        if val is not None:
+            return val
+        res = self._pool.submit(_worker_rank_reranker, query, candidates_list).result()
+        self._cache.set(key, res)
+        return res
 
 
 class CatchemService:
@@ -53,10 +273,67 @@ class CatchemService:
 
         use_stubs = bool(settings.models.use_ml_stubs)
         self.prefilter = FastPrefilter(taxonomy=taxonomy)
-        self.zero_shot: ZeroShot = make_zero_shot(taxonomy, settings.models.zero_shot, use_stubs)
-        self.sentiment: SentimentClassifier = make_sentiment(settings.models.sentiment_default, use_stubs)
-        self.embedder: Embedder = make_embedder(settings.models.embedding, use_stubs)
-        self.reranker: Reranker = make_reranker(settings.models.reranker, use_stubs)
+
+        if settings.models.isolation_enabled is not None:
+            self.use_isolation = settings.models.isolation_enabled
+        else:
+            self.use_isolation = not use_stubs
+
+        zero_shot_ver = "stub-zero-shot/v1" if use_stubs else f"hf:{settings.models.zero_shot}"
+        sentiment_ver = "stub-sentiment/v1" if use_stubs else f"hf:{settings.models.sentiment_default}"
+        embedder_ver = "stub-embedding/v1" if use_stubs else f"hf:{settings.models.embedding}"
+        reranker_ver = "stub-reranker/v1" if use_stubs else f"hf:{settings.models.reranker}"
+
+        if self.use_isolation:
+            if use_stubs:
+                self._pool = ThreadPoolExecutor(
+                    max_workers=settings.models.isolation_processes,
+                    initializer=_init_worker,
+                    initargs=(
+                        settings.models.zero_shot,
+                        settings.models.sentiment_default,
+                        settings.models.embedding,
+                        settings.models.reranker,
+                        use_stubs,
+                        taxonomy,
+                        settings.models.isolation_nice,
+                        settings.models.isolation_memory_limit_mb,
+                    ),
+                )
+            else:
+                self._pool = ProcessPoolExecutor(
+                    max_workers=settings.models.isolation_processes,
+                    initializer=_init_worker,
+                    initargs=(
+                        settings.models.zero_shot,
+                        settings.models.sentiment_default,
+                        settings.models.embedding,
+                        settings.models.reranker,
+                        use_stubs,
+                        taxonomy,
+                        settings.models.isolation_nice,
+                        settings.models.isolation_memory_limit_mb,
+                    ),
+                )
+            self.zero_shot: ZeroShot = ProcessIsolatedZeroShot(
+                self._pool, taxonomy, zero_shot_ver, settings.models.cache_maxsize
+            )
+            self.sentiment: SentimentClassifier = ProcessIsolatedSentiment(
+                self._pool, sentiment_ver, settings.models.cache_maxsize
+            )
+            self.embedder: Embedder = ProcessIsolatedEmbedder(
+                self._pool, embedder_ver, settings.models.cache_maxsize
+            )
+            self.reranker: Reranker = ProcessIsolatedReranker(
+                self._pool, reranker_ver, settings.models.cache_maxsize
+            )
+        else:
+            self._pool = None
+            self.zero_shot = make_zero_shot(taxonomy, settings.models.zero_shot, use_stubs)
+            self.sentiment = make_sentiment(settings.models.sentiment_default, use_stubs)
+            self.embedder = make_embedder(settings.models.embedding, use_stubs)
+            self.reranker = make_reranker(settings.models.reranker, use_stubs)
+
         config_path = Path(__file__).resolve().parents[2] / "configs" / "symbols.yaml"
         self.symbol_mapper = SymbolMapper(
             config_path=config_path if config_path.exists() else None,
@@ -79,6 +356,26 @@ class CatchemService:
             except NewsImpactGuardError as exc:
                 logger.warning("diagnostic_adapter_refused", reason=str(exc))
                 self._diagnostic_adapter = None
+
+    def close(self) -> None:
+        if hasattr(self, "_pool") and self._pool is not None:
+            try:
+                self._pool.shutdown(wait=True)
+            except Exception:
+                pass
+            self._pool = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __enter__(self) -> CatchemService:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
 
     @property
     def diagnostic_enabled(self) -> bool:

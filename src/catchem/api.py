@@ -2520,6 +2520,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     messages=messages,
                     temperature=0.35,
                     max_tokens=320,
+                    timeout_seconds=sup.settings.reviewers.deepseek.timeout_seconds,
                 )
                 while True:
                     try:

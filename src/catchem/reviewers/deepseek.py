@@ -60,6 +60,7 @@ class DeepSeekReviewer:
         base_url: str = DEFAULT_BASE_URL,
         temperature: float = 0.1,
         max_output_tokens: int = 600,
+        timeout_seconds: float = 30.0,
         client: httpx.Client | None = None,
     ) -> None:
         if not api_key:
@@ -75,7 +76,8 @@ class DeepSeekReviewer:
         self.max_output_tokens = int(max_output_tokens)
         # Allow tests to inject a mock httpx.Client without rewriting
         # the constructor signature.
-        self._client = client or httpx.Client(timeout=_HTTPX_TIMEOUT)
+        timeout = httpx.Timeout(connect=5.0, read=timeout_seconds, write=10.0, pool=5.0)
+        self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
 
     @property
@@ -307,6 +309,7 @@ async def stream_chat_completion(
     messages: list[dict[str, str]],
     temperature: float = 0.35,
     max_tokens: int = 320,
+    timeout_seconds: float = 60.0,
     client: httpx.AsyncClient | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async-yield envelopes from DeepSeek's streaming chat-completions API.
@@ -327,7 +330,7 @@ async def stream_chat_completion(
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=timeout_seconds, write=10.0, pool=5.0),
         )
     request_body = {
         "model": model,

@@ -119,3 +119,14 @@ def test_registry_run_and_persist_deepseek_budget_exhausted(supervisor) -> None:
     assert len(rows) == 1
     assert rows[0]["reviewer_id"] == "deepseek"
     assert rows[0]["error_code"] == "budget_exceeded"
+
+
+def test_registry_deepseek_timeout_propagation(supervisor) -> None:
+    supervisor.settings.reviewers.deepseek.enabled = True
+    supervisor.settings.reviewers.deepseek.api_key = "dummy-key"
+    supervisor.settings.reviewers.deepseek.timeout_seconds = 18.5
+    registry = supervisor.reviewers
+    reviewer = registry.deepseek()
+    assert reviewer is not None
+    assert reviewer._client.timeout.read == 18.5
+

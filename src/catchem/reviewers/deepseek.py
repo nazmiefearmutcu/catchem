@@ -46,15 +46,19 @@ PRICING_PER_1M = {
 # article-classification prompt; off-peak DeepSeek calls land in 1-3s.
 _HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
+# Pre-compiled regex patterns for spaces/tabs and newlines at the module level to reduce review cleaning latency.
+_SPACES_AND_TABS_RE = re.compile(r"[ \t]+")
+_NEWLINES_RE = re.compile(r"[\r\n]+")
+
 
 def _clean_text(text: str) -> str:
     """Consolidate spaces, tabs, and newlines to save tokens and memory footprint."""
     if not text:
         return ""
     # Consolidate spaces and tabs
-    text = re.sub(r"[ \t]+", " ", text)
+    text = _SPACES_AND_TABS_RE.sub(" ", text)
     # Consolidate multiple newlines
-    text = re.sub(r"[\r\n]+", "\n", text)
+    text = _NEWLINES_RE.sub("\n", text)
     return text.strip()
 
 

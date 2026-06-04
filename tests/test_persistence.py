@@ -2,6 +2,7 @@
 
 Pins compute_persistence() pure-logic contract + the HTTP endpoint envelope.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -14,7 +15,9 @@ from catchem.quant.persistence import compute_persistence
 UTC = UTC
 
 
-def _record(day_offset_from_today: int, asset_class: str = "equities", symbol: str = "AAPL", title: str = "") -> dict:
+def _record(
+    day_offset_from_today: int, asset_class: str = "equities", symbol: str = "AAPL", title: str = ""
+) -> dict:
     """Build a record with a published_ts shifted N days back from today."""
     ts = datetime.now(UTC) - timedelta(days=day_offset_from_today)
     return {
@@ -68,10 +71,9 @@ def test_compute_persistence_sample_titles_capped_at_3() -> None:
 
 def test_compute_persistence_sorts_by_ratio_desc() -> None:
     """Higher days_covered ratio comes first; ties break on total_records."""
-    records = (
-        [_record(d, asset_class="rates", symbol="UST") for d in range(2)]
-        + [_record(d, asset_class="equities", symbol="AAPL") for d in range(5)]
-    )
+    records = [_record(d, asset_class="rates", symbol="UST") for d in range(2)] + [
+        _record(d, asset_class="equities", symbol="AAPL") for d in range(5)
+    ]
     out = compute_persistence(records, window_days=7, min_records=2)
     # Apple (5 days) should beat UST (2 days)
     assert out[0].scope.startswith("equities/AAPL")
@@ -196,6 +198,43 @@ def test_compute_persistence_missing_symbols_uses_em_dash_top_symbol() -> None:
     assert out[0].scope == "macro/—"
 
 
+def test_compute_persistence_optimization_coverage_gaps() -> None:
+    now_utc = datetime.now(UTC)
+    ts_latest = now_utc.isoformat().replace("+00:00", "Z")
+    ts_naive = (now_utc - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+    ts_outside = (now_utc - timedelta(days=10)).isoformat().replace("+00:00", "Z")
+
+    records = [
+        {
+            "capture_id": "r-latest",
+            "published_ts": ts_latest,
+            "asset_classes": ["equities"],
+            "candidate_symbols": ["AAPL"],
+        },
+        {
+            "capture_id": "r-naive",
+            "published_ts": ts_naive,
+            "asset_classes": ["equities"],
+            "candidate_symbols": ["AAPL"],
+        },
+        {
+            "capture_id": "r-outside",
+            "published_ts": ts_outside,
+            "asset_classes": ["equities"],
+            "candidate_symbols": ["AAPL"],
+        },
+        {
+            "capture_id": "r-missing-fields",
+            "published_ts": ts_latest,
+        },
+    ]
+
+    out = compute_persistence(records, window_days=2, min_records=1)
+    scopes = {b.scope for b in out}
+    assert "equities/AAPL" in scopes
+    assert "—/—" in scopes
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path))
@@ -203,6 +242,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "false")
     from catchem.api import create_app
     from catchem.settings import load_settings, reload_settings
+
     reload_settings()
     app = create_app(load_settings())
     with TestClient(app) as c:

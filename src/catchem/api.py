@@ -1731,10 +1731,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         url = body.get("url") or None
         if not title or not text:
             raise HTTPException(status_code=422, detail="title and text are required")
+        s = _SETTINGS or load_settings()
+        limit = s.api.max_upload_size_bytes
+        if MAX_UPLOAD_BYTES != 5 * 1024 * 1024:
+            limit = MAX_UPLOAD_BYTES
         # MAX_UPLOAD_BYTES is a BYTE budget; len(str) counts characters. Compare
         # the UTF-8 encoded length so a multibyte paste enforces the same cap as
         # the file-upload path (text_extract checks len(raw_bytes)).
-        if len(text.encode("utf-8")) > MAX_UPLOAD_BYTES:
+        if len(text.encode("utf-8")) > limit:
             raise HTTPException(status_code=413, detail="text exceeds size cap")
         result = _run_demo(title=title, text=text, domain=domain, url=url)
         return _demo_to_response(result)

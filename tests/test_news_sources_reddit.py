@@ -102,9 +102,7 @@ def test_parse_reddit_maps_fields_and_skips_malformed() -> None:
     # ── self-post: text comes from selftext, url is the permalink discussion
     assert self_post.title == "GME to the moon — DD inside"
     assert self_post.text == "Here is my deep dive on the short interest."
-    assert self_post.url == (
-        "https://www.reddit.com/r/wallstreetbets/comments/abc123/gme_to_the_moon/"
-    )
+    assert self_post.url == ("https://www.reddit.com/r/wallstreetbets/comments/abc123/gme_to_the_moon/")
     assert self_post.domain == "reddit.com"
     # epoch float → tz-aware UTC datetime
     assert self_post.published_ts == datetime.fromtimestamp(_TS_SELF, tz=UTC)
@@ -115,9 +113,7 @@ def test_parse_reddit_maps_fields_and_skips_malformed() -> None:
     assert link_post.title == "Fed signals rate hold"
     assert link_post.text == "Fed signals rate hold"
     # url is the *discussion* permalink, NOT the off-site `url` field
-    assert link_post.url == (
-        "https://www.reddit.com/r/stocks/comments/def456/fed_signals_rate_hold/"
-    )
+    assert link_post.url == ("https://www.reddit.com/r/stocks/comments/def456/fed_signals_rate_hold/")
     assert link_post.domain == "reddit.com"
     assert link_post.published_ts == datetime.fromtimestamp(_TS_LINK, tz=UTC)
 
@@ -188,3 +184,116 @@ def test_required_subreddits_are_configured() -> None:
         "economy",
         "finance",
     }
+
+
+def test_reddit_timestamp_caching_and_fast_paths() -> None:
+    from catchem.news_sources.reddit import (
+        _parse_epoch_cached,
+        _parse_reddit,
+    )
+
+    # Clear caches first to get clean measurement
+    _parse_epoch_cached.cache_clear()
+
+    # 1. Test epoch caching and cache hit
+    payload_epoch = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "title": "Epoch Cache Test",
+                        "permalink": "/r/stocks/comments/abc/test/",
+                        "created_utc": 1716900000.0,
+                    }
+                }
+            ]
+        }
+    }
+
+    # First parse should call fromtimestamp and cache it
+    items1 = _parse_reddit(json.dumps(payload_epoch).encode("utf-8"), "reddit.com")
+    assert len(items1) == 1
+    t1 = items1[0].published_ts
+    assert t1 == datetime(2024, 5, 28, 12, 40, 0, tzinfo=UTC)
+
+    # Second parse should be a cache hit
+    items2 = _parse_reddit(json.dumps(payload_epoch).encode("utf-8"), "reddit.com")
+    assert len(items2) == 1
+    t2 = items2[0].published_ts
+    assert t2 == t1
+
+    info = _parse_epoch_cached.cache_info()
+    assert info.hits >= 1
+
+    # 2. Test string coercion and invalid values
+    # Valid float string
+    payload_str = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "title": "Str Epoch Test",
+                        "permalink": "/r/stocks/comments/abc/str/",
+                        "created_utc": "1716900000.0",
+                    }
+                }
+            ]
+        }
+    }
+    items3 = _parse_reddit(json.dumps(payload_str).encode("utf-8"), "reddit.com")
+    assert len(items3) == 1
+    assert items3[0].published_ts == t1
+
+    # Boolean created_utc (invalid, should fall back to now)
+    payload_bool = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "title": "Bool Epoch Test",
+                        "permalink": "/r/stocks/comments/abc/bool/",
+                        "created_utc": True,
+                    }
+                }
+            ]
+        }
+    }
+    items4 = _parse_reddit(json.dumps(payload_bool).encode("utf-8"), "reddit.com")
+    assert len(items4) == 1
+    assert isinstance(items4[0].published_ts, datetime)
+
+    # Invalid representation (non-numeric string, should fall back to now)
+    payload_invalid = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "title": "Invalid Epoch Test",
+                        "permalink": "/r/stocks/comments/abc/invalid/",
+                        "created_utc": "not-a-number",
+                    }
+                }
+            ]
+        }
+    }
+    items5 = _parse_reddit(json.dumps(payload_invalid).encode("utf-8"), "reddit.com")
+    assert len(items5) == 1
+    assert isinstance(items5[0].published_ts, datetime)
+
+    # Test extreme epoch that raises OverflowError/OSError
+    payload_overflow = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "title": "Overflow Epoch Test",
+                        "permalink": "/r/stocks/comments/abc/overflow/",
+                        "created_utc": 1e20,
+                    }
+                }
+            ]
+        }
+    }
+    items6 = _parse_reddit(json.dumps(payload_overflow).encode("utf-8"), "reddit.com")
+    assert len(items6) == 1
+    assert isinstance(items6[0].published_ts, datetime)

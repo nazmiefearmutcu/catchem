@@ -623,84 +623,90 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
     Tolerant: anything we can't read gets skipped, not raised. RSS feeds
     in the wild are not standards-compliant.
     """
-    try:
-        root = ET.fromstring(body)
-    except ET.ParseError as exc:
-        logger.warning("rss_parse_error", error=str(exc))
-        return []
+    from io import BytesIO
 
     items: list[ParsedItem] = []
 
-    # RSS 2.0: <rss><channel><item>...</item></channel></rss>
-    for item in root.iter("item"):
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
-        desc = item.findtext("description") or ""
-        content_enc = item.find("content:encoded", _NS)
-        if content_enc is not None and content_enc.text:
-            desc = content_enc.text
-        source_el = item.find("source")
-        source_name = (source_el.text if source_el is not None else "") or ""
-        source_url = (source_el.attrib.get("url") if source_el is not None else "") or ""
-        pub = item.findtext("pubDate") or item.findtext("dc:date", default=None, namespaces=_NS)
-        text = _strip_html(desc) or title
-        title = _strip_source_suffix(title, source_name)
-        # Title-less feeds (Mastodon micro-posts, etc.): synthesize a short
-        # title from the first sentence/clause of the body so the row is
-        # still readable in the Live Feed.
-        if not title and text:
-            title = text[:120].rstrip()
-        if not title or not link or not text:
-            continue
-        domain = _resolve_domain(link, fallback_domain)
-        source_domain = _resolve_domain(source_url, "") if source_url else ""
-        if domain == "news.google.com" and source_domain:
-            domain = source_domain
-        items.append(
-            ParsedItem(
-                title=title,
-                text=text,
-                url=link,
-                domain=domain,
-                published_ts=_parse_ts(pub),
-            )
-        )
+    try:
+        context = ET.iterparse(BytesIO(body), events=("start", "end"))
+        root = None
+        parent_stack: list[ET.Element] = []
 
-    # Atom: <feed><entry>...</entry></feed>
-    for entry in root.iter(f"{{{_NS['atom']}}}entry"):
-        title_el = entry.find("atom:title", _NS)
-        # Atom entries routinely carry several <link> children (rel='self',
-        # 'edit', 'enclosure', 'alternate'). The canonical article URL is the
-        # rel='alternate' one (or the rel-less default); .find() returns only
-        # the FIRST child, which is frequently a self/edit/enclosure link.
-        # Prefer alternate so the item url — and the dedup key + capture_id
-        # built from it — points at the real story.
-        links = entry.findall("atom:link", _NS)
-        link_el = next(
-            (lk for lk in links if lk.attrib.get("rel") in (None, "", "alternate")),
-            links[0] if links else None,
-        )
-        link = ""
-        if link_el is not None:
-            link = (link_el.attrib.get("href") or link_el.text or "").strip()
-        summary = entry.findtext("atom:summary", default="", namespaces=_NS)
-        content = entry.findtext("atom:content", default="", namespaces=_NS)
-        pub = entry.findtext("atom:updated", default=None, namespaces=_NS) or entry.findtext(
-            "atom:published", default=None, namespaces=_NS
-        )
-        title = (title_el.text if title_el is not None else "").strip()
-        body_text = _strip_html(content or summary) or title
-        if not title or not link or not body_text:
-            continue
-        items.append(
-            ParsedItem(
-                title=title,
-                text=body_text,
-                url=link,
-                domain=_resolve_domain(link, fallback_domain),
-                published_ts=_parse_ts(pub),
-            )
-        )
+        for event, elem in context:
+            if event == "start":
+                if root is None:
+                    root = elem
+                parent_stack.append(elem)
+            else:
+                if parent_stack:
+                    parent_stack.pop()
+
+                if elem.tag == "item":
+                    title = (elem.findtext("title") or "").strip()
+                    link = (elem.findtext("link") or "").strip()
+                    desc = elem.findtext("description") or ""
+                    content_enc = elem.find("content:encoded", _NS)
+                    if content_enc is not None and content_enc.text:
+                        desc = content_enc.text
+                    source_el = elem.find("source")
+                    source_name = (source_el.text if source_el is not None else "") or ""
+                    source_url = (source_el.attrib.get("url") if source_el is not None else "") or ""
+                    pub = elem.findtext("pubDate") or elem.findtext("dc:date", default=None, namespaces=_NS)
+                    text = _strip_html(desc) or title
+                    title = _strip_source_suffix(title, source_name)
+                    if not title and text:
+                        title = text[:120].rstrip()
+                    if title and link and text:
+                        domain = _resolve_domain(link, fallback_domain)
+                        source_domain = _resolve_domain(source_url, "") if source_url else ""
+                        if domain == "news.google.com" and source_domain:
+                            domain = source_domain
+                        items.append(
+                            ParsedItem(
+                                title=title,
+                                text=text,
+                                url=link,
+                                domain=domain,
+                                published_ts=_parse_ts(pub),
+                            )
+                        )
+                    elem.clear()
+                    if parent_stack:
+                        parent_stack[-1].remove(elem)
+
+                elif elem.tag == f"{{{_NS['atom']}}}entry":
+                    title_el = elem.find("atom:title", _NS)
+                    links = elem.findall("atom:link", _NS)
+                    link_el = next(
+                        (lk for lk in links if lk.attrib.get("rel") in (None, "", "alternate")),
+                        links[0] if links else None,
+                    )
+                    link = ""
+                    if link_el is not None:
+                        link = (link_el.attrib.get("href") or link_el.text or "").strip()
+                    summary = elem.findtext("atom:summary", default="", namespaces=_NS)
+                    content = elem.findtext("atom:content", default="", namespaces=_NS)
+                    pub = elem.findtext("atom:updated", default=None, namespaces=_NS) or elem.findtext(
+                        "atom:published", default=None, namespaces=_NS
+                    )
+                    title = (title_el.text if title_el is not None else "").strip()
+                    body_text = _strip_html(content or summary) or title
+                    if title and link and body_text:
+                        items.append(
+                            ParsedItem(
+                                title=title,
+                                text=body_text,
+                                url=link,
+                                domain=_resolve_domain(link, fallback_domain),
+                                published_ts=_parse_ts(pub),
+                            )
+                        )
+                    elem.clear()
+                    if parent_stack:
+                        parent_stack[-1].remove(elem)
+    except Exception as exc:
+        logger.warning("rss_parse_error", error=str(exc))
+        return []
 
     return items
 

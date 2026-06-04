@@ -95,9 +95,22 @@ class Supervisor:
             deepseek_enabled=settings.reviewers.deepseek.enabled,
             deepseek_keyed=bool(settings.reviewers.deepseek.api_key),
         )
+        self._queue_stop = threading.Event()
+        self._queue_thread = None
+        if self.settings.live.ingestion_queue_enabled:
+            self._queue_thread = threading.Thread(
+                target=self._queue_worker_loop,
+                name="catchem-queue-worker",
+                daemon=True,
+            )
+            self._queue_thread.start()
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     def close(self) -> None:
+        self._queue_stop.set()
+        if self._queue_thread is not None:
+            with suppress(Exception):
+                self._queue_thread.join(timeout=5.0)
         with suppress(Exception):
             self._deepseek_pool.shutdown(wait=False, cancel_futures=True)
         with suppress(Exception):
@@ -106,12 +119,49 @@ class Supervisor:
             self.storage.close()
 
     # ── single-capture path (used by API /process-one) ───────────────────
-    def process_capture(self, cap: AwarenessCaptureView) -> FinancialImpactRecord:
+    def process_capture(self, cap: AwarenessCaptureView, force_sync: bool = False) -> FinancialImpactRecord | None:
+        if self.settings.live.ingestion_queue_enabled and not force_sync:
+            try:
+                payload_json = cap.model_dump_json()
+                self.storage.enqueue_capture(cap.capture_id, payload_json)
+                logger.info("capture_enqueued", capture_id=cap.capture_id)
+                return None
+            except Exception as exc:
+                logger.error("capture_enqueue_failed", capture_id=cap.capture_id, error=str(exc))
+                logger.info("capture_sync_fallback", capture_id=cap.capture_id)
+
         rec = self.service.process(cap)
         self.storage.insert_record(rec)
         self._maybe_schedule_second_opinion(cap, rec)
         self._maybe_dispatch_webhook(rec)
         return rec
+
+    def _queue_worker_loop(self) -> None:
+        """Background thread loop draining the persistent queue."""
+        logger.info("queue_worker_thread_started")
+        while not self._queue_stop.is_set():
+            try:
+                items = self.storage.dequeue_captures(limit=1)
+                if not items:
+                    self._queue_stop.wait(0.2)
+                    continue
+
+                queue_id, capture_id, payload_json = items[0]
+                try:
+                    cap = AwarenessCaptureView.model_validate_json(payload_json)
+                    self.process_capture(cap, force_sync=True)
+                except Exception as exc:
+                    logger.warning("queue_worker_process_failed", capture_id=capture_id, error=str(exc))
+                    try:
+                        self.storage.record_failure(capture_id, str(exc), payload_json[:2000])
+                    except Exception as dlq_exc:
+                        logger.warning("queue_worker_dlq_failed", error=str(dlq_exc))
+
+                self.storage.ack_capture(queue_id)
+            except Exception as loop_exc:
+                logger.error("queue_worker_loop_error", error=str(loop_exc))
+                self._queue_stop.wait(1.0)
+        logger.info("queue_worker_thread_stopped")
 
     # ── webhook fire-and-forget ──────────────────────────────────────────
     def _maybe_dispatch_webhook(self, rec: FinancialImpactRecord) -> None:

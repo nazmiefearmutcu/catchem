@@ -153,6 +153,14 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_reviewer ON reviews(reviewer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reviews_capture ON reviews(capture_id);
+
+CREATE TABLE IF NOT EXISTS ingestion_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ingestion_queue_created ON ingestion_queue(created_at);
 """
 
 
@@ -733,6 +741,34 @@ class Storage:
     def dlq_count(self) -> int:
         with self._connection() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM dlq").fetchone()[0])
+
+    # ── Ingestion Queue ──────────────────────────────────────────────────────
+    def enqueue_capture(self, capture_id: str, payload_json: str) -> None:
+        """Enqueue a capture payload for processing."""
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                "INSERT INTO ingestion_queue (capture_id, payload_json, created_at) VALUES (?, ?, ?)",
+                (capture_id, payload_json, datetime.now(UTC).isoformat()),
+            )
+
+    def dequeue_captures(self, limit: int = 1) -> list[tuple[int, str, str]]:
+        """Fetch the oldest enqueued captures."""
+        with self._lock, self._connection() as conn:
+            rows = conn.execute(
+                "SELECT id, capture_id, payload_json FROM ingestion_queue ORDER BY id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [(r["id"], r["capture_id"], r["payload_json"]) for r in rows]
+
+    def ack_capture(self, queue_id: int) -> None:
+        """Remove a capture from the ingestion queue after processing."""
+        with self._lock, self._connection() as conn:
+            conn.execute("DELETE FROM ingestion_queue WHERE id = ?", (queue_id,))
+
+    def queue_count(self) -> int:
+        """Return the number of items currently in the queue."""
+        with self._connection() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM ingestion_queue").fetchone()[0])
 
     # ── reviews (second-opinion) ─────────────────────────────────────────────
     def upsert_review(self, row: dict[str, Any]) -> None:

@@ -124,6 +124,19 @@ MIGRATIONS: tuple[Migration, ...] = (
             CREATE INDEX IF NOT EXISTS idx_portfolio_symbol ON portfolio(symbol);
         """,
     ),
+    Migration(
+        version=4,
+        name="add_ingestion_queue_table",
+        sql="""
+            CREATE TABLE IF NOT EXISTS ingestion_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                capture_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ingestion_queue_created ON ingestion_queue(created_at);
+        """,
+    ),
 )
 
 

@@ -1690,7 +1690,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # as a 500 Internal Server Error with a noisy traceback in the
         # sidecar log instead of an actionable response for the caller.
         sup = _get_supervisor()
-        rec = sup.process_capture(capture)
+        rec = sup.process_capture(capture, force_sync=True)
         payload = rec.model_dump(mode="json")
         redacted = redact_record_for_mode(payload, production_safe=_is_production_safe()) or payload
         return FinancialImpactDetail(**_normalize_detail_payload(redacted))

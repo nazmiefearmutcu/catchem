@@ -109,6 +109,7 @@ class LiveConfig(BaseModel):
     poll_seconds: float = 10.0
     tail_max_per_tick: int = 50
     awareness_api_url: str = "http://127.0.0.1:8085"
+    ingestion_queue_enabled: bool = False
 
 
 class ApiConfig(BaseModel):

@@ -44,6 +44,7 @@ live:
   poll_seconds: 10.0
   tail_max_per_tick: 50
   awareness_api_url: "http://127.0.0.1:8085"
+  ingestion_queue_enabled: false
 
 api:
   host: "127.0.0.1"

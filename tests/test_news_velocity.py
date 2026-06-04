@@ -443,3 +443,8 @@ def test_compute_velocity_fallback_paths(monkeypatch) -> None:
     report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
     assert report.baseline_rate == 42.0
     assert report.baseline_std == 7.0
+
+
+def test_parse_ts_value_error_returns_none() -> None:
+    """Explicitly verify that a ValueError raised during parsing results in None."""
+    assert _parse_ts("2026-99-99T99:99:99Z") is None

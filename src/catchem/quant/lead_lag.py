@@ -36,7 +36,9 @@ Design constraints honoured:
 
 from __future__ import annotations
 
+import functools
 import math
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -96,6 +98,23 @@ class LeadLagReport:
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=8192)
+def _parse_ts_cached(raw: str) -> datetime | None:
+    if raw.endswith("Z"):
+        normalized = raw[:-1] + "+00:00"
+    else:
+        normalized = raw
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    if dt.tzinfo is UTC:
+        return dt
+    return dt.astimezone(UTC)
+
+
 def _parse_ts(value: Any) -> datetime | None:
     """Parse an ISO-8601 timestamp string into a tz-aware UTC datetime.
 
@@ -103,22 +122,12 @@ def _parse_ts(value: Any) -> datetime | None:
     Returns ``None`` if the value is missing, blank, or unparseable —
     callers handle that as "no timestamp, drop this member".
     """
-    if not value or not isinstance(value, str):
+    if not isinstance(value, str) or not value:
         return None
     raw = value.strip()
     if not raw:
         return None
-    # ``fromisoformat`` does not accept the ``Z`` suffix until 3.11,
-    # so normalize to the explicit offset form for portability.
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
+    return _parse_ts_cached(raw)
 
 
 def _record_timestamp(record: dict[str, Any]) -> tuple[datetime | None, str | None]:
@@ -134,11 +143,15 @@ def _record_timestamp(record: dict[str, Any]) -> tuple[datetime | None, str | No
     pub_raw = record.get("published_ts")
     pub_dt = _parse_ts(pub_raw)
     if pub_dt is not None:
-        return pub_dt, str(pub_raw) if pub_raw is not None else None
+        return pub_dt, pub_raw if isinstance(pub_raw, str) else (
+            str(pub_raw) if pub_raw is not None else None
+        )
     created_raw = record.get("created_at")
     created_dt = _parse_ts(created_raw)
     if created_dt is not None:
-        return created_dt, str(created_raw) if created_raw is not None else None
+        return created_dt, created_raw if isinstance(created_raw, str) else (
+            str(created_raw) if created_raw is not None else None
+        )
     return None, None
 
 
@@ -146,8 +159,10 @@ def _domain_of(record: dict[str, Any]) -> str:
     """Pull the domain string, defaulting to ``"unknown"`` so a missing
     or blank value still produces a deterministic group key."""
     raw = record.get("domain")
-    if isinstance(raw, str) and raw.strip():
-        return raw.strip().lower()
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped:
+            return stripped.lower()
     return "unknown"
 
 
@@ -183,22 +198,24 @@ def attribute_lead_lag(
         List of ``FinancialImpactRecord``-style dicts. Only ``capture_id``,
         ``domain``, ``published_ts`` and ``created_at`` are consulted.
     """
-    # Build the capture lookup once. Records without a ``capture_id`` are
-    # quietly dropped — they can't be referenced by any cluster anyway.
-    by_capture: dict[str, dict[str, Any]] = {}
+    # Build the capture lookup once.
+    # We pre-resolve the timestamp and domain for each record to avoid looking up
+    # and parsing inside the inner cluster loop.
+    by_capture_resolved: dict[str, tuple[datetime, str | None, str]] = {}
     for rec in records:
         cap = rec.get("capture_id")
         if isinstance(cap, str) and cap:
-            by_capture[cap] = rec
+            ts_dt, ts_raw = _record_timestamp(rec)
+            if ts_dt is not None:
+                by_capture_resolved[cap] = (ts_dt, ts_raw, _domain_of(rec))
 
     per_event: list[PerEventLeadLag] = []
 
-    # Per-source accumulators. Lists are intentional: we want the per-event
-    # values to compute means without losing precision to running averages.
-    participated: dict[str, int] = {}
-    led: dict[str, int] = {}
-    lag_when_following: dict[str, list[int]] = {}
-    lead_gap_when_leading: dict[str, list[int]] = {}
+    # Per-source accumulators. Use defaultdict for O(1) creation and accumulation.
+    participated = defaultdict(int)
+    led = defaultdict(int)
+    lag_when_following = defaultdict(list)
+    lead_gap_when_leading = defaultdict(list)
 
     for cluster in clusters:
         cluster_id = getattr(cluster, "cluster_id", None)
@@ -207,19 +224,15 @@ def attribute_lead_lag(
             # Skip malformed entries rather than crashing the report.
             continue
 
-        # Pull (capture_id, ts, original_iso, domain) for every resolvable
-        # member. Drop members that have no timestamp at all (neither
-        # ``published_ts`` nor ``created_at``); we cannot place them on a
-        # timeline so they would corrupt the leader pick.
-        members: list[tuple[str, datetime, str | None, str]] = []
+        # Pull (ts_dt, capture_id, ts_raw, domain) for every resolvable member.
+        # We store ts_dt first to allow natural sorting without python lambda key function.
+        members: list[tuple[datetime, str, str | None, str]] = []
         for cap_id in capture_ids:
-            rec = by_capture.get(cap_id)
-            if rec is None:
+            resolved = by_capture_resolved.get(cap_id)
+            if resolved is None:
                 continue
-            ts_dt, ts_raw = _record_timestamp(rec)
-            if ts_dt is None:
-                continue
-            members.append((cap_id, ts_dt, ts_raw, _domain_of(rec)))
+            ts_dt, ts_raw, domain = resolved
+            members.append((ts_dt, cap_id, ts_raw, domain))
 
         if not members:
             # Cluster references no resolvable record — emit an empty
@@ -239,27 +252,22 @@ def attribute_lead_lag(
 
         # Earliest timestamp wins; ties broken by capture_id sort so the
         # leader pick is stable across runs.
-        members_sorted = sorted(members, key=lambda m: (m[1], m[0]))
-        leader_cap, leader_dt, leader_iso, leader_domain = members_sorted[0]
+        # Natural sorting compares ts_dt first, then cap_id, which matches the key=lambda m: (m[1], m[0]).
+        members_sorted = sorted(members)
+        leader_dt, leader_cap, leader_iso, leader_domain = members_sorted[0]
 
         # Per-domain lag — take the minimum lag across multiple captures
         # from the same outlet so spammy re-publishes don't dilute the
         # signal.
         domain_min_lag: dict[str, int] = {}
         member_domains: set[str] = set()
-        for _cap_id, dt, _iso, domain in members_sorted:
+        for dt, _cap_id, _iso, domain in members_sorted:
             member_domains.add(domain)
-            # Skip every capture from the LEADER domain (not just the single
-            # leader capture). A later re-publish from the leading outlet is
-            # not "following" itself — counting it would violate the
-            # "one entry per non-leader domain" contract and pollute the
-            # leader's mean_lag_seconds_when_following with a self-follow lag.
-            if domain == leader_domain:
-                continue
-            lag = int((dt - leader_dt).total_seconds())
-            prev = domain_min_lag.get(domain)
-            if prev is None or lag < prev:
-                domain_min_lag[domain] = lag
+            # Skip every capture from the LEADER domain.
+            # Since members_sorted is sorted ascending by timestamp, the first time
+            # we see any follower domain, it must have the minimum lag.
+            if domain != leader_domain and domain not in domain_min_lag:
+                domain_min_lag[domain] = int((dt - leader_dt).total_seconds())
 
         # Sort the per-event follower entries by lag asc, then by domain
         # so equal-lag rows are deterministic.
@@ -280,32 +288,33 @@ def attribute_lead_lag(
 
         # ---- accumulate per-source stats ----
         for domain in member_domains:
-            participated[domain] = participated.get(domain, 0) + 1
+            participated[domain] += 1
 
-        led[leader_domain] = led.get(leader_domain, 0) + 1
+        led[leader_domain] += 1
 
         # Gap to nearest follower from the leader's perspective. None when
         # the cluster has no followers (e.g. singleton, or only same-domain
         # members which collapsed away above).
         if follower_pairs:
             nearest_follower_lag = follower_pairs[0][1]
-            lead_gap_when_leading.setdefault(leader_domain, []).append(nearest_follower_lag)
+            lead_gap_when_leading[leader_domain].append(nearest_follower_lag)
 
         for domain, lag in domain_min_lag.items():
-            lag_when_following.setdefault(domain, []).append(lag)
+            lag_when_following[domain].append(lag)
 
     # ---- build per-source scores ----
-    all_domains = set(participated) | set(led)
+    # All domains that ever participated/led are keys of the participated dict
+    # because the leader must also have participated.
     per_source_unsorted: list[SourceLeadLagScore] = []
-    for domain in all_domains:
-        n_part = participated.get(domain, 0)
-        n_led = led.get(domain, 0)
+    for domain in participated:
+        n_part = participated[domain]
+        n_led = led[domain]
         lead_rate = (n_led / n_part) if n_part > 0 else 0.0
 
-        follow_lags = lag_when_following.get(domain) or []
+        follow_lags = lag_when_following.get(domain)
         mean_follow = (sum(follow_lags) / len(follow_lags)) if follow_lags else None
 
-        lead_gaps = lead_gap_when_leading.get(domain) or []
+        lead_gaps = lead_gap_when_leading.get(domain)
         mean_lead = (sum(lead_gaps) / len(lead_gaps)) if lead_gaps else None
 
         per_source_unsorted.append(

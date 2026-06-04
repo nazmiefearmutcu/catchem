@@ -228,9 +228,7 @@ def test_malformed_clusters_are_skipped() -> None:
     produces a report; the malformed siblings vanish without raising.
     """
     base = datetime(2026, 5, 27, 8, 0, 0, tzinfo=UTC)
-    good_cluster, good_recs = _build_chain_event(
-        "ok", base, ["reuters.com", "ft.com"], gap_seconds=30
-    )
+    good_cluster, good_recs = _build_chain_event("ok", base, ["reuters.com", "ft.com"], gap_seconds=30)
     bad_id = _ClusterStub(cluster_id=None, capture_ids=("x",))  # non-str id
     bad_empty = _ClusterStub(cluster_id="empty", capture_ids=())  # no captures
 
@@ -368,3 +366,22 @@ def test_cluster_referencing_unknown_capture_skips_that_member() -> None:
     assert pe.member_count == 1
     assert pe.leader_capture_id == "present"
     assert pe.follower_lag_seconds == ()
+
+
+def test_coverage_gaps_for_domain_and_timezone() -> None:
+    """Cover the astimezone branch for non-UTC timezone and non-string/missing domain."""
+    # 1. Non-UTC offset timestamp (e.g. +02:00)
+    # 2. Record with non-string domain (e.g. None)
+    rec_non_utc = {
+        "capture_id": "non-utc",
+        "domain": None,  # non-string domain to cover _domain_of
+        "published_ts": "2026-05-27T07:00:00+02:00",  # non-UTC timezone
+    }
+    cluster = _ClusterStub(
+        cluster_id="gap-evt",
+        capture_ids=("non-utc",),
+    )
+    report = attribute_lead_lag([cluster], [rec_non_utc])
+    (pe,) = report.per_event
+    assert pe.leader_capture_id == "non-utc"
+    assert pe.leader_domain == "unknown"

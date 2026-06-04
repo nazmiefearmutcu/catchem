@@ -156,6 +156,10 @@ rm -f data/logs/api.pid
 | `fusion-stack run` exits with `awareness path missing` | Awareness data dir not where expected | `FUSION_PATHS__AWARENESS_DATA_DIR=...` |
 | No records appearing | All inputs may be filtered. Run `fusion-stack run --mode replay_existing --max-records 50` and inspect `data/results/dlq/`. |
 | `transformers` import error during ML run | venv missing optional extra | `uv pip install -e ".[ml]"` |
+| `GET /` returns the placeholder page after `pip install dist/*.whl` | static dir installed via wheel `force-include` regressed | Re-check `[tool.hatch.build.targets.wheel] force-include` and re-run `tests/test_static_dashboard_packaged_install.py::test_wheel_install_smoke_serves_dashboard` |
+| `FUSION_LIVE__POLL_SECONDS` ignored | someone reverted `settings_customise_sources` source order | Re-run `tests/test_settings_live_env_override.py` and restore env-above-init ordering |
+| Diagnostic data appears in a `/recent` payload during prod-safe | redaction layer skipped at API surface | Re-check `redact_records_for_mode` calls in `api.py` |
+| Bundle JS appears at `/static/app/...` instead of `/assets/...` | StaticFiles mount uses the wrong path | Verify `api.py` mounts `/assets` from the resolved `assets` subdir |
 
 ## NewsImpact safety: when to be paranoid
 

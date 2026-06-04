@@ -80,3 +80,10 @@ on Awareness and NewsImpact.
 - Pytest markers `guard` and `regression` enumerate tests that pin these rules.
 - `configs/source_of_truth.yaml` carries the same statements in machine form;
   the test `test_source_of_truth_matches_doc.py` keeps them in lockstep.
+- `src/fusion_stack/redaction.py` enforces production-safe diagnostic scrubbing
+  at the API surface. `tests/test_guard_redaction_in_production.py` pins that
+  every record-returning endpoint runs the redactor.
+- `tests/test_settings_live_env_override.py` pins env > YAML > defaults
+  precedence so configuration cannot silently drift.
+- `tests/test_static_dashboard_packaged_install.py` includes a wheel-build
+  canary so static-asset packaging cannot silently break in a release.

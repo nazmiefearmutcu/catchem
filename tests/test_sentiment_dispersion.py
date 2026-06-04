@@ -159,6 +159,29 @@ def test_dominant_single_label_returns_that_label() -> None:
     assert _dominant(Counter(["positive"])) == "positive"
 
 
+def test_dominant_label_edge_cases() -> None:
+    """Exercise all dominant label decision tree branches and _dominant tie path."""
+
+    # 1. _dominant with tie
+    assert _dominant(Counter(["positive", "negative"])) == "tied"
+
+    # 2. pos > neu, pos < neg => dominant = "negative"
+    r = compute_dispersion(["positive"] * 2 + ["neutral"] * 1 + ["negative"] * 3)
+    assert r.dominant_label == "negative"
+
+    # 3. pos < neu, neu < neg => dominant = "negative"
+    r = compute_dispersion(["positive"] * 1 + ["neutral"] * 2 + ["negative"] * 3)
+    assert r.dominant_label == "negative"
+
+    # 4. pos < neu, neu == neg => dominant = "tied"
+    r = compute_dispersion(["positive"] * 1 + ["neutral"] * 2 + ["negative"] * 2)
+    assert r.dominant_label == "tied"
+
+    # 5. pos == neu, pos < neg => dominant = "negative"
+    r = compute_dispersion(["positive"] * 1 + ["neutral"] * 1 + ["negative"] * 2)
+    assert r.dominant_label == "negative"
+
+
 def test_compute_by_scope_skips_non_dict_records() -> None:
     """Junk list members (str / int / None) don't crash the bucketer."""
 
@@ -252,9 +275,7 @@ def test_endpoint_overall_returns_valid_envelope(client: TestClient) -> None:
 def test_endpoint_buckets_scope_returns_list(client: TestClient) -> None:
     """``scope=asset_classes`` envelope: ``buckets`` is a list (possibly empty)."""
 
-    res = client.get(
-        "/api/quant/sentiment-dispersion?scope=asset_classes&limit=50"
-    )
+    res = client.get("/api/quant/sentiment-dispersion?scope=asset_classes&limit=50")
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["scope"] == "asset_classes"

@@ -288,6 +288,7 @@ from .runtime_metrics import current_metrics as _current_process_metrics
 from .schemas import AwarenessCaptureView
 from .settings import Settings, load_settings
 from .static_assets import get_static_path, open_static_bytes
+from .storage import _parse_iso_ts_cached
 from .supervisor import Supervisor
 from .text_extract import MAX_UPLOAD_BYTES, extract_text
 from .ws_push import WebSocketNewsChannel
@@ -4058,7 +4059,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not ts:
                 continue
             try:
-                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                dt = _parse_iso_ts_cached(str(ts))
             except ValueError:
                 continue
             # Epoch-based truncation: works uniformly for any bucket size,
@@ -4067,8 +4068,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # ValueError whenever bucket_minutes >= 60 because the
             # computed `minute` exceeded the [0..59] range that
             # `replace(minute=)` accepts.
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
             ts_epoch = int(dt.timestamp())
             bucket_seconds = bucket_minutes * 60
             bucket_epoch = ts_epoch - (ts_epoch % bucket_seconds)
@@ -4138,7 +4137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not ts:
                 continue
             try:
-                bucket = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).strftime("%Y-%m-%dT%H:00")
+                bucket = _parse_iso_ts_cached(str(ts)).strftime("%Y-%m-%dT%H:00")
             except ValueError:
                 continue
             row = ts_ac.setdefault(bucket, Counter())

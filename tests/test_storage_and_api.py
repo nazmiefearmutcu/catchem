@@ -460,3 +460,87 @@ def test_storage_extra_coverage(tmp_path: Path) -> None:
     s._conn_pool.get_nowait = MagicMock(side_effect=queue.Empty)
     s.close()
     dummy_conn.close()
+
+
+def test_storage_timestamp_parsing_caching() -> None:
+    from datetime import UTC, datetime
+
+    from catchem.storage import _parse_iso_ts_cached
+
+    # 1. +00:00 ending, sub_len == 26
+    ts1 = "2026-06-04T10:24:34.123456+00:00"
+    dt1 = _parse_iso_ts_cached(ts1)
+    assert dt1 == datetime(2026, 6, 4, 10, 24, 34, 123456, tzinfo=UTC)
+
+    # 1b. +00:00 ending, sub_len == 26, but invalid values to trigger ValueError and fallback
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("2026-XX-04T10:24:34.123456+00:00")
+
+    # 2. +00:00 ending, sub_len == 19
+    ts2 = "2026-06-04T10:24:34+00:00"
+    dt2 = _parse_iso_ts_cached(ts2)
+    assert dt2 == datetime(2026, 6, 4, 10, 24, 34, tzinfo=UTC)
+
+    # 2b. +00:00 ending, sub_len == 19 with invalid values
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("2026-XX-04T10:24:34+00:00")
+
+    # 3. Z ending, sub_len == 23
+    ts3 = "2026-06-04T10:24:34.123Z"
+    dt3 = _parse_iso_ts_cached(ts3)
+    assert dt3 == datetime(2026, 6, 4, 10, 24, 34, 123000, tzinfo=UTC)
+
+    # 3b. Z ending, sub_len == 23 with invalid values
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("2026-XX-04T10:24:34.123Z")
+
+    # 4. z/Z ending, sub_len == 19
+    ts4 = "2026-06-04T10:24:34z"
+    dt4 = _parse_iso_ts_cached(ts4)
+    assert dt4 == datetime(2026, 6, 4, 10, 24, 34, tzinfo=UTC)
+
+    # 4b. z/Z ending, sub_len == 19 with invalid values
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("2026-XX-04T10:24:34z")
+
+    # 5. Fallback standard parsing path with tzinfo is None
+    ts5 = "2026-06-04T10:24:34"
+    dt5 = _parse_iso_ts_cached(ts5)
+    assert dt5 == datetime(2026, 6, 4, 10, 24, 34, tzinfo=UTC)
+
+    # 6. Fallback standard parsing path with tzinfo is not None
+    ts6 = "2026-06-04T10:24:34+05:00"
+    dt6 = _parse_iso_ts_cached(ts6)
+    assert dt6.tzinfo is not None
+    assert dt6 == datetime.fromisoformat(ts6)
+
+    # 7. Cache hit
+    dt7 = _parse_iso_ts_cached(ts1)
+    assert dt7 is dt1
+
+    # 8. Extra branch coverage cases (not standard lengths/mismatched characters in slices)
+    # 8a. +00:00 ending, sub_len not 26 and not 19
+    ts_extra1 = "2026-06-04+00:00"
+    dt_extra1 = _parse_iso_ts_cached(ts_extra1)
+    assert dt_extra1 == datetime(2026, 6, 4, tzinfo=UTC)
+
+    # 8b. Z ending, sub_len not 23 and not 19
+    ts_extra2 = "2026-06-04Z"
+    dt_extra2 = _parse_iso_ts_cached(ts_extra2)
+    assert dt_extra2 == datetime(2026, 6, 4, tzinfo=UTC)
+
+    # 8c. +00:00 ending, sub_len == 26 but mismatched characters
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("202/6-06-04T10:24:34.123456+00:00")
+
+    # 8d. +00:00 ending, sub_len == 19 but mismatched characters
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("202/6-06-04T10:24:34+00:00")
+
+    # 8e. Z ending, sub_len == 23 but mismatched characters
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("202/6-06-04T10:24:34.123Z")
+
+    # 8f. Z ending, sub_len == 19 but mismatched characters
+    with pytest.raises(ValueError):
+        _parse_iso_ts_cached("202/6-06-04T10:24:34Z")

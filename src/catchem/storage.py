@@ -13,6 +13,7 @@ Design priorities:
 
 from __future__ import annotations
 
+import functools
 import json
 import queue
 import re
@@ -153,6 +154,107 @@ CREATE TABLE IF NOT EXISTS reviews (
 CREATE INDEX IF NOT EXISTS idx_reviews_reviewer ON reviews(reviewer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reviews_capture ON reviews(capture_id);
 """
+
+
+@functools.lru_cache(maxsize=1024)
+def _parse_iso_ts_cached(raw: str) -> datetime:
+    """Cached fast-path parser for ISO-8601 strings, stamping naive as UTC."""
+    if raw.endswith("+00:00"):
+        sub = raw[:-6]
+        sub_len = len(sub)
+        if (
+            sub_len == 26
+            and sub[4] == "-"
+            and sub[7] == "-"
+            and sub[10] == "T"
+            and sub[13] == ":"
+            and sub[16] == ":"
+            and sub[19] == "."
+        ):
+            try:
+                return datetime(
+                    int(sub[0:4]),
+                    int(sub[5:7]),
+                    int(sub[8:10]),
+                    int(sub[11:13]),
+                    int(sub[14:16]),
+                    int(sub[17:19]),
+                    int(sub[20:26]),
+                    tzinfo=UTC,
+                )
+            except ValueError:
+                pass
+        elif (
+            sub_len == 19
+            and sub[4] == "-"
+            and sub[7] == "-"
+            and sub[10] == "T"
+            and sub[13] == ":"
+            and sub[16] == ":"
+        ):
+            try:
+                return datetime(
+                    int(sub[0:4]),
+                    int(sub[5:7]),
+                    int(sub[8:10]),
+                    int(sub[11:13]),
+                    int(sub[14:16]),
+                    int(sub[17:19]),
+                    tzinfo=UTC,
+                )
+            except ValueError:
+                pass
+    elif raw.endswith("Z") or raw.endswith("z"):
+        sub = raw[:-1]
+        sub_len = len(sub)
+        if (
+            sub_len == 23
+            and sub[4] == "-"
+            and sub[7] == "-"
+            and sub[10] == "T"
+            and sub[13] == ":"
+            and sub[16] == ":"
+            and sub[19] == "."
+        ):
+            try:
+                return datetime(
+                    int(sub[0:4]),
+                    int(sub[5:7]),
+                    int(sub[8:10]),
+                    int(sub[11:13]),
+                    int(sub[14:16]),
+                    int(sub[17:19]),
+                    int(sub[20:23]) * 1000,
+                    tzinfo=UTC,
+                )
+            except ValueError:
+                pass
+        elif (
+            sub_len == 19
+            and sub[4] == "-"
+            and sub[7] == "-"
+            and sub[10] == "T"
+            and sub[13] == ":"
+            and sub[16] == ":"
+        ):
+            try:
+                return datetime(
+                    int(sub[0:4]),
+                    int(sub[5:7]),
+                    int(sub[8:10]),
+                    int(sub[11:13]),
+                    int(sub[14:16]),
+                    int(sub[17:19]),
+                    tzinfo=UTC,
+                )
+            except ValueError:
+                pass
+
+    normalized = raw.replace("Z", "+00:00").replace("z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 class Storage:
@@ -532,7 +634,7 @@ class Storage:
                 source_path=source_path,
                 line_offset=int(r["line_offset"]),
                 last_capture_id=r["last_capture_id"],
-                updated_at=datetime.fromisoformat(r["updated_at"]),
+                updated_at=_parse_iso_ts_cached(r["updated_at"]),
             )
 
     def save_offset(self, offset: ReplayOffset) -> None:

@@ -135,6 +135,7 @@ export function SearchPalette() {
   // v33: brief toast-style confirmation when a save lands.
   const [justSaved, setJustSaved] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const reqIdRef = useRef(0); // monotonically increasing — drop stale responses
   const nav = useNavigate();
@@ -146,8 +147,21 @@ export function SearchPalette() {
     id: "search-palette",
     open,
     onClose: () => setOpen(false),
-    lockBody: true,
+    lockBody: false,
   });
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [open]);
   useEffect(() => {
     openRef.current = open;
   }, [open]);
@@ -437,8 +451,6 @@ export function SearchPalette() {
     if (el) el.scrollIntoView({ block: "nearest" });
   }, [selected, open]);
 
-  if (!open) return null;
-
   // Section boundaries for header insertion — we count to know where to
   // print "Records" / "Symbols" / "Clusters" labels.
   const recordCount = result?.records.length ?? 0;
@@ -446,57 +458,91 @@ export function SearchPalette() {
   const clusterCount = result?.clusters.length ?? 0;
 
   return (
-    <div
-      data-testid="search-palette"
-      className="search-palette fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-24 px-4"
-      onClick={() => setOpen(false)}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search palette"
-        className="w-full max-w-2xl rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft animate-modal-enter"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div id="search-palette-instructions" className="sr-only">
-          {hasQuery
-            ? "Search results loaded. Use up and down arrow keys to navigate, Enter to open, Command S to save, and Escape to close."
-            : "Use up and down arrow keys to navigate saved searches, Enter to run, Backspace to remove, and Escape to close."}
-        </div>
-        <div className="flex items-center gap-2 border-b border-[color:var(--border)] px-3 focus-within:ring-1 focus-within:ring-accent/50 focus-within:border-accent transition-all duration-200">
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Search records, symbols, clusters..."
-            aria-label="Search query"
-            aria-describedby="search-palette-instructions"
-            data-testid="search-palette-input"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={open}
-            aria-controls="search-palette-listbox"
-            aria-activedescendant={selectablesCount > 0 ? `search-palette-option-${selected}` : undefined}
-            className="flex-1 bg-transparent py-3 text-sm outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="btn py-1 px-2 text-[10px] leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            aria-label="Close search palette"
-          >
-            close
-          </button>
-        </div>
+    <div className="relative search-palette-container" ref={wrapRef}>
+      <div className="flex items-center gap-1.5 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2.5 py-1 focus-within:ring-1 focus-within:ring-accent/50 focus-within:border-accent transition-all duration-200 w-44 focus-within:w-64">
+        <Icon name="search" size={12} className="text-[color:var(--fg-dim)] shrink-0" />
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKey}
+          onFocus={() => setOpen(true)}
+          placeholder="Search..."
+          aria-label="Search query"
+          aria-describedby="search-palette-instructions"
+          data-testid="search-palette-input"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls="search-palette-listbox"
+          aria-activedescendant={selectablesCount > 0 ? `search-palette-option-${selected}` : undefined}
+          className="bg-transparent text-xs outline-none w-full placeholder-[color:var(--fg-dim)] text-[color:var(--fg)]"
+        />
+        {!open && (
+          <span className="text-[9px] font-mono text-[color:var(--fg-dim)] bg-[color:var(--bg-elev)] px-1 py-0.5 rounded border border-[color:var(--border)] leading-none select-none shrink-0">
+            ⌘P
+          </span>
+        )}
+      </div>
+
+      <div id="search-palette-instructions" className="sr-only">
+        {hasQuery
+          ? "Search results loaded. Use up and down arrow keys to navigate, Enter to open, Command S to save, and Escape to close."
+          : "Use up and down arrow keys to navigate saved searches, Enter to run, Backspace to remove, and Escape to close."}
+      </div>
+
+      {open && (
         <div
-          ref={listRef}
-          id="search-palette-listbox"
-          role="listbox"
-          aria-label="Search results and saved queries"
-          className="max-h-[28rem] overflow-auto p-1"
+          data-testid="search-palette"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search palette"
+          className="absolute right-0 top-full mt-1.5 w-[32rem] max-w-[90vw] z-50 rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-lg animate-fade-in flex flex-col overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
         >
-          {/* ── Empty-query view: SAVED queries (v33) ───────────── */}
+          <div className="flex items-center justify-between border-b border-[color:var(--border)] px-3 py-2 bg-[color:var(--bg-elev2)] shrink-0">
+            <span className="text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)] font-semibold">Search workstation</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="btn py-0.5 px-1.5 text-[9px] leading-none focus:outline-none focus-visible:ring-1 focus-visible:ring-accent hover:text-[color:var(--accent)]"
+              aria-label="Close search palette"
+            >
+              close
+            </button>
+          </div>
+          <div
+            ref={listRef}
+            id="search-palette-listbox"
+            role="listbox"
+            aria-label="Search results and saved queries"
+            className="max-h-[24rem] overflow-auto p-1"
+          >
+          {/* ── Recommended Symbols ── */}
+          {!hasQuery && (
+            <div className="px-3 py-2 border-b border-[color:var(--border)] mb-2" data-testid="search-palette-recommended-section">
+              <div className="text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)] label mb-1.5">
+                Recommended
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {["BTC-USD", "ETH-USD", "AAPL", "MSFT", "NVDA", "TSLA", "XU100.IS", "THYAO.IS", "PLTR", "AMZN"].map((sym) => (
+                  <button
+                    key={sym}
+                    type="button"
+                    onClick={() => {
+                      setInput(sym);
+                      setDebounced(sym);
+                      setSelected(0);
+                      inputRef.current?.focus();
+                    }}
+                    className="chip text-[11px] px-2 py-0.5 hover:bg-[color:var(--bg-elev2)] hover:border-[color:var(--accent)] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {!hasQuery && visibleSaved.length === 0 && (
             <div className="px-3 py-4 text-[11px] text-[color:var(--fg-dim)] text-center">
               Type to search across records, symbols, and clusters.
@@ -729,6 +775,7 @@ export function SearchPalette() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

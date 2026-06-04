@@ -140,7 +140,6 @@ export function HelpDrawer() {
         aria-labelledby="help-drawer-title"
         aria-describedby="help-drawer-instructions"
         onKeyDownCapture={handleKeyDownCapture}
-        hidden={!open}
         // The `inert` attribute removes the subtree from the tab order AND
         // hides it from assistive tech. `aria-hidden` alone hides from SR
         // but interactive children stay focusable, which makes Tab vanish
@@ -150,7 +149,9 @@ export function HelpDrawer() {
         {...(!open ? { inert: "" as unknown as boolean } : {})}
         data-testid="help-drawer"
         data-state={open ? "open" : "closed"}
-        className="fixed inset-y-0 right-0 z-[45] flex w-[calc(100vw-1rem)] sm:w-[360px] flex-col border-l border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft transition-transform duration-220 ease-out max-w-[calc(100vw-1rem)]"
+        className={`fixed inset-y-0 right-0 z-[45] flex w-[calc(100vw-1rem)] sm:w-[360px] flex-col border-l border-[color:var(--border)] bg-[color:var(--bg-elev)] shadow-soft transition-transform duration-220 ease-out max-w-[calc(100vw-1rem)] ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
         data-open={open ? "true" : "false"}
         style={{ transitionDuration: "220ms" }}
       >

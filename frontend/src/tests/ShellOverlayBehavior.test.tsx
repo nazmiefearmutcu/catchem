@@ -275,10 +275,9 @@ describe("Shell overlay behavior", () => {
     expect(cmdBtn).toHaveClass("focus-visible:ring-1");
     expect(cmdBtn).toHaveClass("focus-visible:ring-accent");
 
-    const searchBtn = screen.getByRole("button", { name: "Open search palette" });
-    expect(searchBtn).toHaveClass("focus:outline-none");
-    expect(searchBtn).toHaveClass("focus-visible:ring-1");
-    expect(searchBtn).toHaveClass("focus-visible:ring-accent");
+    const searchInput = screen.getByTestId("search-palette-input");
+    expect(searchInput).toHaveClass("outline-none");
+    expect(searchInput.parentElement).toHaveClass("focus-within:ring-1");
 
     // 4. Primary nav links
     const overviewLinks = screen.getAllByRole("link", { name: "Overview" });

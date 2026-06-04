@@ -639,3 +639,32 @@ def test_spillover_edge_cases(monkeypatch) -> None:
     # 6. _parse_ts invalid inputs directly
     assert sp._parse_ts(None) is None
     assert sp._parse_ts("") is None
+
+
+def test_parse_ts_optimization_coverage_spillover() -> None:
+    from catchem.quant.spillover import _parse_ts
+    
+    # 1. Invalid values
+    assert _parse_ts(123) is None
+    assert _parse_ts("   ") is None
+    
+    # 2. Parse cache hits & formats
+    t1 = "2024-01-01T09:00:00Z"
+    t2 = "2024-01-01T09:00:00"
+    
+    res1 = _parse_ts(t1)
+    assert res1 is not None
+    res1_again = _parse_ts(t1)
+    assert res1_again is res1
+    
+    # Verify fallback parsing and ValueError handling
+    assert _parse_ts("invalid-date") is None
+    
+    # Verify naive datetime gets UTC tzinfo
+    res2 = _parse_ts(t2)
+    assert res2.tzinfo == UTC
+    
+    # Verify non-UTC timezone conversion
+    res4 = _parse_ts("2024-01-01T09:00:00+03:00")
+    assert res4.tzinfo == UTC
+    assert res4.hour == 6

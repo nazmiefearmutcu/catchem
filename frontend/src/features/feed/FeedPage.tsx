@@ -33,6 +33,21 @@ export function FeedPage() {
   const { captureId } = useParams();
   const nav = useNavigate();
 
+  const [showDropdown, setShowDropdown] = useState(false);
+  const feedSearchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (feedSearchRef.current && !feedSearchRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   const qc = useQueryClient();
   const facets = useQuery({ queryKey: ["facets"], queryFn: () => api.facets(500), staleTime: 10_000 });
   // Top user-defined tags — distinct from pipeline labels above. Refetched on
@@ -489,7 +504,7 @@ export function FeedPage() {
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
       {/* Sidebar — filters */}
       <aside className="card grid gap-3 h-fit lg:sticky lg:top-3">
-        <div>
+        <div className="relative" ref={feedSearchRef}>
           <label className="label" htmlFor="q">search</label>
           <input
             id="q"
@@ -498,8 +513,40 @@ export function FeedPage() {
             placeholder={t("feed.search.placeholder")}
             value={filters.q ?? ""}
             onChange={(e) => setFilter("q", e.target.value || null)}
+            onFocus={() => setShowDropdown(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setShowDropdown(false);
+                e.stopPropagation();
+              }
+            }}
             aria-label="Search records"
           />
+          {showDropdown && (
+            <div
+              className="absolute top-full left-0 z-20 w-full mt-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] p-3 shadow-lg animate-fade-in"
+              data-testid="feed-recommended-section"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)] label mb-2 font-semibold">
+                recommended
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {["AAPL", "NVDA", "TSLA", "BTC-USD", "XU100.IS"].map((sym) => (
+                  <button
+                    key={sym}
+                    type="button"
+                    onClick={() => {
+                      setFilter("q", filters.q === sym ? null : sym);
+                      setShowDropdown(false);
+                    }}
+                    className={`chip text-[10px] py-0.5 px-2 ${filters.q === sym ? "chip-active" : ""}`}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div>
           <div className="label mb-1"><JargonTooltip term="finance relevance score">relevance</JargonTooltip></div>

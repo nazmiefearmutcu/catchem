@@ -47,6 +47,7 @@ z-scores, not a peek-ahead artefact.
 
 from __future__ import annotations
 
+import functools
 import statistics
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -133,19 +134,8 @@ class SpilloverReport:
 # ---------------------------------------------------------------------------
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse an ISO timestamp into a tz-aware UTC datetime.
-
-    Accepts the ``Z`` shortcut and naive strings (assumed UTC).
-    Returns ``None`` for missing/unparseable input so callers can fall
-    through to a secondary field.
-    """
-
-    if not isinstance(value, str) or not value:
-        return None
-    raw = value.strip()
-    if not raw:
-        return None
+@functools.lru_cache(maxsize=1024)
+def _parse_ts_cached(raw: str) -> datetime | None:
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
     try:
@@ -157,6 +147,21 @@ def _parse_ts(value: Any) -> datetime | None:
     if parsed.tzinfo is UTC:
         return parsed
     return parsed.astimezone(UTC)
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
+
+    Returns ``None`` for missing/unparseable input so callers can fall
+    through to a secondary field.
+    """
+
+    if type(value) is not str or not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return _parse_ts_cached(raw)
 
 
 def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:

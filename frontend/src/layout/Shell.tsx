@@ -379,15 +379,7 @@ export function Shell() {
             >
               <span className="kbd">⌘K</span>
             </button>
-            <button
-              type="button"
-              onClick={openSearchPalette}
-              className="btn hidden sm:inline-flex focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              title="Open search palette (records, symbols, clusters)"
-              aria-label="Open search palette"
-            >
-              <span className="kbd">⌘P</span>
-            </button>
+            <SearchPalette />
           </div>
         </div>
       </header>
@@ -491,7 +483,7 @@ export function Shell() {
       </footer>
 
       <CommandPalette />
-      <SearchPalette />
+
       <ShortcutOverlay />
       <OnboardingModal />
       <ToastTray />

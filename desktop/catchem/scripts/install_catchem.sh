@@ -84,7 +84,7 @@ bash "$CATCHEM_DIR/scripts/verify_catchem_bundle.sh" "$APP_SRC"
 APP_DST="/Applications/Catchem.app"
 echo "[install_catchem] installing to $APP_DST"
 if [ -d "$APP_DST" ]; then
-  BACKUP="/Applications/Catchem.app.backup.$(/bin/date +%Y%m%d-%H%M%S)"
+  BACKUP="/Applications/Catchem.backup.$(/bin/date +%Y%m%d-%H%M%S)"
   echo "[install_catchem] backing up existing app to $BACKUP"
   /usr/bin/ditto --rsrc "$APP_DST" "$BACKUP"
   /bin/rm -rf "$APP_DST"
@@ -93,11 +93,11 @@ if [ -d "$APP_DST" ]; then
   # net), delete older. Each Catchem.app is ~360MB; without this guard the
   # /Applications volume hits "No space left on device" after ~25 installs.
   KEEP=2
-  TOTAL=$(ls -1d /Applications/Catchem.app.backup.* 2>/dev/null | wc -l | tr -d ' ')
+  TOTAL=$(ls -1d /Applications/Catchem.backup.* 2>/dev/null | wc -l | tr -d ' ')
   if [ "$TOTAL" -gt "$KEEP" ]; then
     PRUNE=$((TOTAL - KEEP))
     echo "[install_catchem] pruning $PRUNE old backup(s) (keeping $KEEP most recent)"
-    ls -1d /Applications/Catchem.app.backup.* 2>/dev/null | sort | head -n "$PRUNE" | while read -r OLD; do
+    ls -1d /Applications/Catchem.backup.* 2>/dev/null | sort | head -n "$PRUNE" | while read -r OLD; do
       /bin/rm -rf "$OLD"
     done
   fi

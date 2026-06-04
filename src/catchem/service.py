@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .chart_context import ChartContextReader
 from .embeddings import Embedder, VectorIndex, make_embedder
@@ -56,7 +57,11 @@ class CatchemService:
         self.sentiment: SentimentClassifier = make_sentiment(settings.models.sentiment_default, use_stubs)
         self.embedder: Embedder = make_embedder(settings.models.embedding, use_stubs)
         self.reranker: Reranker = make_reranker(settings.models.reranker, use_stubs)
-        self.symbol_mapper = SymbolMapper(newsimpact_root=settings.paths.newsimpact_repo)
+        config_path = Path(__file__).resolve().parents[2] / "configs" / "symbols.yaml"
+        self.symbol_mapper = SymbolMapper(
+            config_path=config_path if config_path.exists() else None,
+            newsimpact_root=settings.paths.newsimpact_repo
+        )
         self.entity_linker = EntityLinker(company_aliases=self.symbol_mapper.alias_dict())
         self.chart_reader = ChartContextReader(settings.paths.newsimpact_repo)
         self.vector_index = vector_index

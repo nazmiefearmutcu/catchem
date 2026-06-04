@@ -1,0 +1,166 @@
+aliases:
+  # Global Tech & Giants (expanded)
+  Advanced Micro Devices: AMD
+  AMD: AMD
+  Palantir Technologies: PLTR
+  Palantir: PLTR
+  MicroStrategy: MSTR
+  Coinbase: COIN
+  Shopify: SHOP
+  Block: SQ
+  Square: SQ
+  Uber: UBER
+  Airbnb: ABNB
+  Spotify: SPOT
+  Zoom: ZM
+  Starbucks: SBUX
+  Nike: NKE
+  Caterpillar: CAT
+  ASML: ASML
+  TSMC: TSM
+  Taiwan Semiconductor: TSM
+  Super Micro Computer: SMCI
+  Super Micro: SMCI
+  Supermicro: SMCI
+  Arm Holdings: ARM
+  Arm: ARM
+  Snowflake: SNOW
+  Alibaba: BABA
+  Baidu: BIDU
+  Tencent: TCEHY
+  Intel: INTC
+  Qualcomm: QCOM
+  Broadcom: AVGO
+  Adobe: ADBE
+  Salesforce: CRM
+  Oracle: ORCL
+  Netflix: NFLX
+  Disney: DIS
+  Visa: V
+  Mastercard: MA
+  PayPal: PYPL
+  Boeing: BA
+  Lockheed Martin: LMT
+  General Electric: GE
+  Ford: F
+  General Motors: GM
+  Toyota: TM
+  Cisco: CSCO
+  Apple: AAPL
+  Microsoft: MSFT
+  Alphabet: GOOGL
+  Google: GOOGL
+  Amazon: AMZN
+  Meta Platforms: META
+  Meta: META
+  Facebook: META
+  Nvidia: NVDA
+  NVIDIA: NVDA
+  Tesla: TSLA
+  Berkshire Hathaway: BRK.B
+  Berkshire: BRK.B
+  JPMorgan: JPM
+  Goldman Sachs: GS
+  Bank of America: BAC
+  Citigroup: C
+  Morgan Stanley: MS
+  Wells Fargo: WFC
+  BlackRock: BLK
+  ExxonMobil: XOM
+  Exxon: XOM
+  Chevron: CVX
+  Shell: SHEL
+  BP: BP
+  Johnson & Johnson: JNJ
+  Pfizer: PFE
+  Moderna: MRNA
+  Eli Lilly: LLY
+  Procter & Gamble: PG
+  Coca-Cola: KO
+  PepsiCo: PEP
+  Walmart: WMT
+  Costco: COST
+  Home Depot: HD
+  McDonald's: MCD
+
+  # Turkish Equities (BIST 100 / 30)
+  Turk Hava Yollari: THYAO.IS
+  Turkish Airlines: THYAO.IS
+  THY: THYAO.IS
+  Aselsan: ASELS.IS
+  Eregli Demir Celik: EREGL.IS
+  Eregli: EREGL.IS
+  Garanti BBVA: GARAN.IS
+  Garanti Bankasi: GARAN.IS
+  Garanti: GARAN.IS
+  Akbank: AKBNK.IS
+  Yapi Kredi: YKBNK.IS
+  Is Bankasi: ISCTR.IS
+  Isbank: ISCTR.IS
+  Tupras: TUPRS.IS
+  Koc Holding: KCHOL.IS
+  Koc: KCHOL.IS
+  Sabanci Holding: SAHOL.IS
+  Sabanci: SAHOL.IS
+  BIM: BIMAS.IS
+  Bim: BIMAS.IS
+  Ford Otosan: FROTO.IS
+  Tofas: TOASO.IS
+  Arcelik: ARCLK.IS
+  Sise Cam: SISE.IS
+  Sisecam: SISE.IS
+  Turk Telekom: TTKOM.IS
+  Turkcell: TCELL.IS
+  Pegasus: PGSUS.IS
+  Petkim: PETKM.IS
+  Emlak Konut: EKGYO.IS
+  Koza Altin: KOZAL.IS
+  Koza Anadolu: KOZAA.IS
+  Kardemir: KARDMD.IS
+  Dogan Holding: DOHOL.IS
+  Hektas: HEKTS.IS
+  Sasa Polyester: SASA.IS
+  Sasa: SASA.IS
+  Kontrolmatik: KONTR.IS
+  Astor Enerji: ASTOR.IS
+  Europower: EUPWR.IS
+  Mia Teknoloji: MIATK.IS
+  Vestel: VESTL.IS
+
+  # Cryptocurrencies
+  Bitcoin: BTC-USD
+  BTC: BTC-USD
+  Ethereum: ETH-USD
+  Ether: ETH-USD
+  ETH: ETH-USD
+  Solana: SOL-USD
+  SOL: SOL-USD
+  Ripple: XRP-USD
+  XRP: XRP-USD
+  Cardano: ADA-USD
+  ADA: ADA-USD
+  Dogecoin: DOGE-USD
+  DOGE: DOGE-USD
+  Polkadot: DOT-USD
+  DOT: DOT-USD
+  Chainlink: LINK-USD
+  Uniswap: UNI-USD
+  Avalanche: AVAX-USD
+  Litecoin: LTC-USD
+  Shiba Inu: SHIB-USD
+
+  # Commodities
+  Brent: BZ=F
+  WTI: CL=F
+  gold: GC=F
+  silver: SI=F
+  copper: HG=F
+  Natural Gas: NG=F
+
+  # FX Pairs
+  EUR/USD: EURUSD=X
+  USD/JPY: USDJPY=X
+  GBP/USD: GBPUSD=X
+  USD/TRY: USDTRY=X
+  EUR/TRY: EURTRY=X
+  GBP/TRY: GBPTRY=X

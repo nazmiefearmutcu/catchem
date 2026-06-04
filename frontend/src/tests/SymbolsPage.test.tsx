@@ -92,6 +92,7 @@ describe("SymbolsPage smoke", () => {
     renderPage(createElement(SymbolsPage));
 
     // AAPL appears (hero top-3 tile + mention-count list both render it).
+    expect((await screen.findAllByText("12 mentions")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("AAPL")).length).toBeGreaterThan(0);
     // "N mentions" shows in both the hero tile and the count list → use All.
     expect(screen.getAllByText("12 mentions").length).toBeGreaterThan(0);

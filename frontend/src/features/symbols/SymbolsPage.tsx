@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { api, fmtDate, fmtPct } from "@/lib/api";
 import { freshnessLabel, useTick } from "@/lib/freshness";
 import { Skeleton, ErrorBox, EmptyState } from "@/components/Skeleton";
@@ -9,6 +9,20 @@ import type { MarketQuote } from "@/types/api";
 export function SymbolsPage() {
   // Re-render every 30s so the hero freshness label keeps advancing.
   useTick();
+  const [showDropdown, setShowDropdown] = useState(false);
+  const symSearchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (symSearchRef.current && !symSearchRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
   const top = useQuery({ queryKey: ["top-symbols"], queryFn: () => api.topSymbols(100) });
   const [q, setQ] = useState("");
   const allItems = top.data?.items ?? [];
@@ -93,13 +107,47 @@ export function SymbolsPage() {
 
       <div className="card">
         <label htmlFor="symq" className="label">filter symbol mentions</label>
-        <input
-          id="symq"
-          className="input w-full mt-1 focus:outline-none focus:ring-1 focus:ring-accent focus-visible:ring-1 focus-visible:ring-accent"
-          placeholder="AAPL mentions, BTC-USD news, ^GSPC mentions..."
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+        <div className="relative mt-1" ref={symSearchRef}>
+          <input
+            id="symq"
+            className="input w-full focus:outline-none focus:ring-1 focus:ring-accent focus-visible:ring-1 focus-visible:ring-accent"
+            placeholder="AAPL mentions, BTC-USD news, ^GSPC mentions..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onFocus={() => setShowDropdown(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setShowDropdown(false);
+                e.stopPropagation();
+              }
+            }}
+          />
+          {showDropdown && (
+            <div
+              className="absolute top-full left-0 z-20 w-full mt-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] p-3 shadow-lg animate-fade-in"
+              data-testid="symbols-recommended-section"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)] label mb-2 font-semibold">
+                recommended
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {["AAPL", "NVDA", "TSLA", "BTC-USD", "XU100.IS"].map((sym) => (
+                  <button
+                    key={sym}
+                    type="button"
+                    onClick={() => {
+                      setQ(q === sym ? "" : sym);
+                      setShowDropdown(false);
+                    }}
+                    className={`chip text-[10px] py-0.5 px-2 ${q === sym ? "chip-active" : ""}`}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       {top.isLoading ? <Skeleton className="h-72" /> :
         top.error ? <ErrorBox err={top.error} /> :

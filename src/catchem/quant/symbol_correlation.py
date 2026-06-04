@@ -18,6 +18,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 
 __all__ = [
     "SymbolPair",
@@ -53,11 +54,24 @@ def _pearson(xs: list[float], ys: list[float]) -> float:
     n = len(xs)
     if n < 2 or n != len(ys):
         return 0.0
-    mx = sum(xs) / n
-    my = sum(ys) / n
-    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
-    vx = sum((x - mx) ** 2 for x in xs)
-    vy = sum((y - my) ** 2 for y in ys)
+    sum_x = 0.0
+    sum_y = 0.0
+    for i in range(n):
+        sum_x += xs[i]
+        sum_y += ys[i]
+    mx = sum_x / n
+    my = sum_y / n
+
+    cov = 0.0
+    vx = 0.0
+    vy = 0.0
+    for i in range(n):
+        dx = xs[i] - mx
+        dy = ys[i] - my
+        cov += dx * dy
+        vx += dx * dx
+        vy += dy * dy
+
     denom = math.sqrt(vx * vy)
     if denom == 0:
         return 0.0
@@ -71,13 +85,8 @@ def _pearson(xs: list[float], ys: list[float]) -> float:
     return r
 
 
-def _parse_ts(value: object) -> datetime | None:
-    """Parse the same ISO shapes spillover accepts (Z suffix, naive=UTC)."""
-    if not isinstance(value, str) or not value:
-        return None
-    raw = value.strip()
-    if not raw:
-        return None
+@lru_cache(maxsize=1024)
+def _parse_ts_cached(raw: str) -> datetime | None:
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
     try:
@@ -89,6 +98,16 @@ def _parse_ts(value: object) -> datetime | None:
     else:
         parsed = parsed.astimezone(UTC)
     return parsed
+
+
+def _parse_ts(value: object) -> datetime | None:
+    """Parse the same ISO shapes spillover accepts (Z suffix, naive=UTC)."""
+    if type(value) is not str:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return _parse_ts_cached(raw)
 
 
 def compute_pairs(
@@ -126,7 +145,9 @@ def compute_pairs(
     # bucket weight for that symbol.
     buckets: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for r in records or []:
-        ts = _parse_ts(r.get("published_ts")) or _parse_ts(r.get("created_at"))
+        ts = _parse_ts(r.get("published_ts"))
+        if ts is None:
+            ts = _parse_ts(r.get("created_at"))
         if ts is None:
             continue
         bucket_key = int(ts.timestamp()) // bucket_secs
@@ -135,7 +156,7 @@ def compute_pairs(
             continue
         seen: set[str] = set()
         for s in raw_symbols:
-            if not isinstance(s, str):
+            if type(s) is not str:
                 continue
             sym = s.strip()
             if not sym or sym in seen:
@@ -174,18 +195,22 @@ def compute_pairs(
     # which is the correct "no contemporaneous signal" answer.
     if max_bk - min_bk + 1 > _MAX_GRID_BUCKETS:
         min_bk = max_bk - _MAX_GRID_BUCKETS + 1
-    sorted_bucket_keys = list(range(min_bk, max_bk + 1))
-    vectors: dict[str, list[float]] = {
-        sym: [float((buckets.get(bk) or {}).get(sym, 0)) for bk in sorted_bucket_keys]
-        for sym in eligible
-    }
+
+    n_buckets = max_bk - min_bk + 1
+    vectors: dict[str, list[float]] = {sym: [0.0] * n_buckets for sym in eligible}
+    for bk, counts in buckets.items():
+        if min_bk <= bk <= max_bk:
+            idx = bk - min_bk
+            for sym, count in counts.items():
+                vec = vectors.get(sym)
+                if vec is not None:
+                    vec[idx] = float(count)
 
     # Pearson r for every unordered pair. eligible cap is small (≈50
     # post-filter) so O(n²) is fine.
     pairs: list[SymbolPair] = []
-    n_buckets = len(sorted_bucket_keys)
     for i, a in enumerate(eligible):
-        for b in eligible[i + 1:]:
+        for b in eligible[i + 1 :]:
             r = _pearson(vectors[a], vectors[b])
             pairs.append(
                 SymbolPair(

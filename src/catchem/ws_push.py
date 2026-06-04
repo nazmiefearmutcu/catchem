@@ -661,7 +661,8 @@ class WebSocketNewsChannel:
             import httpx
             import httpx_ws
 
-            async with httpx.AsyncClient() as client:
+            timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 async with httpx_ws.aconnect_ws(spec.url, client) as ws:
                     self._mark_connected(st)
                     while not self._stop.is_set():

@@ -697,6 +697,11 @@ async def test_connect_and_read_httpx_ws(monkeypatch: pytest.MonkeyPatch) -> Non
             return self.msgs.pop(0)
 
     def mock_aconnect_ws(url, client):
+        assert client.timeout is not None
+        assert client.timeout.connect == 10.0
+        assert client.timeout.read is None
+        assert client.timeout.write == 10.0
+        assert client.timeout.pool == 10.0
         return MockWS(chan)
 
     mock_httpx_ws.aconnect_ws = mock_aconnect_ws
@@ -781,6 +786,11 @@ async def test_connect_and_read_httpx_ws_clean_stop(monkeypatch: pytest.MonkeyPa
             return "msg1"
 
     def mock_aconnect_ws(url, client):
+        assert client.timeout is not None
+        assert client.timeout.connect == 10.0
+        assert client.timeout.read is None
+        assert client.timeout.write == 10.0
+        assert client.timeout.pool == 10.0
         return MockWS(chan)
 
     mock_httpx_ws.aconnect_ws = mock_aconnect_ws

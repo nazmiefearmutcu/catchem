@@ -63,9 +63,7 @@ class TestSamplingDeterminism:
         supervisor.settings.reviewers.deepseek.api_key = "test-key"
         supervisor.settings.reviewers.deepseek.sampling_rate = 0.5
 
-        decisions = [
-            supervisor.reviewers.should_sample_for_deepseek("cap-same") for _ in range(5)
-        ]
+        decisions = [supervisor.reviewers.should_sample_for_deepseek("cap-same") for _ in range(5)]
         assert len(set(decisions)) == 1
 
     def test_rate_zero_never_samples(self, supervisor):
@@ -88,9 +86,7 @@ class TestSamplingDeterminism:
         supervisor.settings.reviewers.deepseek.api_key = "test-key"
         supervisor.settings.reviewers.deepseek.sampling_rate = 0.1
         sampled = sum(
-            1
-            for i in range(1000)
-            if supervisor.reviewers.should_sample_for_deepseek(f"cap-{i:04d}")
+            1 for i in range(1000) if supervisor.reviewers.should_sample_for_deepseek(f"cap-{i:04d}")
         )
         # SHA-256 is uniform — expect 100 ± reasonable jitter.
         assert 70 <= sampled <= 130
@@ -216,9 +212,14 @@ class TestAgreement:
 
     def test_empty_lists_count_as_match(self):
         """Vacuous Jaccard (both empty) is 1.0 — matches set-theory convention."""
-        p = {"is_finance_relevant": False, "finance_relevance_score": 0.1,
-             "asset_classes": [], "impact_reason_codes": [], "candidate_symbols": [],
-             "sentiment_label": "neutral"}
+        p = {
+            "is_finance_relevant": False,
+            "finance_relevance_score": 0.1,
+            "asset_classes": [],
+            "impact_reason_codes": [],
+            "candidate_symbols": [],
+            "sentiment_label": "neutral",
+        }
         a = _compute_agreement(p, p)
         assert a["asset_jaccard"] == 1.0
         assert a["reason_jaccard"] == 1.0
@@ -418,6 +419,71 @@ class TestDeepSeekClient:
         with pytest.raises(ReviewerError) as exc:
             DeepSeekReviewer(api_key="", taxonomy=taxonomy)
         assert exc.value.code == "auth"
+
+    def test_clean_text_utility(self):
+        from catchem.reviewers.deepseek import _clean_text
+        assert _clean_text("hello   world") == "hello world"
+        assert _clean_text("hello\n\n\nworld") == "hello\nworld"
+        assert _clean_text(" \t hello \r\n world \t ") == "hello \n world"
+
+    def test_review_early_slicing_and_cleanup(self, taxonomy):
+        # Construct a massive body with redundant spaces and newlines
+        long_body = "word  " * 5000 + "\n\n\n" * 1000 + "end"
+        cap = AwarenessCaptureView(
+            capture_id="cap-long-body",
+            doc_id="doc-long",
+            title="Fed cuts rates",
+            text=long_body,
+            domain="reuters.com",
+        )
+        body = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "is_finance_relevant": True,
+                                "finance_relevance_score": 0.5,
+                                "asset_classes": ["rates"],
+                                "impact_reason_codes": ["central_bank"],
+                                "candidate_symbols": ["A" * 100],  # huge symbol to test clipping
+                                "sentiment_label": "neutral",
+                                "evidence_sentences": ["B" * 600],  # huge evidence sentence to test clipping
+                                "reason_text": "C" * 2000,  # huge reason text to test clipping
+                            }
+                        )
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+        }
+        client = _MockClient([_MockResponse(200, body)])
+        reviewer = DeepSeekReviewer(
+            api_key="test-key",
+            taxonomy=taxonomy,
+            client=client,
+        )
+        payload = reviewer.review(cap)
+        assert payload.is_finance_relevant is True
+        # Symbol should be capped to 50 chars
+        assert payload.candidate_symbols[0] == "A" * 50
+        # Evidence should be capped to 500 chars
+        assert payload.evidence_sentences[0] == "B" * 500
+        # Reason text should be capped to 1000 chars
+        assert payload.reason_text == "C" * 1000
+
+        # Now verify the prompt generated has the cleaned and sliced body
+        _called_url, called_json = client.calls[0]
+        called_prompt = called_json["messages"][1]["content"]
+        # The body in the prompt must be clean and not have redundant spaces/newlines
+        assert "word word" in called_prompt
+        assert "\n\n\n" not in called_prompt
+        # The body must be exactly capped to 6000 characters
+        # Let's find the start of body in prompt
+        body_start = called_prompt.find("body:\n") + 6
+        body_end = called_prompt.find("\n</article>")
+        prompt_body = called_prompt[body_start:body_end]
+        assert len(prompt_body) <= 6000
 
 
 # ── registry integration ──────────────────────────────────────────────────

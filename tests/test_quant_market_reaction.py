@@ -332,3 +332,30 @@ def test_market_reaction_coverage_gaps() -> None:
     assert missing_15m_report.headline_excess_return_15m is None
     assert tuple(row.horizon for row in missing_15m_report.horizons) == ("5m", "1h")
 
+
+def test_optimization_coverage_gaps() -> None:
+    # Test asset_classes fallback where none matches
+    provider = FakeQuoteProvider()
+    record = {
+        "capture_id": "cap-opt-gaps",
+        "published_ts": None,
+        "candidate_symbols": [],
+        "asset_classes": ["some_unsupported_class"],
+    }
+    report = compute_reaction(record, provider)
+    assert all(row.symbol == "SPY" for row in report.horizons)
+
+    # Test empty benchmark_symbol via spaces (triggers bench empty logic)
+    report_empty_bench = compute_reaction(
+        _aapl_record(),
+        provider,
+        benchmark_symbol="   ",
+    )
+    assert report_empty_bench.benchmark_symbol == "SPY"
+
+    # Test _safe_float with integer, valid numeric string, and non-finite numeric string
+    from catchem.quant.market_reaction import _safe_float
+
+    assert _safe_float(42) == 42.0
+    assert _safe_float("42.42") == 42.42
+    assert _safe_float("inf") is None

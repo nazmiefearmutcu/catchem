@@ -49,11 +49,11 @@ class MockAsyncClient:
 @pytest.mark.asyncio
 async def test_stream_happy_path():
     lines = [
-        "data: {\"choices\": [{\"delta\": {\"content\": \"Hello\"}}]}",
+        'data: {"choices": [{"delta": {"content": "Hello"}}]}',
         "",  # empty line
         ": heartbeat",  # comment line
-        "data: {\"choices\": [{\"delta\": {\"content\": \" World\"}}]}",
-        "data: {\"usage\": {\"prompt_tokens\": 10, \"completion_tokens\": 5}}",
+        'data: {"choices": [{"delta": {"content": " World"}}]}',
+        'data: {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}',
         "data: [DONE]",
     ]
     response = MockAsyncResponse(200, lines=lines)
@@ -101,7 +101,7 @@ async def test_stream_http_error_non_200():
 async def test_stream_invalid_json_skipped():
     lines = [
         "data: {invalid json}",
-        "data: {\"choices\": [{\"delta\": {\"content\": \"Valid\"}}]}",
+        'data: {"choices": [{"delta": {"content": "Valid"}}]}',
         "data: [DONE]",
     ]
     response = MockAsyncResponse(200, lines=lines)
@@ -200,7 +200,6 @@ async def test_stream_own_client_creation(monkeypatch):
 
 
 # ── Synchronous & edge-case unit tests for DeepSeekReviewer ──────────────────
-
 
 
 class _SyncMockResponse:
@@ -320,6 +319,7 @@ def test_reviewer_sync_choices_content_not_object(taxonomy, cap):
 
 def test_as_bool_variants():
     from catchem.reviewers.deepseek import _as_bool
+
     assert _as_bool(1) is True
     assert _as_bool(0) is False
     assert _as_bool(1.5) is True
@@ -331,6 +331,7 @@ def test_as_bool_variants():
 
 def test_as_clamped_float_variants():
     from catchem.reviewers.deepseek import _as_clamped_float
+
     assert _as_clamped_float("invalid") == 0.0
     assert _as_clamped_float(float("nan")) == 0.0
     assert _as_clamped_float(float("inf")) == 0.0
@@ -342,7 +343,7 @@ def test_as_clamped_float_variants():
 async def test_stream_additional_branches():
     lines = [
         "invalid_line",
-        "data: {\"choices\": [{\"delta\": {\"content\": null}}]}",
+        'data: {"choices": [{"delta": {"content": null}}]}',
         "data: [DONE]",
     ]
     response = MockAsyncResponse(200, lines=lines)
@@ -382,8 +383,10 @@ def test_reviewer_injected_client_close_noop(taxonomy):
     class InjectedClient:
         def __init__(self):
             self.closed = False
+
         def close(self):
             self.closed = True
+
     client = InjectedClient()
     reviewer = DeepSeekReviewer(api_key="key", taxonomy=taxonomy, client=client)  # type: ignore
     assert not reviewer._owns_client
@@ -431,4 +434,13 @@ async def test_stream_timeout_seconds_config(monkeypatch):
     assert timeout_passed.read == 27.5
 
 
+def test_deepseek_precompiled_regex_patterns():
+    import re
 
+    from catchem.reviewers.deepseek import _NEWLINES_RE, _SPACES_AND_TABS_RE, _clean_text
+
+    assert isinstance(_SPACES_AND_TABS_RE, re.Pattern)
+    assert isinstance(_NEWLINES_RE, re.Pattern)
+
+    assert _clean_text("abc\t\tdef  ghi") == "abc def ghi"
+    assert _clean_text("\n\nline1\r\n\r\nline2\n") == "line1\nline2"

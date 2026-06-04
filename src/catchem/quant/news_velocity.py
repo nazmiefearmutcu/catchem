@@ -25,9 +25,9 @@ all-zero report rather than raising.
 
 from __future__ import annotations
 
+import functools
 import math
 import statistics
-from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -73,18 +73,8 @@ def _classify_regime(z: float) -> str:
     return "calm"
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
-
-    Returns ``None`` for non-string, empty, or unparseable input so the
-    caller can drop bad rows without exception handling.
-    """
-
-    if not isinstance(value, str):
-        return None
-    raw = value.strip()
-    if not raw:
-        return None
+@functools.lru_cache(maxsize=1024)
+def _parse_ts_cached(raw: str) -> datetime | None:
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
     try:
@@ -98,12 +88,38 @@ def _parse_ts(value: Any) -> datetime | None:
     return parsed
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
+
+    Returns ``None`` for non-string, empty, or unparseable input so the
+    caller can drop bad rows without exception handling.
+    """
+
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return _parse_ts_cached(raw)
+
+
 def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:
     """Prefer ``published_ts``; fall back to ``created_at``."""
 
-    return _parse_ts(record.get("published_ts")) or _parse_ts(
-        record.get("created_at")
-    )
+    pub = record.get("published_ts")
+    if pub is not None:
+        ts = _parse_ts(pub)
+        if ts is not None:
+            return ts
+    cre = record.get("created_at")
+    if cre is not None:
+        return _parse_ts(cre)
+    return None
+
+
+@functools.lru_cache(maxsize=1024)
+def _get_timestamp(dt: datetime) -> float:
+    return dt.timestamp()
 
 
 def _empty(bucket_minutes: int, window_minutes: int) -> VelocityReport:
@@ -164,7 +180,9 @@ def compute_velocity(
 
     latest = max(timestamps)
     window_start = latest - timedelta(minutes=window_minutes)
-    in_window = [ts for ts in timestamps if ts >= window_start]
+    window_start_epoch = _get_timestamp(window_start)
+
+    in_window = [ts for ts in timestamps if _get_timestamp(ts) >= window_start_epoch]
 
     if not in_window:
         return _empty(bucket_minutes, window_minutes)
@@ -172,20 +190,17 @@ def compute_velocity(
     # Bucket using epoch-second arithmetic — no anchor drift across calls
     # because every bucket key is `floor(epoch / bucket_seconds)`.
     bucket_secs = bucket_minutes * 60
-    bucket_counts: Counter[int] = Counter()
+    bucket_counts: dict[int, int] = {}
     for ts in in_window:
-        bk = int(ts.timestamp()) // bucket_secs
-        bucket_counts[bk] += 1
+        bk = int(_get_timestamp(ts)) // bucket_secs
+        bucket_counts[bk] = bucket_counts.get(bk, 0) + 1
 
-    earliest_bucket = int(window_start.timestamp()) // bucket_secs
-    latest_bucket = int(latest.timestamp()) // bucket_secs
+    earliest_bucket = int(window_start_epoch) // bucket_secs
+    latest_bucket = int(_get_timestamp(latest)) // bucket_secs
 
     # Fill zeros across the full bucket range so EMAs and the baseline
     # see a true rate timeseries (a 0-arrival bucket IS information).
-    sequence: list[float] = []
-    for b in range(earliest_bucket, latest_bucket + 1):
-        count = bucket_counts.get(b, 0)
-        sequence.append(count / bucket_minutes)
+    sequence = [bucket_counts.get(b, 0) / bucket_minutes for b in range(earliest_bucket, latest_bucket + 1)]
 
     if not sequence:
         return _empty(bucket_minutes, window_minutes)
@@ -200,14 +215,39 @@ def compute_velocity(
         ema_fast = _ALPHA_FAST * x + (1.0 - _ALPHA_FAST) * ema_fast
         ema_slow = _ALPHA_SLOW * x + (1.0 - _ALPHA_SLOW) * ema_slow
 
-    baseline_rate = statistics.median(sequence)
+    use_fast_median = (
+        getattr(statistics.median, "__name__", None) == "median"
+        and getattr(statistics.median, "__module__", None) == "statistics"
+    )
+    if use_fast_median:
+        n_seq = len(sequence)
+        s_seq = sorted(sequence)
+        mid = n_seq // 2
+        if n_seq % 2 == 1:
+            baseline_rate = s_seq[mid]
+        else:
+            baseline_rate = (s_seq[mid - 1] + s_seq[mid]) / 2.0
+    else:
+        baseline_rate = statistics.median(sequence)
+
     if len(sequence) >= 2:
-        try:
-            baseline_std = statistics.stdev(sequence)
-        except statistics.StatisticsError:
-            baseline_std = 0.0
+        use_fast_std = (
+            getattr(statistics.stdev, "__name__", None) == "stdev"
+            and getattr(statistics.stdev, "__module__", None) == "statistics"
+        )
+        if use_fast_std:
+            n = len(sequence)
+            mean_val = sum(sequence) / n
+            variance = sum((x - mean_val) * (x - mean_val) for x in sequence) / (n - 1)
+            baseline_std = max(0.0, variance) ** 0.5
+        else:
+            try:
+                baseline_std = statistics.stdev(sequence)
+            except statistics.StatisticsError:
+                baseline_std = 0.0
     else:
         baseline_std = 0.0
+
     if not math.isfinite(baseline_std) or baseline_std < 0.0:
         baseline_std = 0.0
 

@@ -21,9 +21,7 @@ _BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def _ts(offset_seconds: float) -> str:
-    return (_BASE + timedelta(seconds=offset_seconds)).replace(
-        microsecond=0
-    ).isoformat()
+    return (_BASE + timedelta(seconds=offset_seconds)).replace(microsecond=0).isoformat()
 
 
 def _record(offset_seconds: float, *, capture_id: str | None = None) -> dict:
@@ -310,9 +308,7 @@ def test_single_bucket_sequence_has_zero_stdev_and_zero_accel() -> None:
     """
 
     base = 300 * 100  # an exact 5-min bucket boundary in epoch seconds
-    report = compute_velocity(
-        [{"published_ts": _at(base + 120)}], bucket_minutes=5, window_minutes=1
-    )
+    report = compute_velocity([{"published_ts": _at(base + 120)}], bucket_minutes=5, window_minutes=1)
     assert report.samples == 1
     assert report.current_rate_per_min == pytest.approx(0.2)  # 1 / 5 min
     assert report.baseline_rate == pytest.approx(0.2)
@@ -426,3 +422,24 @@ def test_compute_velocity_stdev_error_and_non_finite(monkeypatch) -> None:
         report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
         assert report.baseline_std == 0.0
 
+
+def test_compute_velocity_fallback_paths(monkeypatch) -> None:
+    """Test fallback paths for median and stdev when they are monkeypatched."""
+    import statistics
+
+    def custom_median(seq):
+        return 42.0
+
+    def custom_stdev(seq):
+        return 7.0
+
+    monkeypatch.setattr(statistics, "median", custom_median)
+    monkeypatch.setattr(statistics, "stdev", custom_stdev)
+
+    records = [
+        {"published_ts": "2026-01-01T12:00:00Z"},
+        {"published_ts": "2026-01-01T12:05:00Z"},
+    ]
+    report = compute_velocity(records, bucket_minutes=5, window_minutes=60)
+    assert report.baseline_rate == 42.0
+    assert report.baseline_std == 7.0

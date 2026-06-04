@@ -34,8 +34,9 @@ def test_central_bank_and_index_detected() -> None:
 
 def test_fed_central_bank_does_not_match_federation() -> None:
     e = EntityLinker()
-    h = e.extract(title="UN Federation of Trade Unions condemns sanctions",
-                  text="The federation released a statement.")
+    h = e.extract(
+        title="UN Federation of Trade Unions condemns sanctions", text="The federation released a statement."
+    )
     cbs = h.by_kind("central_bank")
     assert "Fed" not in cbs, (
         "Substring 'Fed' inside 'Federation' must NOT trigger central-bank match. "
@@ -54,8 +55,7 @@ def test_dow_index_does_not_match_inside_down() -> None:
     h = e.extract(title="Markets are down on rate fears", text="The shutdown weighs on sentiment.")
     idxs = h.by_kind("index")
     assert "Dow" not in idxs, (
-        f"Substring 'Dow' inside 'down'/'shutdown' must NOT trigger index match. "
-        f"Got idxs={idxs}."
+        f"Substring 'Dow' inside 'down'/'shutdown' must NOT trigger index match. Got idxs={idxs}."
     )
 
 
@@ -134,7 +134,6 @@ def test_entity_linker_coverage_gaps() -> None:
     assert "SEC" not in h3.tickers
     assert "MSFT" in h3.tickers
 
-
     # 4. Known currencies detection
     h4 = e3.extract(title="USD drops", text="EUR rises.")
     assert "USD" in h4.by_kind("currency")
@@ -150,3 +149,14 @@ def test_entity_linker_coverage_gaps() -> None:
     assert "Bitcoin" in h6.by_kind("crypto")
     assert "BTC" in h6.by_kind("crypto")
 
+
+def test_alias_pattern_cache() -> None:
+    from catchem.entity_linker import _compile_alias_pattern
+
+    _compile_alias_pattern.cache_clear()
+    pat1 = _compile_alias_pattern("testalias")
+    pat2 = _compile_alias_pattern("testalias")
+    assert pat1 is pat2
+    stats = _compile_alias_pattern.cache_info()
+    assert stats.hits == 1
+    assert stats.misses == 1

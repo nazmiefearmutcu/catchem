@@ -100,16 +100,12 @@ class LeadLagReport:
 
 @functools.lru_cache(maxsize=8192)
 def _parse_ts_cached(raw: str) -> datetime | None:
-    if raw.endswith("Z"):
-        normalized = raw[:-1] + "+00:00"
-    else:
-        normalized = raw
     try:
-        dt = datetime.fromisoformat(normalized)
+        from catchem.storage import _parse_iso_ts_cached
+
+        dt = _parse_iso_ts_cached(raw)
     except ValueError:
         return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
     if dt.tzinfo is UTC:
         return dt
     return dt.astimezone(UTC)

@@ -113,6 +113,8 @@ class ApiConfig(BaseModel):
     )
     recent_limit_default: int = 50
     recent_limit_max: int = 500
+    # Maximum payload size in bytes for database file imports (e.g. SQLite backups)
+    max_import_size_bytes: int = 200 * 1024 * 1024
 
 
 class StorageConfig(BaseModel):

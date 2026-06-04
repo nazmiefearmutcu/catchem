@@ -42,6 +42,7 @@ deterministic for a given input.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections import defaultdict
 from collections.abc import Mapping
@@ -139,16 +140,8 @@ class SentimentMomentumReport:
 # ---------------------------------------------------------------------------
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
-
-    Naive strings are interpreted as UTC. Anything unparseable yields
-    ``None`` so callers can fall through to a secondary field.
-    """
-
-    if not isinstance(value, str) or not value:
-        return None
-    raw = value.strip()
+@functools.lru_cache(maxsize=1024)
+def _parse_ts_cached(raw: str) -> datetime | None:
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
     try:
@@ -162,12 +155,38 @@ def _parse_ts(value: Any) -> datetime | None:
     return parsed
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
+
+    Naive strings are interpreted as UTC. Anything unparseable yields
+    ``None`` so callers can fall through to a secondary field.
+    """
+
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return _parse_ts_cached(raw)
+
+
 def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:
     """Prefer ``published_ts``; fall back to ``created_at``."""
 
-    return _parse_ts(record.get("published_ts")) or _parse_ts(
-        record.get("created_at")
-    )
+    pub = record.get("published_ts")
+    if pub is not None:
+        ts = _parse_ts(pub)
+        if ts is not None:
+            return ts
+    cre = record.get("created_at")
+    if cre is not None:
+        return _parse_ts(cre)
+    return None
+
+
+@functools.lru_cache(maxsize=1024)
+def _get_timestamp(dt: datetime) -> float:
+    return dt.timestamp()
 
 
 def _floor_bucket(ts: datetime, anchor: datetime, bucket_minutes: int) -> datetime:
@@ -186,6 +205,7 @@ def _floor_bucket(ts: datetime, anchor: datetime, bucket_minutes: int) -> dateti
     return anchor + timedelta(seconds=floor_seconds)
 
 
+@functools.lru_cache(maxsize=1024)
 def _iso(ts: datetime) -> str:
     """Canonical ISO output (always trailing ``+00:00``, no microseconds)."""
 
@@ -195,14 +215,21 @@ def _iso(ts: datetime) -> str:
 def _safe_float(value: Any) -> float | None:
     """Best-effort float coercion; treat NaN/inf/garbage as ``None``."""
 
-    if value is None or isinstance(value, bool):
-        # bool subclasses int — exclude so True doesn't become 1.0.
+    if isinstance(value, float):
+        if value != value or value == float("inf") or value == float("-inf"):
+            return None
+        return value
+    if isinstance(value, int):
+        if isinstance(value, bool):
+            return None
+        return float(value)
+    if value is None:
         return None
     try:
         out = float(value)
     except (TypeError, ValueError):
         return None
-    if out != out or out in (float("inf"), float("-inf")):
+    if out != out or out == float("inf") or out == float("-inf"):
         return None
     return out
 
@@ -380,9 +407,7 @@ def _half_means(nets: list[float]) -> tuple[float, float]:
     if n == 1:
         return nets[0], nets[0]
     split = n // 2  # for n=4 → split=2 (2/2); for n=5 → split=2 (2/3 late)
-    first = nets[:split]
-    last = nets[split:]
-    return sum(first) / len(first), sum(last) / len(last)
+    return sum(nets[:split]) / split, sum(nets[split:]) / (n - split)
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +454,7 @@ def compute_sentiment_momentum(
         raise ValueError("max_tickers must be >= 0")
 
     # Pair every usable record with its resolved timestamp + cleaned symbols.
-    paired: list[tuple[datetime, list[str], Mapping[str, Any]]] = []
+    paired: list[tuple[float, datetime, list[str], Mapping[str, Any]]] = []
     for record in records or []:
         if not isinstance(record, Mapping):
             continue
@@ -439,7 +464,7 @@ def compute_sentiment_momentum(
         symbols = _clean_symbols(record)
         if not symbols:
             continue
-        paired.append((ts, symbols, record))
+        paired.append((_get_timestamp(ts), ts, symbols, record))
 
     if not paired or max_tickers == 0:
         return SentimentMomentumReport(
@@ -448,22 +473,38 @@ def compute_sentiment_momentum(
             tickers=(),
         )
 
-    paired.sort(key=lambda triple: triple[0])
-    anchor = paired[0][0]
+    paired.sort(key=lambda quad: quad[0])
+    anchor_epoch = paired[0][0]
+    anchor = paired[0][1]
     width = timedelta(minutes=bucket_minutes)
+    bucket_seconds = bucket_minutes * 60
 
-    # (symbol, bucket_start) -> _BucketAgg. Two nested mappings would be
-    # marginally cleaner but the flat tuple-keyed defaultdict is faster
-    # and keeps mention totals trivial to derive.
-    cells: dict[tuple[str, datetime], _BucketAgg] = defaultdict(_BucketAgg)
-    per_symbol_buckets: dict[str, set[datetime]] = defaultdict(set)
+    # Cache bucket starts (datetime objects) and ISO ranges by floor_seconds.
+    floor_cache: dict[int, datetime] = {}
+    floor_iso_cache: dict[int, tuple[str, str]] = {}
+
+    # (symbol, floor_seconds) -> _BucketAgg.
+    cells: dict[tuple[str, int], _BucketAgg] = defaultdict(_BucketAgg)
+    per_symbol_buckets: dict[str, set[int]] = defaultdict(set)
     per_symbol_mentions: dict[str, int] = defaultdict(int)
 
-    for ts, symbols, record in paired:
-        bucket_start = _floor_bucket(ts, anchor, bucket_minutes)
+    for ts_epoch, _ts, symbols, record in paired:
+        delta_seconds = int(ts_epoch - anchor_epoch)
+        if delta_seconds < 0:
+            delta_seconds = 0
+        floor_seconds = (delta_seconds // bucket_seconds) * bucket_seconds
+
+        if floor_seconds not in floor_cache:
+            bucket_start = anchor + timedelta(seconds=floor_seconds)
+            floor_cache[floor_seconds] = bucket_start
+            floor_iso_cache[floor_seconds] = (
+                _iso(bucket_start),
+                _iso(bucket_start + width),
+            )
+
         for sym in symbols:
-            cells[(sym, bucket_start)].add(record)
-            per_symbol_buckets[sym].add(bucket_start)
+            cells[(sym, floor_seconds)].add(record)
+            per_symbol_buckets[sym].add(floor_seconds)
             per_symbol_mentions[sym] += 1
 
     tickers: list[TickerMomentum] = []
@@ -478,12 +519,13 @@ def compute_sentiment_momentum(
         total_neutral = 0
         total_negative = 0
 
-        for bucket_start in ordered_starts:
-            agg = cells[(symbol, bucket_start)]
+        for floor_seconds in ordered_starts:
+            agg = cells[(symbol, floor_seconds)]
+            b_start_iso, b_end_iso = floor_iso_cache[floor_seconds]
             buckets.append(
                 SentimentBucket(
-                    bucket_start=_iso(bucket_start),
-                    bucket_end=_iso(bucket_start + width),
+                    bucket_start=b_start_iso,
+                    bucket_end=b_end_iso,
                     count=agg.count,
                     positive=agg.positive,
                     neutral=agg.neutral,
@@ -510,9 +552,7 @@ def compute_sentiment_momentum(
             direction = "stable"
         else:
             first_mean, last_mean = _half_means(nets)
-            momentum = _clamp(
-                last_mean - first_mean, -_MOMENTUM_CLAMP, _MOMENTUM_CLAMP
-            )
+            momentum = _clamp(last_mean - first_mean, -_MOMENTUM_CLAMP, _MOMENTUM_CLAMP)
             # Mean of consecutive deltas — telescopes to
             # (nets[-1] - nets[0]) / (len(nets) - 1), but we compute it
             # explicitly so the intent is obvious from the code.
@@ -532,7 +572,7 @@ def compute_sentiment_momentum(
                 velocity=velocity,
                 direction=direction,
                 flip_detected=flip_detected,
-                last_bucket_start=_iso(ordered_starts[-1]),
+                last_bucket_start=floor_iso_cache[ordered_starts[-1]][0],
             )
         )
 

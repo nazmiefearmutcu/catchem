@@ -161,9 +161,7 @@ def _parse_ts(value: Any) -> datetime | None:
 
 def _record_ts(record: dict) -> datetime | None:
     """Resolve a record's effective timestamp (published > created)."""
-    return _parse_ts(record.get("published_ts")) or _parse_ts(
-        record.get("created_at")
-    )
+    return _parse_ts(record.get("published_ts")) or _parse_ts(record.get("created_at"))
 
 
 def _record_ts_iso(record: dict) -> str | None:
@@ -192,7 +190,7 @@ _W_ENTITIES = 0.10
 _W_TITLE = 0.20
 
 
-def pairwise_similarity(a: dict, b: dict) -> float:
+def pairwise_similarity(a: dict, b: dict, *, _cache: dict[int, Any] | None = None) -> float:
     """Weighted Jaccard similarity over five signal categories.
 
     Returns 0 when the two records have no overlapping signal in any
@@ -204,23 +202,44 @@ def pairwise_similarity(a: dict, b: dict) -> float:
         # Same dict reference → identical input, identical signal.
         return 1.0
 
-    sym_score = _jaccard(
-        _normalize_symbols(a.get("candidate_symbols")),
-        _normalize_symbols(b.get("candidate_symbols")),
-    )
-    reason_score = _jaccard(
-        _normalize_set(a.get("impact_reason_codes")),
-        _normalize_set(b.get("impact_reason_codes")),
-    )
-    asset_score = _jaccard(
-        _normalize_set(a.get("asset_classes")),
-        _normalize_set(b.get("asset_classes")),
-    )
-    entity_score = _jaccard(
-        _normalize_set(a.get("candidate_entities")),
-        _normalize_set(b.get("candidate_entities")),
-    )
-    title_score = _jaccard(_title_tokens(a.get("title")), _title_tokens(b.get("title")))
+    if _cache is not None:
+        if id(a) in _cache:
+            a_syms, a_reasons, a_assets, a_entities, a_title = _cache[id(a)]
+        else:
+            a_syms = _normalize_symbols(a.get("candidate_symbols"))
+            a_reasons = _normalize_set(a.get("impact_reason_codes"))
+            a_assets = _normalize_set(a.get("asset_classes"))
+            a_entities = _normalize_set(a.get("candidate_entities"))
+            a_title = _title_tokens(a.get("title"))
+            _cache[id(a)] = (a_syms, a_reasons, a_assets, a_entities, a_title)
+
+        if id(b) in _cache:
+            b_syms, b_reasons, b_assets, b_entities, b_title = _cache[id(b)]
+        else:
+            b_syms = _normalize_symbols(b.get("candidate_symbols"))
+            b_reasons = _normalize_set(b.get("impact_reason_codes"))
+            b_assets = _normalize_set(b.get("asset_classes"))
+            b_entities = _normalize_set(b.get("candidate_entities"))
+            b_title = _title_tokens(b.get("title"))
+            _cache[id(b)] = (b_syms, b_reasons, b_assets, b_entities, b_title)
+    else:
+        a_syms = _normalize_symbols(a.get("candidate_symbols"))
+        a_reasons = _normalize_set(a.get("impact_reason_codes"))
+        a_assets = _normalize_set(a.get("asset_classes"))
+        a_entities = _normalize_set(a.get("candidate_entities"))
+        a_title = _title_tokens(a.get("title"))
+
+        b_syms = _normalize_symbols(b.get("candidate_symbols"))
+        b_reasons = _normalize_set(b.get("impact_reason_codes"))
+        b_assets = _normalize_set(b.get("asset_classes"))
+        b_entities = _normalize_set(b.get("candidate_entities"))
+        b_title = _title_tokens(b.get("title"))
+
+    sym_score = _jaccard(a_syms, b_syms)
+    reason_score = _jaccard(a_reasons, b_reasons)
+    asset_score = _jaccard(a_assets, b_assets)
+    entity_score = _jaccard(a_entities, b_entities)
+    title_score = _jaccard(a_title, b_title)
 
     total = (
         _W_SYMBOLS * sym_score
@@ -307,7 +326,11 @@ def _mean_relevance(members: list[dict]) -> float:
     return total / len(members)
 
 
-def _coherence(members: list[dict], sim_cache: dict[tuple[int, int], float]) -> float:
+def _coherence(
+    members: list[dict],
+    sim_cache: dict[tuple[int, int], float],
+    feature_cache: dict[int, Any] | None = None,
+) -> float:
     """Mean pairwise similarity across all member pairs."""
     n = len(members)
     if n < 2:
@@ -323,20 +346,26 @@ def _coherence(members: list[dict], sim_cache: dict[tuple[int, int], float]) -> 
                 total += sim_cache[key]
             else:
                 # Fallback (shouldn't happen if cache is primed during clustering).
-                total += pairwise_similarity(members[i], members[j])
+                total += pairwise_similarity(members[i], members[j], _cache=feature_cache)
             pair_count += 1
     return total / pair_count if pair_count else 1.0
 
 
-def _first_last_ts(members: list[dict]) -> tuple[str, str]:
+def _first_last_ts(
+    members: list[dict],
+    ts_cache: dict[int, tuple[datetime | None, str | None]] | None = None,
+) -> tuple[str, str]:
     """Earliest and latest effective ISO timestamps in the cluster.
 
     Falls back to the empty string only if literally nothing is parseable.
     """
     candidates: list[tuple[datetime, str]] = []
     for rec in members:
-        ts = _record_ts(rec)
-        iso = _record_ts_iso(rec)
+        if ts_cache is not None and id(rec) in ts_cache:
+            ts, iso = ts_cache[id(rec)]
+        else:
+            ts = _record_ts(rec)
+            iso = _record_ts_iso(rec) if ts is not None else None
         if ts is None or iso is None:
             continue
         candidates.append((ts, iso))
@@ -384,11 +413,22 @@ def cluster_records(
     if not records:
         return []
 
+    # Pre-parse timestamps and create feature cache to avoid redundant work in nested loops
+    ts_cache: dict[int, tuple[datetime | None, str | None]] = {}
+    feature_cache: dict[int, Any] = {}
+    for rec in records:
+        ts = _record_ts(rec)
+        iso = _record_ts_iso(rec) if ts is not None else None
+        ts_cache[id(rec)] = (ts, iso)
+
+    def get_rec_ts(r: dict) -> datetime | None:
+        return ts_cache[id(r)][0]
+
     # --- 1. Sort by effective timestamp. Records without any timestamp
     #     sort to the end so they still participate in clustering but
     #     don't anchor the window.
     def _sort_key(rec: dict) -> tuple[int, datetime]:
-        ts = _record_ts(rec)
+        ts = get_rec_ts(rec)
         if ts is None:
             return (1, datetime.max.replace(tzinfo=UTC))
         return (0, ts)
@@ -400,10 +440,11 @@ def cluster_records(
     #     order). ``sim_cache`` memoizes the pair similarities so we can
     #     reuse them when computing coherence at the end.
     clusters: list[list[dict]] = []
+    cluster_last_ts: dict[int, datetime | None] = {}
     sim_cache: dict[tuple[int, int], float] = {}
 
     for rec in ordered:
-        rec_ts = _record_ts(rec)
+        rec_ts = get_rec_ts(rec)
 
         best_cluster: list[dict] | None = None
         best_score = similarity_threshold  # strict ≥ threshold below.
@@ -414,17 +455,10 @@ def cluster_records(
             # `window_seconds` of any prior member extends the window.
             within_window = True
             if rec_ts is not None:
-                last_in_cluster: datetime | None = None
-                for member in cluster:
-                    member_ts = _record_ts(member)
-                    if member_ts is None:
-                        continue
-                    if last_in_cluster is None or member_ts > last_in_cluster:
-                        last_in_cluster = member_ts
-                if last_in_cluster is not None:
-                    delta = abs((rec_ts - last_in_cluster).total_seconds())
-                    if delta > window_seconds:
-                        within_window = False
+                last_in_cluster = cluster_last_ts[id(cluster)]
+                delta = abs((rec_ts - last_in_cluster).total_seconds())
+                if delta > window_seconds:
+                    within_window = False
 
             if not within_window:
                 continue
@@ -436,7 +470,7 @@ def cluster_records(
                 if key in sim_cache:
                     score = sim_cache[key]
                 else:
-                    score = pairwise_similarity(member, rec)
+                    score = pairwise_similarity(member, rec, _cache=feature_cache)
                     sim_cache[key] = score
                     sim_cache[(id(rec), id(member))] = score
                 if score > cluster_max:
@@ -447,39 +481,39 @@ def cluster_records(
                 best_cluster = cluster
 
         if best_cluster is None:
-            clusters.append([rec])
+            new_cluster = [rec]
+            clusters.append(new_cluster)
+            if rec_ts is not None:
+                cluster_last_ts[id(new_cluster)] = rec_ts
         else:
             best_cluster.append(rec)
+            if rec_ts is not None:
+                prior_last = cluster_last_ts.get(id(best_cluster))
+                if prior_last is None or rec_ts > prior_last:
+                    cluster_last_ts[id(best_cluster)] = rec_ts
 
     # --- 3. Drop too-small clusters.
     surviving = [c for c in clusters if len(c) >= min_cluster_size]
     if min_distinct_domains > 1:
-        surviving = [
-            c for c in surviving
-            if len(set(_member_domains(c))) >= min_distinct_domains
-        ]
+        surviving = [c for c in surviving if len(set(_member_domains(c))) >= min_distinct_domains]
 
     # --- 4. Build the public EventCluster objects.
     out: list[EventCluster] = []
     for members in surviving:
-        capture_ids = tuple(
-            str(rec.get("capture_id", "")) for rec in members
-        )
+        capture_ids = tuple(str(rec.get("capture_id", "")) for rec in members)
         # Compute coherence using the pair cache populated during clustering.
         # For size-2 the spec says "the single pair score" — _coherence
         # handles that naturally (mean of one pair == that pair).
-        coh = _coherence(members, sim_cache)
+        coh = _coherence(members, sim_cache, feature_cache)
 
-        first_ts, last_ts = _first_last_ts(members)
+        first_ts, last_ts = _first_last_ts(members, ts_cache)
 
         cluster = EventCluster(
             cluster_id=_cluster_id(capture_ids),
             capture_ids=capture_ids,
             first_seen_ts=first_ts,
             last_seen_ts=last_ts,
-            dominant_symbols=_ranked_dominant(
-                members, "candidate_symbols", normalize_upper=True
-            ),
+            dominant_symbols=_ranked_dominant(members, "candidate_symbols", normalize_upper=True),
             dominant_reasons=_ranked_dominant(members, "impact_reason_codes"),
             dominant_assets=_ranked_dominant(members, "asset_classes"),
             member_domains=_member_domains(members),

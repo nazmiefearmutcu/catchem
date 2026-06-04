@@ -163,13 +163,9 @@ def test_record_outside_time_window_does_not_cluster():
         entities=["Apple"],
     )
     r1 = _rec("cap-a", domain="reuters.com", published_ts=base, **common)
-    r2 = _rec(
-        "cap-b", domain="bloomberg.com", published_ts=base + timedelta(minutes=5), **common
-    )
+    r2 = _rec("cap-b", domain="bloomberg.com", published_ts=base + timedelta(minutes=5), **common)
     # 90 minutes later — well past the default 30 min window.
-    r3 = _rec(
-        "cap-c", domain="cnbc.com", published_ts=base + timedelta(minutes=90), **common
-    )
+    r3 = _rec("cap-c", domain="cnbc.com", published_ts=base + timedelta(minutes=90), **common)
 
     clusters = cluster_records([r1, r2, r3], window_seconds=1800)
     assert len(clusters) == 1, "only the in-window pair should cluster"
@@ -456,16 +452,19 @@ def test_pairwise_similarity_identical_dict_reference_is_one():
 
 def test_as_iter_single_value() -> None:
     from catchem.quant.event_clustering import _as_iter
+
     assert list(_as_iter("hello")) == ["hello"]
 
 
 def test_normalize_set_none_element() -> None:
     from catchem.quant.event_clustering import _normalize_set
+
     assert _normalize_set(["val", None, "   ", "val2"]) == frozenset({"val", "val2"})
 
 
 def test_parse_ts_edge_cases() -> None:
     from catchem.quant.event_clustering import _parse_ts
+
     # Naive datetime
     naive = datetime(2026, 5, 27, 12, 0)
     assert _parse_ts(naive).tzinfo == UTC
@@ -485,52 +484,48 @@ def test_parse_ts_edge_cases() -> None:
 
 def test_record_ts_iso_missing() -> None:
     from catchem.quant.event_clustering import _record_ts_iso
+
     assert _record_ts_iso({"published_ts": "invalid", "created_at": "invalid"}) is None
 
 
 def test_ranked_dominant_none_or_empty() -> None:
     from catchem.quant.event_clustering import _ranked_dominant
-    members = [
-        {"symbols": [None, "AAPL", "   ", "AAPL"]},
-        {"symbols": ["AAPL", "MSFT"]}
-    ]
+
+    members = [{"symbols": [None, "AAPL", "   ", "AAPL"]}, {"symbols": ["AAPL", "MSFT"]}]
     res = _ranked_dominant(members, "symbols", top_n=5)
     assert res == ("AAPL",)
 
 
 def test_member_domains_none_or_empty() -> None:
     from catchem.quant.event_clustering import _member_domains
-    members = [
-        {"domain": "bloomberg.com"},
-        {"domain": None},
-        {"domain": "   "}
-    ]
+
+    members = [{"domain": "bloomberg.com"}, {"domain": None}, {"domain": "   "}]
     assert _member_domains(members) == ("bloomberg.com",)
 
 
 def test_mean_relevance_invalid() -> None:
     from catchem.quant.event_clustering import _mean_relevance
+
     assert _mean_relevance([]) == 0.0
     members = [
         {"finance_relevance_score": "not a float"},
         {"finance_relevance_score": None},
-        {"finance_relevance_score": 0.5}
+        {"finance_relevance_score": 0.5},
     ]
     assert _mean_relevance(members) == 0.5 / 3
 
 
 def test_coherence_cache_miss() -> None:
     from catchem.quant.event_clustering import _coherence
-    members = [
-        {"title": "title one"},
-        {"title": "title two"}
-    ]
+
+    members = [{"title": "title one"}, {"title": "title two"}]
     coh = _coherence(members, {})
     assert coh == pairwise_similarity(members[0], members[1])
 
 
 def test_first_last_ts_empty() -> None:
     from catchem.quant.event_clustering import _first_last_ts
+
     assert _first_last_ts([]) == ("", "")
     assert _first_last_ts([{"published_ts": None, "created_at": None}]) == ("", "")
 
@@ -550,7 +545,6 @@ def test_cluster_records_time_window_and_sort() -> None:
     records = [r_no_ts, r1, r2, r_outside, r_member_no_ts]
     clusters = cluster_records(records, window_seconds=100, similarity_threshold=0.0, min_cluster_size=1)
     assert len(clusters) >= 2
-
 
 
 def test_cluster_records_sim_cache_hit() -> None:
@@ -597,3 +591,55 @@ def test_cluster_records_missing_member_ts(monkeypatch) -> None:
     assert len(clusters) > 0
 
 
+def test_pairwise_similarity_fallback_and_cache() -> None:
+    from catchem.quant.event_clustering import pairwise_similarity
+
+    r1 = _rec("r1", title="apple pie")
+    r2 = _rec("r2", title="apple juice")
+    cache = {}
+    sim1 = pairwise_similarity(r1, r2)
+    sim2 = pairwise_similarity(r1, r2, _cache=cache)
+    assert sim1 == sim2
+    assert id(r1) in cache
+    assert id(r2) in cache
+    # Check cache hit works as well
+    sim3 = pairwise_similarity(r1, r2, _cache=cache)
+    assert sim3 == sim1
+
+
+def test_coherence_fallback_and_first_last_ts_fallback() -> None:
+    from catchem.quant.event_clustering import _coherence, _first_last_ts
+
+    r1 = _rec("r1", title="test title", published_ts=datetime(2026, 5, 27, 12, 0, tzinfo=UTC))
+    r2 = _rec("r2", title="test title", published_ts=datetime(2026, 5, 27, 12, 1, tzinfo=UTC))
+    sim_cache = {(id(r1), id(r2)): 0.8, (id(r2), id(r1)): 0.8}
+    coh1 = _coherence([r1, r2], sim_cache, feature_cache=None)
+    assert coh1 == 0.8
+    # Test fallback inside _coherence when key not in sim_cache
+    coh2 = _coherence([r1, r2], {}, feature_cache=None)
+    assert coh2 >= 0.0
+    # Test _first_last_ts fallback with ts_cache=None
+    ts1, ts2 = _first_last_ts([r1, r2], ts_cache=None)
+    assert ts1 != ""
+    assert ts2 != ""
+
+
+def test_cluster_records_last_in_cluster_none() -> None:
+    # A cluster starts with a record without a timestamp, then a record with a timestamp is added.
+    r_no_ts = _rec("r_no_ts", title="test title", published_ts=None)
+    r_no_ts["created_at"] = None
+    r_with_ts = _rec("r_with_ts", title="test title", published_ts=datetime(2026, 5, 27, 12, 0, tzinfo=UTC))
+    # Add an unrelated record without a timestamp to test the branch where a new cluster is created with a None timestamp.
+    r_no_ts_unrelated = _rec(
+        "r_no_ts_unrelated", title="completely different unrelated text", published_ts=None
+    )
+    r_no_ts_unrelated["created_at"] = None
+
+    records = [r_no_ts, r_with_ts, r_no_ts_unrelated]
+    # Use similarity_threshold 0.35 so records do not cluster since title-only match yields similarity 0.20, resulting in 3 separate clusters
+    clusters = cluster_records(records, window_seconds=100, similarity_threshold=0.35, min_cluster_size=1)
+    assert len(clusters) == 3
+    cluster_caps = {frozenset(c.capture_ids) for c in clusters}
+    assert frozenset(["r_no_ts"]) in cluster_caps
+    assert frozenset(["r_with_ts"]) in cluster_caps
+    assert frozenset(["r_no_ts_unrelated"]) in cluster_caps

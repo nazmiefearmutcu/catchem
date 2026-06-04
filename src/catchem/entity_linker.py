@@ -130,7 +130,7 @@ _KNOWN_CRYPTO = {
 }
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=4096)
 def _compile_alias_pattern(alias: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", re.IGNORECASE)
 

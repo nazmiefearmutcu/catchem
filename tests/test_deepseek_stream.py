@@ -396,3 +396,39 @@ def test_estimate_usd_public(taxonomy):
     assert reviewer.estimate_usd(input_tokens=1000, output_tokens=2000) == pytest.approx(0.00247)
 
 
+def test_deepseek_reviewer_timeout_config_propagation(taxonomy):
+    reviewer = DeepSeekReviewer(api_key="key", taxonomy=taxonomy, timeout_seconds=12.5)
+    assert reviewer._client.timeout.read == 12.5
+
+
+@pytest.mark.asyncio
+async def test_stream_timeout_seconds_config(monkeypatch):
+    timeout_passed = None
+
+    class MockAsyncClientReal:
+        def __init__(self, *args, **kwargs):
+            nonlocal timeout_passed
+            timeout_passed = kwargs.get("timeout")
+
+        def stream(self, *args, **kwargs):
+            return MockAsyncResponse(200, lines=["data: [DONE]"])
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClientReal)
+
+    async for _ in stream_chat_completion(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        messages=[],
+        timeout_seconds=27.5,
+    ):
+        pass
+
+    assert timeout_passed is not None
+    assert timeout_passed.read == 27.5
+
+
+

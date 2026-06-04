@@ -240,6 +240,7 @@ class DeepSeekReviewerConfig(BaseModel):
     sampling_rate: float = 0.10
     usd_cap: float = 9.50
     max_output_tokens: int = 600
+    timeout_seconds: float = 30.0
 
 
 class ReviewersConfig(BaseModel):

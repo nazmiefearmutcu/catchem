@@ -106,6 +106,7 @@ class ReviewerRegistry:
                         model=cfg.model,
                         base_url=cfg.base_url or "https://api.deepseek.com",
                         max_output_tokens=cfg.max_output_tokens,
+                        timeout_seconds=cfg.timeout_seconds,
                     )
                 except ReviewerError as exc:
                     logger.warning("deepseek_init_failed", code=exc.code, message=exc.message)

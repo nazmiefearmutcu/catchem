@@ -15,7 +15,7 @@ import time
 import traceback
 from collections import deque
 from collections.abc import Callable
-from dataclasses import asdict, is_dataclass
+from dataclasses import is_dataclass
 from typing import Any
 
 from ..logging import get_logger
@@ -122,12 +122,17 @@ def _safe_call(fn: Callable[..., Any], *args, label: str, **kwargs) -> Any:
 
 def _dataclass_to_dict(value: Any) -> Any:
     """Recursively serialize dataclasses for JSON output."""
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    if isinstance(value, (list, tuple)):
+    t = type(value)
+    if t in (str, int, float, bool, type(None)):
+        return value
+    if t is list:
         return [_dataclass_to_dict(v) for v in value]
-    if isinstance(value, dict):
+    if t is dict:
         return {k: _dataclass_to_dict(v) for k, v in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return {f: _dataclass_to_dict(getattr(value, f)) for f in value.__dataclass_fields__}
+    if t is tuple:
+        return [_dataclass_to_dict(v) for v in value]
     return value
 
 
@@ -150,26 +155,52 @@ class QuantEngine:
         # not safe under concurrent __setitem__ (a rehash mid-insert can drop or
         # duplicate entries), so guard every cache read/write with this lock.
         self._cache_lock = threading.Lock()
+        self._pending_events: dict[str, threading.Event] = {}
 
     # ── cache helpers ────────────────────────────────────────────────────
     def _cached(self, key: str, build: Callable[[], Any]) -> Any:
-        # Double-checked pattern: hold the lock only for the dict read and the
-        # dict write, NEVER while running build(). Holding it across build()
-        # would (a) serialize the whole parallel fan-out and (b) deadlock when
-        # one signal's build() re-enters _cached() (lead_lag → clusters). The
-        # trade-off is that two threads may compute the same uncached key once
-        # (e.g. clusters via its own worker AND via lead_lag's) — wasteful but
-        # correct, since the builds are deterministic and last-write-wins.
         now = time.time()
+        # 1. Fast-path: lock-free read of the cache
+        hit = self._cache.get(key)
+        if hit is not None and (now - hit[0]) < self._ttl:
+            return hit[1]
+
+        event_to_wait = None
+        my_event = None
+
         with self._cache_lock:
+            # Double-check under lock
             hit = self._cache.get(key)
-        if hit is not None:
-            ts, value = hit
-            if (now - ts) < self._ttl:
-                return value
-        value = build()
-        with self._cache_lock:
-            self._cache[key] = (now, value)
+            if hit is not None and (now - hit[0]) < self._ttl:
+                return hit[1]
+
+            # Check if another thread is currently building this key
+            if key in self._pending_events:
+                event_to_wait = self._pending_events[key]
+            else:
+                # We are the builder for this key
+                my_event = threading.Event()
+                self._pending_events[key] = my_event
+
+        if event_to_wait is not None:
+            event_to_wait.wait()
+            # Retrieve value after the other thread completes building it
+            hit = self._cache.get(key)
+            if hit is not None:
+                return hit[1]
+            return build()
+
+        success = False
+        try:
+            value = build()
+            success = True
+        finally:
+            with self._cache_lock:
+                if success:
+                    self._cache[key] = (time.time(), value)
+                self._pending_events.pop(key, None)
+                my_event.set()
+
         return value
 
     def invalidate(self) -> None:
@@ -211,7 +242,9 @@ class QuantEngine:
     def _recent_records(self, limit: int = 500, relevant_only: bool = False) -> list[dict]:
         """Pull the recent corpus once per request and reuse across signals."""
         cache_key = f"records:{limit}:{relevant_only}"
-        return self._cached(cache_key, lambda: self._storage.recent_records(limit=limit, relevant_only=relevant_only))
+        return self._cached(
+            cache_key, lambda: self._storage.recent_records(limit=limit, relevant_only=relevant_only)
+        )
 
     # ── signals ──────────────────────────────────────────────────────────
     def clusters(
@@ -227,16 +260,18 @@ class QuantEngine:
         key = f"clusters:{limit}:{window_seconds}:{similarity_threshold}:{min_cluster_size}:{min_distinct_domains}"
         return self._cached(
             key,
-            lambda: _safe_call(
-                cluster_records,
-                records,
-                window_seconds=window_seconds,
-                similarity_threshold=similarity_threshold,
-                min_cluster_size=min_cluster_size,
-                min_distinct_domains=min_distinct_domains,
-                label="event_clustering",
-            )
-            or [],
+            lambda: (
+                _safe_call(
+                    cluster_records,
+                    records,
+                    window_seconds=window_seconds,
+                    similarity_threshold=similarity_threshold,
+                    min_cluster_size=min_cluster_size,
+                    min_distinct_domains=min_distinct_domains,
+                    label="event_clustering",
+                )
+                or []
+            ),
         )
 
     def source_leaderboard(
@@ -452,11 +487,15 @@ class QuantEngine:
             "n_records_window": len(records),
             "n_clusters": len(clusters),
             "clusters": [_dataclass_to_dict(c) for c in clusters[:50]],
-            "source_leaderboard": _dataclass_to_dict(signals.get("leaderboard")) if signals.get("leaderboard") else None,
+            "source_leaderboard": _dataclass_to_dict(signals.get("leaderboard"))
+            if signals.get("leaderboard")
+            else None,
             "novelty_timeline": [_dataclass_to_dict(n) for n in (signals.get("novelty") or [])[:100]],
             "lead_lag": _dataclass_to_dict(signals.get("lead_lag")) if signals.get("lead_lag") else None,
             "regime": _dataclass_to_dict(signals.get("regime")) if signals.get("regime") else None,
-            "sentiment_momentum": _dataclass_to_dict(signals.get("sent_momentum")) if signals.get("sent_momentum") else None,
+            "sentiment_momentum": _dataclass_to_dict(signals.get("sent_momentum"))
+            if signals.get("sent_momentum")
+            else None,
             "co_occurrence": _dataclass_to_dict(signals.get("cooc")) if signals.get("cooc") else None,
             "anomalies": _dataclass_to_dict(signals.get("anomaly")) if signals.get("anomaly") else None,
             "spillover": _dataclass_to_dict(signals.get("spillover")) if signals.get("spillover") else None,

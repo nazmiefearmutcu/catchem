@@ -65,8 +65,7 @@ def _rec(capture_id: str, *, title: str = "T", score: float = 0.5):
 
 
 def test_reprocess_preserves_user_tags(tmp_path: Path) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         assert storage.insert_record(_rec("cap1", title="v1", score=0.1)) is True
         assert storage.add_record_tag("cap1", "important") is True
         assert storage.add_record_tag("cap1", "watch") is True
@@ -82,16 +81,13 @@ def test_reprocess_preserves_user_tags(tmp_path: Path) -> None:
         assert rec is not None
         assert rec["title"] == "v2"
         assert rec["finance_relevance_score"] == pytest.approx(0.9)
-    finally:
-        storage.close()
 
 
 # ── insert_record atomicity ──────────────────────────────────────────────────
 
 
 def test_insert_record_atomic_on_midwrite_failure(tmp_path: Path, monkeypatch) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         storage.insert_record(_rec("base"))  # pre-existing unrelated row
 
         import catchem.storage as storage_mod
@@ -116,16 +112,13 @@ def test_insert_record_atomic_on_midwrite_failure(tmp_path: Path, monkeypatch) -
         assert n == 0
         # The unrelated pre-existing row is untouched.
         assert storage.get_record("base") is not None
-    finally:
-        storage.close()
 
 
 # ── MED: parquet filename collision ──────────────────────────────────────────
 
 
 def test_parquet_flush_filenames_unique_same_second(tmp_path: Path) -> None:
-    storage = _make_storage(tmp_path, rotate_parquet_records=100)
-    try:
+    with _make_storage(tmp_path, rotate_parquet_records=100) as storage:
         storage.insert_record(_rec("a"))
         storage.flush()
         storage.insert_record(_rec("b"))
@@ -135,8 +128,6 @@ def test_parquet_flush_filenames_unique_same_second(tmp_path: Path) -> None:
         # row-count used to overwrite the first).
         assert len(files) == 2, files
         assert len(set(files)) == 2
-    finally:
-        storage.close()
 
 
 # ── LOW: _resolve_storage_dir tolerates non-data/ overrides ──────────────────

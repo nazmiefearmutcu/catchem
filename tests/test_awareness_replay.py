@@ -20,6 +20,7 @@ Fixtures are tmp_path-based JSONL files; ``synth_capture`` /
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -30,12 +31,13 @@ from catchem.storage import Storage
 
 
 @pytest.fixture
-def storage(tmp_path: Path) -> Storage:
-    return Storage(
+def storage(tmp_path: Path) -> Iterator[Storage]:
+    with Storage(
         db_path=tmp_path / "catchem.sqlite3",
         parquet_dir=tmp_path / "parquet",
         dlq_dir=tmp_path / "dlq",
-    )
+    ) as s:
+        yield s
 
 
 def _rows(synth_capture, *ids: str) -> list[dict]:

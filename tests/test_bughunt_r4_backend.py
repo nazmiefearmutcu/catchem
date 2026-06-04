@@ -71,9 +71,8 @@ def _mk_record(capture_id: str):
 
 def test_two_storage_instances_share_parquet_dir_without_collision(tmp_path: Path) -> None:
     parquet = tmp_path / "parquet"
-    a = Storage(db_path=tmp_path / "a" / "db.sqlite3", parquet_dir=parquet, dlq_dir=tmp_path / "dq")
-    b = Storage(db_path=tmp_path / "b" / "db.sqlite3", parquet_dir=parquet, dlq_dir=tmp_path / "dq")
-    try:
+    with Storage(db_path=tmp_path / "a" / "db.sqlite3", parquet_dir=parquet, dlq_dir=tmp_path / "dq") as a, \
+         Storage(db_path=tmp_path / "b" / "db.sqlite3", parquet_dir=parquet, dlq_dir=tmp_path / "dq") as b:
         # Distinct per-instance ids → distinct filenames even on identical
         # second/seq/row-count.
         assert a._instance_id != b._instance_id
@@ -83,24 +82,17 @@ def test_two_storage_instances_share_parquet_dir_without_collision(tmp_path: Pat
         b.flush()
         files = sorted(p.name for p in parquet.glob("*.parquet"))
         assert len(files) == 2 and len(set(files)) == 2, files
-    finally:
-        a.close()
-        b.close()
 
 
 def test_two_storage_instances_same_db_both_write(tmp_path: Path) -> None:
     """BEGIN IMMEDIATE: two connections to one DB file serialize instead of
     racing the SHARED→RESERVED upgrade into an instant SQLITE_BUSY."""
     db = tmp_path / "shared.sqlite3"
-    a = Storage(db_path=db, parquet_dir=tmp_path / "pa", dlq_dir=tmp_path / "da")
-    b = Storage(db_path=db, parquet_dir=tmp_path / "pb", dlq_dir=tmp_path / "db")
-    try:
+    with Storage(db_path=db, parquet_dir=tmp_path / "pa", dlq_dir=tmp_path / "da") as a, \
+         Storage(db_path=db, parquet_dir=tmp_path / "pb", dlq_dir=tmp_path / "db") as b:
         assert a.insert_record(_mk_record("x")) is True
         assert b.insert_record(_mk_record("y")) is True  # must not raise "database is locked"
         assert a.count_records()["total"] == 2
-    finally:
-        a.close()
-        b.close()
 
 
 # ── embeddings: nearest tolerates a vanished .npy ────────────────────────────

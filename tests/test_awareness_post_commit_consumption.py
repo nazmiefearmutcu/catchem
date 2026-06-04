@@ -39,25 +39,24 @@ def test_replay_offset_advances_only_on_success(tmp_path: Path, write_jsonl, syn
     rows = [json.loads(cap1.model_dump_json()), json.loads(cap2.model_dump_json())]
     path = write_jsonl(rows)
 
-    db = Storage(
+    with Storage(
         db_path=tmp_path / "catchem.sqlite3",
         parquet_dir=tmp_path / "parquet",
         dlq_dir=tmp_path / "dlq",
-    )
+    ) as db:
+        processed: list[str] = []
 
-    processed: list[str] = []
+        def handle(cap: AwarenessCaptureView) -> None:
+            processed.append(cap.capture_id)
 
-    def handle(cap: AwarenessCaptureView) -> None:
-        processed.append(cap.capture_id)
+        runner = ReplayRunner(root=path.parent, storage=db)
+        counts = runner.run_once(handle)
+        assert counts["processed"] == 2
+        assert processed == ["c1", "c2"]
 
-    runner = ReplayRunner(root=path.parent, storage=db)
-    counts = runner.run_once(handle)
-    assert counts["processed"] == 2
-    assert processed == ["c1", "c2"]
-
-    # Re-run: should resume from offset and find zero new rows.
-    counts2 = runner.run_once(handle)
-    assert counts2["processed"] == 0
+        # Re-run: should resume from offset and find zero new rows.
+        counts2 = runner.run_once(handle)
+        assert counts2["processed"] == 0
 
 
 @pytest.mark.regression

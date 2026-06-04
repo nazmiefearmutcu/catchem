@@ -67,8 +67,7 @@ def _insert_minimal_record(storage: Storage, capture_id: str) -> None:
 
 def test_migration_v2_creates_record_tags_table(tmp_path: Path) -> None:
     """A fresh Storage should land on v2 and have record_tags + indexes."""
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         with storage._connection() as conn:
             assert current_version(conn) == max_known_version()
             tables = {
@@ -92,16 +91,13 @@ def test_migration_v2_creates_record_tags_table(tmp_path: Path) -> None:
             # PK is implicit; we ship two explicit indexes.
             assert "idx_record_tags_tag" in indexes
             assert "idx_record_tags_capture" in indexes
-    finally:
-        storage.close()
 
 
 # ── Storage helpers ─────────────────────────────────────────────────────────
 
 
 def test_add_get_remove_tag_roundtrip(tmp_path: Path) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         _insert_minimal_record(storage, "cap-a")
         assert storage.add_record_tag("cap-a", "watch") is True
         # Second add is idempotent (INSERT OR IGNORE).
@@ -110,8 +106,6 @@ def test_add_get_remove_tag_roundtrip(tmp_path: Path) -> None:
         assert storage.remove_record_tag("cap-a", "watch") is True
         assert storage.remove_record_tag("cap-a", "watch") is False
         assert storage.get_record_tags("cap-a") == []
-    finally:
-        storage.close()
 
 
 @pytest.mark.parametrize(
@@ -127,30 +121,23 @@ def test_add_get_remove_tag_roundtrip(tmp_path: Path) -> None:
     ],
 )
 def test_add_tag_rejects_invalid_input(tmp_path: Path, bad_tag: str) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         _insert_minimal_record(storage, "cap-a")
         with pytest.raises(ValueError):
             storage.add_record_tag("cap-a", bad_tag)
-    finally:
-        storage.close()
 
 
 def test_get_record_tags_returns_sorted(tmp_path: Path) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         _insert_minimal_record(storage, "cap-a")
         storage.add_record_tag("cap-a", "zebra")
         storage.add_record_tag("cap-a", "alpha")
         storage.add_record_tag("cap-a", "mango")
         assert storage.get_record_tags("cap-a") == ["alpha", "mango", "zebra"]
-    finally:
-        storage.close()
 
 
 def test_top_tags_returns_counts_desc(tmp_path: Path) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         for cid in ("c1", "c2", "c3", "c4"):
             _insert_minimal_record(storage, cid)
         for cid in ("c1", "c2", "c3"):
@@ -164,13 +151,10 @@ def test_top_tags_returns_counts_desc(tmp_path: Path) -> None:
         assert items[0] == {"tag": "hot", "count": 3}
         assert items[1] == {"tag": "mid", "count": 2}
         assert items[2] == {"tag": "rare", "count": 1}
-    finally:
-        storage.close()
 
 
 def test_records_by_tag_filters(tmp_path: Path) -> None:
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         for cid in ("c1", "c2", "c3"):
             _insert_minimal_record(storage, cid)
         storage.add_record_tag("c1", "watch")
@@ -178,22 +162,17 @@ def test_records_by_tag_filters(tmp_path: Path) -> None:
         records = storage.records_by_tag("watch", limit=10)
         ids = {r["capture_id"] for r in records}
         assert ids == {"c1", "c3"}
-    finally:
-        storage.close()
 
 
 def test_remove_record_tag_normalizes_whitespace_returns_false(tmp_path: Path) -> None:
     """Validator rejects whitespace; raw-whitespace pass yields ValueError."""
-    storage = _make_storage(tmp_path)
-    try:
+    with _make_storage(tmp_path) as storage:
         _insert_minimal_record(storage, "cap-a")
         storage.add_record_tag("cap-a", "watch")
         # "watch  " strips down to "watch" — should remove.
         assert storage.remove_record_tag("cap-a", "watch  ") is True
         # Now it's gone — second call returns False.
         assert storage.remove_record_tag("cap-a", "watch") is False
-    finally:
-        storage.close()
 
 
 # ── HTTP endpoints ──────────────────────────────────────────────────────────

@@ -46,45 +46,45 @@ def test_capture_view_accepts_missing_published_ts() -> None:
 
 def test_storage_serializes_published_ts_as_iso_string(tmp_path: Path) -> None:
     from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-    s = Storage(db_path=tmp_path / "catchem.sqlite3",
-                parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
-    pub = datetime(2026, 5, 16, 10, 0, 0, tzinfo=UTC)
-    rec = FinancialImpactRecord(
-        capture_id="ts1", doc_id="d", title="t", text_excerpt="x",
-        published_ts=pub, domain="x.com", url="https://x.com/1",
-        is_finance_relevant=True, finance_relevance_score=0.4,
-        sentiment_label=SentimentLabel.NEUTRAL, sentiment_score=0.5,
-        evidence_sentences=[], reason_text=None,
-        component_scores={"raw_relevance_score": 0.4},
-        processing_mode=ProcessingMode.PRODUCTION_SAFE,
-        model_versions={"x": "v"},
-        created_at=datetime.now(UTC),
-    )
-    s.insert_record(rec)
-    row = s.get_record("ts1")
-    assert row is not None
-    assert isinstance(row["published_ts"], str)
-    assert "2026-05-16" in row["published_ts"]
-    # round-trippable
-    parsed = datetime.fromisoformat(row["published_ts"])
-    assert parsed.tzinfo is not None
+    with Storage(db_path=tmp_path / "catchem.sqlite3",
+                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq") as s:
+        pub = datetime(2026, 5, 16, 10, 0, 0, tzinfo=UTC)
+        rec = FinancialImpactRecord(
+            capture_id="ts1", doc_id="d", title="t", text_excerpt="x",
+            published_ts=pub, domain="x.com", url="https://x.com/1",
+            is_finance_relevant=True, finance_relevance_score=0.4,
+            sentiment_label=SentimentLabel.NEUTRAL, sentiment_score=0.5,
+            evidence_sentences=[], reason_text=None,
+            component_scores={"raw_relevance_score": 0.4},
+            processing_mode=ProcessingMode.PRODUCTION_SAFE,
+            model_versions={"x": "v"},
+            created_at=datetime.now(UTC),
+        )
+        s.insert_record(rec)
+        row = s.get_record("ts1")
+        assert row is not None
+        assert isinstance(row["published_ts"], str)
+        assert "2026-05-16" in row["published_ts"]
+        # round-trippable
+        parsed = datetime.fromisoformat(row["published_ts"])
+        assert parsed.tzinfo is not None
 
 
 def test_storage_handles_record_with_no_published_ts(tmp_path: Path) -> None:
     from catchem.schemas import FinancialImpactRecord, ProcessingMode, SentimentLabel
-    s = Storage(db_path=tmp_path / "catchem.sqlite3",
-                parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
-    rec = FinancialImpactRecord(
-        capture_id="ts2", doc_id="d", title="t", text_excerpt="x",
-        published_ts=None, domain="x.com", url=None,
-        is_finance_relevant=False, finance_relevance_score=0.1,
-        sentiment_label=SentimentLabel.NEUTRAL, sentiment_score=0.5,
-        evidence_sentences=[], reason_text=None,
-        component_scores={"raw_relevance_score": 0.1},
-        processing_mode=ProcessingMode.PRODUCTION_SAFE,
-        model_versions={"x": "v"},
-        created_at=datetime.now(UTC),
-    )
-    s.insert_record(rec)
-    row = s.get_record("ts2")
-    assert row is not None and row["published_ts"] is None
+    with Storage(db_path=tmp_path / "catchem.sqlite3",
+                 parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq") as s:
+        rec = FinancialImpactRecord(
+            capture_id="ts2", doc_id="d", title="t", text_excerpt="x",
+            published_ts=None, domain="x.com", url=None,
+            is_finance_relevant=False, finance_relevance_score=0.1,
+            sentiment_label=SentimentLabel.NEUTRAL, sentiment_score=0.5,
+            evidence_sentences=[], reason_text=None,
+            component_scores={"raw_relevance_score": 0.1},
+            processing_mode=ProcessingMode.PRODUCTION_SAFE,
+            model_versions={"x": "v"},
+            created_at=datetime.now(UTC),
+        )
+        s.insert_record(rec)
+        row = s.get_record("ts2")
+        assert row is not None and row["published_ts"] is None

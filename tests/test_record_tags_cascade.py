@@ -83,62 +83,62 @@ def test_pragma_foreign_keys_is_on_for_every_connection(tmp_path: Path) -> None:
     ``_connect()`` must also set it. This guard rules out a regression
     where the pragma is moved to ``_init_db`` only.
     """
-    storage = _make_storage(tmp_path)
-    for _ in range(5):
-        with storage._connection() as conn:
-            (fk,) = conn.execute("PRAGMA foreign_keys").fetchone()
-            assert int(fk) == 1, "foreign_keys must be enabled on every connection"
+    with _make_storage(tmp_path) as storage:
+        for _ in range(5):
+            with storage._connection() as conn:
+                (fk,) = conn.execute("PRAGMA foreign_keys").fetchone()
+                assert int(fk) == 1, "foreign_keys must be enabled on every connection"
 
 
 def test_delete_record_cascades_to_record_tags(tmp_path: Path) -> None:
     """The orphan-row regression — once and forever."""
-    storage = _make_storage(tmp_path)
-    capture_id = _seed_record(storage)
+    with _make_storage(tmp_path) as storage:
+        capture_id = _seed_record(storage)
 
-    storage.add_record_tag(capture_id, "watch")
-    storage.add_record_tag(capture_id, "earnings")
-    assert storage.get_record_tags(capture_id) == ["earnings", "watch"]
+        storage.add_record_tag(capture_id, "watch")
+        storage.add_record_tag(capture_id, "earnings")
+        assert storage.get_record_tags(capture_id) == ["earnings", "watch"]
 
-    with storage._lock, storage._connection() as conn:
-        conn.execute("DELETE FROM records WHERE capture_id = ?", (capture_id,))
+        with storage._lock, storage._connection() as conn:
+            conn.execute("DELETE FROM records WHERE capture_id = ?", (capture_id,))
 
-    # The cascade must have fired; the record_tags rows should be gone.
-    with storage._connection() as conn:
-        orphan_rows = conn.execute(
-            "SELECT COUNT(*) FROM record_tags WHERE capture_id = ?",
-            (capture_id,),
-        ).fetchone()[0]
-    assert orphan_rows == 0, (
-        f"record_tags cascade did not fire — {orphan_rows} orphan rows remain. "
-        "Verify PRAGMA foreign_keys=ON is set in Storage._connect."
-    )
+        # The cascade must have fired; the record_tags rows should be gone.
+        with storage._connection() as conn:
+            orphan_rows = conn.execute(
+                "SELECT COUNT(*) FROM record_tags WHERE capture_id = ?",
+                (capture_id,),
+            ).fetchone()[0]
+        assert orphan_rows == 0, (
+            f"record_tags cascade did not fire — {orphan_rows} orphan rows remain. "
+            "Verify PRAGMA foreign_keys=ON is set in Storage._connect."
+        )
 
-    # And the public helper agrees.
-    assert storage.get_record_tags(capture_id) == []
+        # And the public helper agrees.
+        assert storage.get_record_tags(capture_id) == []
 
 
 def test_top_tags_count_after_record_deletion(tmp_path: Path) -> None:
     """Without the cascade, ``top_tags`` over-counted dead-record tags forever."""
-    storage = _make_storage(tmp_path)
-    keep_id = _seed_record(storage, "cap-cascade-keep")
-    drop_id = _seed_record(storage, "cap-cascade-drop")
+    with _make_storage(tmp_path) as storage:
+        keep_id = _seed_record(storage, "cap-cascade-keep")
+        drop_id = _seed_record(storage, "cap-cascade-drop")
 
-    storage.add_record_tag(keep_id, "watch")
-    storage.add_record_tag(drop_id, "watch")
-    storage.add_record_tag(drop_id, "fade")
+        storage.add_record_tag(keep_id, "watch")
+        storage.add_record_tag(drop_id, "watch")
+        storage.add_record_tag(drop_id, "fade")
 
-    top = {item["tag"]: item["count"] for item in storage.top_tags()}
-    assert top.get("watch") == 2
-    assert top.get("fade") == 1
+        top = {item["tag"]: item["count"] for item in storage.top_tags()}
+        assert top.get("watch") == 2
+        assert top.get("fade") == 1
 
-    with storage._lock, storage._connection() as conn:
-        conn.execute("DELETE FROM records WHERE capture_id = ?", (drop_id,))
+        with storage._lock, storage._connection() as conn:
+            conn.execute("DELETE FROM records WHERE capture_id = ?", (drop_id,))
 
-    top_after = {item["tag"]: item["count"] for item in storage.top_tags()}
-    assert top_after.get("watch") == 1, (
-        f"top_tags still over-counts 'watch' after record deletion: {top_after}. "
-        "Cascade either did not fire or the SQL was not actually run."
-    )
-    assert "fade" not in top_after, (
-        f"'fade' tag should be gone (only attached to deleted record) — got {top_after}"
-    )
+        top_after = {item["tag"]: item["count"] for item in storage.top_tags()}
+        assert top_after.get("watch") == 1, (
+            f"top_tags still over-counts 'watch' after record deletion: {top_after}. "
+            "Cascade either did not fire or the SQL was not actually run."
+        )
+        assert "fade" not in top_after, (
+            f"'fade' tag should be gone (only attached to deleted record) — got {top_after}"
+        )

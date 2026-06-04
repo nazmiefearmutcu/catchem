@@ -296,6 +296,12 @@ class Storage:
         self._instance_id = uuid.uuid4().hex[:8]
         self._init_db()
 
+    def __enter__(self) -> Storage:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
     # ── DB --------------------------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30.0, check_same_thread=False)

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from .symbol_mapper import _TICKER_DENYLIST
 
@@ -25,41 +26,133 @@ _PROPER_RE = re.compile(r"\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){0,3})\b")
 
 
 _KNOWN_CURRENCIES = {
-    "USD", "EUR", "JPY", "GBP", "CHF", "CAD", "AUD", "NZD", "CNY", "TRY", "INR",
-    "MXN", "BRL", "ZAR", "KRW", "SEK", "NOK", "PLN", "RUB",
+    "USD",
+    "EUR",
+    "JPY",
+    "GBP",
+    "CHF",
+    "CAD",
+    "AUD",
+    "NZD",
+    "CNY",
+    "TRY",
+    "INR",
+    "MXN",
+    "BRL",
+    "ZAR",
+    "KRW",
+    "SEK",
+    "NOK",
+    "PLN",
+    "RUB",
 }
 _KNOWN_CENTRAL_BANKS = {
-    "Federal Reserve", "Fed", "FOMC", "Federal Open Market Committee", "ECB", "European Central Bank", "Bank of Japan",
-    "BoJ", "Bank of England", "BoE", "People's Bank of China", "PBoC", "Bank of Canada",
-    "BoC", "Reserve Bank of Australia", "RBA", "Reserve Bank of New Zealand", "RBNZ",
-    "Swiss National Bank", "SNB", "Bank of Korea", "BoK", "Central Bank of Turkey",
+    "Federal Reserve",
+    "Fed",
+    "FOMC",
+    "Federal Open Market Committee",
+    "ECB",
+    "European Central Bank",
+    "Bank of Japan",
+    "BoJ",
+    "Bank of England",
+    "BoE",
+    "People's Bank of China",
+    "PBoC",
+    "Bank of Canada",
+    "BoC",
+    "Reserve Bank of Australia",
+    "RBA",
+    "Reserve Bank of New Zealand",
+    "RBNZ",
+    "Swiss National Bank",
+    "SNB",
+    "Bank of Korea",
+    "BoK",
+    "Central Bank of Turkey",
 }
 _KNOWN_INDICES = {
-    "S&P 500", "S&P500", "S&P", "Dow", "Dow Jones", "Nasdaq", "Russell 2000", "FTSE",
-    "FTSE 100", "DAX", "CAC", "CAC 40", "Nikkei", "Nikkei 225", "Hang Seng",
-    "Shanghai Composite", "STOXX 600", "Euro Stoxx", "BIST", "BIST 100", "VIX",
+    "S&P 500",
+    "S&P500",
+    "S&P",
+    "Dow",
+    "Dow Jones",
+    "Nasdaq",
+    "Russell 2000",
+    "FTSE",
+    "FTSE 100",
+    "DAX",
+    "CAC",
+    "CAC 40",
+    "Nikkei",
+    "Nikkei 225",
+    "Hang Seng",
+    "Shanghai Composite",
+    "STOXX 600",
+    "Euro Stoxx",
+    "BIST",
+    "BIST 100",
+    "VIX",
 }
 _KNOWN_COMMODITIES = {
-    "Brent", "WTI", "crude", "natural gas", "gold", "silver", "copper", "platinum",
-    "palladium", "wheat", "corn", "soybeans", "coffee", "sugar", "cocoa",
+    "Brent",
+    "WTI",
+    "crude",
+    "natural gas",
+    "gold",
+    "silver",
+    "copper",
+    "platinum",
+    "palladium",
+    "wheat",
+    "corn",
+    "soybeans",
+    "coffee",
+    "sugar",
+    "cocoa",
 }
 _KNOWN_CRYPTO = {
-    "Bitcoin", "BTC", "Ethereum", "ETH", "Solana", "SOL", "Cardano", "ADA",
-    "Ripple", "XRP", "Dogecoin", "DOGE", "Polkadot", "DOT", "stablecoin",
+    "Bitcoin",
+    "BTC",
+    "Ethereum",
+    "ETH",
+    "Solana",
+    "SOL",
+    "Cardano",
+    "ADA",
+    "Ripple",
+    "XRP",
+    "Dogecoin",
+    "DOGE",
+    "Polkadot",
+    "DOT",
+    "stablecoin",
 }
+
+
+@lru_cache(maxsize=512)
+def _compile_alias_pattern(alias: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", re.IGNORECASE)
 
 
 def _contains_alias(text: str, alias: str) -> bool:
     if len(alias.strip()) <= 1:
         return False
-    return re.search(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", text, flags=re.IGNORECASE) is not None
+    return _compile_alias_pattern(alias).search(text) is not None
+
+
+_CURRENCY_PATTERNS = {ccy: re.compile(rf"\b{ccy}\b") for ccy in _KNOWN_CURRENCIES}
+_CENTRAL_BANK_PATTERNS = {cb: re.compile(rf"\b{re.escape(cb)}\b") for cb in _KNOWN_CENTRAL_BANKS}
+_INDEX_PATTERNS = {idx: re.compile(rf"\b{re.escape(idx)}\b") for idx in _KNOWN_INDICES}
+_COMMODITY_PATTERNS = {c: re.compile(rf"\b{re.escape(c)}\b", re.IGNORECASE) for c in _KNOWN_COMMODITIES}
+_CRYPTO_PATTERNS = {k: re.compile(rf"\b{re.escape(k)}\b", re.IGNORECASE) for k in _KNOWN_CRYPTO}
 
 
 @dataclass
 class EntityHit:
     text: str
-    kind: str           # "cashtag" | "ticker" | "currency" | "central_bank" | "index" | "commodity" | "crypto" | "company"
-    source: str         # which detector found it
+    kind: str  # "cashtag" | "ticker" | "currency" | "central_bank" | "index" | "commodity" | "crypto" | "company"
+    source: str  # which detector found it
 
 
 @dataclass
@@ -132,9 +225,11 @@ class EntityLinker:
                 continue
             add(token, "ticker", "regex:paren")
 
-        for ccy in _KNOWN_CURRENCIES:
-            if re.search(rf"\b{ccy}\b", joined):
+        for ccy, pattern in _CURRENCY_PATTERNS.items():
+            if ccy in joined and pattern.search(joined):
                 add(ccy, "currency", "lex:currency")
+
+        joined_lc = joined.lower()
 
         # Word-boundary match — pre-fix the plain `in` substring check made
         # "Fed" (a central-bank token) hit inside "Federation"/"Federated"
@@ -143,27 +238,30 @@ class EntityLinker:
         # — the inconsistency was the real bug. Names with non-alnum chars
         # (e.g. "S&P 500") are still matched because re.escape neutralises
         # the special chars and \b anchors on the surrounding text.
-        for cb in _KNOWN_CENTRAL_BANKS:
-            if re.search(rf"\b{re.escape(cb)}\b", joined):
+        for cb, pattern in _CENTRAL_BANK_PATTERNS.items():
+            if cb in joined and pattern.search(joined):
                 add(cb, "central_bank", "lex:central_bank")
 
-        for idx in _KNOWN_INDICES:
-            if re.search(rf"\b{re.escape(idx)}\b", joined):
+        for idx, pattern in _INDEX_PATTERNS.items():
+            if idx in joined and pattern.search(joined):
                 add(idx, "index", "lex:index")
 
-        for c in _KNOWN_COMMODITIES:
-            if re.search(rf"\b{re.escape(c)}\b", joined, flags=re.IGNORECASE):
+        for c, pattern in _COMMODITY_PATTERNS.items():
+            if c.lower() in joined_lc and pattern.search(joined):
                 add(c, "commodity", "lex:commodity")
 
-        for k in _KNOWN_CRYPTO:
-            if re.search(rf"\b{re.escape(k)}\b", joined, flags=re.IGNORECASE):
+        for k, pattern in _CRYPTO_PATTERNS.items():
+            if k.lower() in joined_lc and pattern.search(joined):
                 add(k, "crypto", "lex:crypto")
 
         # Company aliases must match as whole tokens. Plain substring matching
         # turns words like "unaffordable" into a false Ford/F hit.
         for alias, ticker in self.company_aliases.items():
-            if alias and _contains_alias(joined, alias):
-                add(alias, "company", "alias")
-                add(ticker, "ticker", "alias")
+            if alias:
+                if alias.lower() not in joined_lc:
+                    continue
+                if _contains_alias(joined, alias):
+                    add(alias, "company", "alias")
+                    add(ticker, "ticker", "alias")
 
         return EntityHits(hits=hits)

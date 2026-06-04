@@ -40,14 +40,47 @@ _PAREN_TICKER_RE = re.compile(
     r"([A-Z]{1,6}(?:\.[A-Z])?)\s*\)"
 )
 _TICKER_DENYLIST = {
-    "CEO", "CFO", "COO", "CTO", "IPO", "ETF", "ETFS", "GDP", "CPI", "PPI",
-    "SEC", "FTC", "FDA", "FOMC", "ECB", "BOJ", "BOE", "PBOC", "RBA",
+    "CEO",
+    "CFO",
+    "COO",
+    "CTO",
+    "IPO",
+    "ETF",
+    "ETFS",
+    "GDP",
+    "CPI",
+    "PPI",
+    "SEC",
+    "FTC",
+    "FDA",
+    "FOMC",
+    "ECB",
+    "BOJ",
+    "BOE",
+    "PBOC",
+    "RBA",
     # Country / org / sports acronyms that routinely appear parenthesized in
     # headlines ("(USA)", "(NBA)") and would otherwise be mis-read as equity
     # tickers and trip the equities asset-class bridge. None of these are real
     # tradeable tickers in our registry.
-    "USA", "UK", "EU", "UN", "NATO", "WHO", "FBI", "CIA", "DOJ", "IRS", "EPA",
-    "NBA", "NFL", "NHL", "MLB", "NCAA", "ESG", "FAQ",
+    "USA",
+    "UK",
+    "EU",
+    "UN",
+    "NATO",
+    "WHO",
+    "FBI",
+    "CIA",
+    "DOJ",
+    "IRS",
+    "EPA",
+    "NBA",
+    "NFL",
+    "NHL",
+    "MLB",
+    "NCAA",
+    "ESG",
+    "FAQ",
     # Common false matches inside the exchange-prefixed form when the
     # regex doesn't bind to a real exchange but to a bare paren with the
     # acronym alone, e.g. "Filed with the SEC (SEC)" → drop.
@@ -56,38 +89,99 @@ _TICKER_DENYLIST = {
 
 _INTERNAL_REGISTRY: Mapping[str, str] = {
     # Equity giants
-    "Apple": "AAPL", "Microsoft": "MSFT", "Alphabet": "GOOGL", "Google": "GOOGL",
-    "Amazon": "AMZN", "Meta Platforms": "META", "Meta": "META", "Facebook": "META",
-    "Nvidia": "NVDA", "NVIDIA": "NVDA", "Tesla": "TSLA",
-    "Berkshire Hathaway": "BRK.B", "Berkshire": "BRK.B",
-    "JPMorgan": "JPM", "JPMorgan Chase": "JPM", "Goldman Sachs": "GS",
-    "Bank of America": "BAC", "Citigroup": "C", "Morgan Stanley": "MS",
-    "Wells Fargo": "WFC", "BlackRock": "BLK",
-    "ExxonMobil": "XOM", "Exxon": "XOM", "Chevron": "CVX", "Shell": "SHEL", "BP": "BP",
-    "Johnson & Johnson": "JNJ", "Pfizer": "PFE", "Moderna": "MRNA", "Eli Lilly": "LLY",
-    "Procter & Gamble": "PG", "Coca-Cola": "KO", "PepsiCo": "PEP",
-    "Walmart": "WMT", "Costco": "COST", "Home Depot": "HD", "McDonald's": "MCD",
-    "Intel": "INTC", "AMD": "AMD", "Qualcomm": "QCOM", "Broadcom": "AVGO", "Cisco": "CSCO",
-    "Oracle": "ORCL", "Salesforce": "CRM", "Adobe": "ADBE", "Netflix": "NFLX", "Disney": "DIS",
-    "Visa": "V", "Mastercard": "MA", "PayPal": "PYPL",
-    "Boeing": "BA", "Lockheed Martin": "LMT", "General Electric": "GE", "Ford": "F",
-    "General Motors": "GM", "Toyota": "TM",
+    "Apple": "AAPL",
+    "Microsoft": "MSFT",
+    "Alphabet": "GOOGL",
+    "Google": "GOOGL",
+    "Amazon": "AMZN",
+    "Meta Platforms": "META",
+    "Meta": "META",
+    "Facebook": "META",
+    "Nvidia": "NVDA",
+    "NVIDIA": "NVDA",
+    "Tesla": "TSLA",
+    "Berkshire Hathaway": "BRK.B",
+    "Berkshire": "BRK.B",
+    "JPMorgan": "JPM",
+    "JPMorgan Chase": "JPM",
+    "Goldman Sachs": "GS",
+    "Bank of America": "BAC",
+    "Citigroup": "C",
+    "Morgan Stanley": "MS",
+    "Wells Fargo": "WFC",
+    "BlackRock": "BLK",
+    "ExxonMobil": "XOM",
+    "Exxon": "XOM",
+    "Chevron": "CVX",
+    "Shell": "SHEL",
+    "BP": "BP",
+    "Johnson & Johnson": "JNJ",
+    "Pfizer": "PFE",
+    "Moderna": "MRNA",
+    "Eli Lilly": "LLY",
+    "Procter & Gamble": "PG",
+    "Coca-Cola": "KO",
+    "PepsiCo": "PEP",
+    "Walmart": "WMT",
+    "Costco": "COST",
+    "Home Depot": "HD",
+    "McDonald's": "MCD",
+    "Intel": "INTC",
+    "AMD": "AMD",
+    "Qualcomm": "QCOM",
+    "Broadcom": "AVGO",
+    "Cisco": "CSCO",
+    "Oracle": "ORCL",
+    "Salesforce": "CRM",
+    "Adobe": "ADBE",
+    "Netflix": "NFLX",
+    "Disney": "DIS",
+    "Visa": "V",
+    "Mastercard": "MA",
+    "PayPal": "PYPL",
+    "Boeing": "BA",
+    "Lockheed Martin": "LMT",
+    "General Electric": "GE",
+    "Ford": "F",
+    "General Motors": "GM",
+    "Toyota": "TM",
     # Crypto
-    "Bitcoin": "BTC-USD", "BTC": "BTC-USD",
-    "Ethereum": "ETH-USD", "Ether": "ETH-USD", "ETH": "ETH-USD",
-    "Solana": "SOL-USD", "SOL": "SOL-USD",
-    "Ripple": "XRP-USD", "XRP": "XRP-USD",
-    "Cardano": "ADA-USD", "ADA": "ADA-USD",
-    "Dogecoin": "DOGE-USD", "DOGE": "DOGE-USD",
-    "Polkadot": "DOT-USD", "DOT": "DOT-USD",
+    "Bitcoin": "BTC-USD",
+    "BTC": "BTC-USD",
+    "Ethereum": "ETH-USD",
+    "Ether": "ETH-USD",
+    "ETH": "ETH-USD",
+    "Solana": "SOL-USD",
+    "SOL": "SOL-USD",
+    "Ripple": "XRP-USD",
+    "XRP": "XRP-USD",
+    "Cardano": "ADA-USD",
+    "ADA": "ADA-USD",
+    "Dogecoin": "DOGE-USD",
+    "DOGE": "DOGE-USD",
+    "Polkadot": "DOT-USD",
+    "DOT": "DOT-USD",
     # Indices (Yahoo-style)
-    "S&P 500": "^GSPC", "Dow Jones": "^DJI", "Nasdaq": "^IXIC", "Russell 2000": "^RUT",
-    "FTSE 100": "^FTSE", "DAX": "^GDAXI", "Nikkei 225": "^N225", "Hang Seng": "^HSI",
-    "VIX": "^VIX", "BIST 100": "XU100.IS",
+    "S&P 500": "^GSPC",
+    "Dow Jones": "^DJI",
+    "Nasdaq": "^IXIC",
+    "Russell 2000": "^RUT",
+    "FTSE 100": "^FTSE",
+    "DAX": "^GDAXI",
+    "Nikkei 225": "^N225",
+    "Hang Seng": "^HSI",
+    "VIX": "^VIX",
+    "BIST 100": "XU100.IS",
     # FX pairs (compact)
-    "EUR/USD": "EURUSD=X", "USD/JPY": "USDJPY=X", "GBP/USD": "GBPUSD=X",
+    "EUR/USD": "EURUSD=X",
+    "USD/JPY": "USDJPY=X",
+    "GBP/USD": "GBPUSD=X",
     # Commodities
-    "Brent": "BZ=F", "WTI": "CL=F", "gold": "GC=F", "silver": "SI=F", "copper": "HG=F",
+    "Brent": "BZ=F",
+    "WTI": "CL=F",
+    "gold": "GC=F",
+    "silver": "SI=F",
+    "copper": "HG=F",
 }
 
 
@@ -122,9 +216,7 @@ class SymbolMapper:
         self._alias_lc = {k.lower(): v for k, v in self._aliases.items()}
         self._alias_keys = list(self._aliases.keys())
         self._alias_exact_patterns = {
-            alias_lc: _alias_pattern(alias_lc)
-            for alias_lc in self._alias_lc
-            if len(alias_lc.strip()) > 1
+            alias_lc: _alias_pattern(alias_lc) for alias_lc in self._alias_lc if len(alias_lc.strip()) > 1
         }
 
     def alias_dict(self) -> Mapping[str, str]:
@@ -154,8 +246,12 @@ class SymbolMapper:
                 out.append(SymbolMatch(text=f"({sym})", symbol=sym, score=0.98, source="paren_ticker"))
         lc = text.lower()
         for alias_lc, sym in self._alias_lc.items():
+            if sym in seen:
+                continue
+            if alias_lc not in lc:
+                continue
             pattern = self._alias_exact_patterns.get(alias_lc)
-            if pattern is not None and pattern.search(lc) and sym not in seen:
+            if pattern is not None and pattern.search(lc):
                 seen.add(sym)
                 out.append(SymbolMatch(text=alias_lc, symbol=sym, score=1.0, source="alias_exact"))
         # Fuzzy fallback for the title (top-3 only)
@@ -181,7 +277,7 @@ class SymbolMapper:
                 # verbatim alias won't appear token-bounded, so requiring it
                 # there would (and previously did) make the whole fuzzy path
                 # dead. See round-5 regression finding.
-                if score >= 100.0 and not _alias_pattern(alias.lower()).search(lc):
+                if score >= 100.0 and not self._alias_exact_patterns[alias.lower()].search(lc):
                     continue
                 seen.add(sym)
                 out.append(SymbolMatch(text=alias, symbol=sym, score=score / 100.0, source="alias_fuzzy"))
@@ -190,6 +286,7 @@ class SymbolMapper:
     # ── loaders ──────────────────────────────────────────────────────────────
     def _merge_yaml(self, path: Path) -> None:
         import yaml
+
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             extra = data.get("aliases") if isinstance(data, dict) else None

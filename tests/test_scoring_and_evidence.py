@@ -100,15 +100,21 @@ def test_entity_density_clamped() -> None:
 def _cap(title: str, text: str) -> AwarenessCaptureView:
     """Minimal AwarenessCaptureView builder for evidence tests."""
     from datetime import datetime
+
     return AwarenessCaptureView(
-        capture_id="c", doc_id="d",
-        title=title, text=text,
-        domain="x.com", url="https://x.com/a",
-        source_type="rss", discovery_channel="rss:x.com",
+        capture_id="c",
+        doc_id="d",
+        title=title,
+        text=text,
+        domain="x.com",
+        url="https://x.com/a",
+        source_type="rss",
+        discovery_channel="rss:x.com",
         language="en",
         fetch_ts=datetime.now(UTC),
         observed_ts=datetime.now(UTC),
-        content_hash="h", robots_decision="not_applicable",
+        content_hash="h",
+        robots_decision="not_applicable",
     )
 
 
@@ -144,6 +150,7 @@ def test_channel_mapper_equities_with_no_reason_has_general_channel() -> None:
     `channels=[]`, which broke the downstream routing UI on edge-case
     inputs (e.g. a vague equities mention without an explicit reason)."""
     from catchem.channel_mapper import map_channels
+
     channels = map_channels(asset_classes=["equities"], reason_codes=[])
     assert "equities.general" in channels, (
         f"Equities + no reason should land in equities.general. Got: {channels}"
@@ -153,6 +160,7 @@ def test_channel_mapper_equities_with_no_reason_has_general_channel() -> None:
 def test_channel_mapper_specific_equities_rule_still_wins() -> None:
     """The fallback wildcard must NOT mask the specific (asset, reason) rules."""
     from catchem.channel_mapper import map_channels
+
     channels = map_channels(asset_classes=["equities"], reason_codes=["earnings"])
     # Both fire, but the specific channel must be present.
     assert "equities.earnings" in channels
@@ -182,10 +190,7 @@ def test_evidence_fed_does_not_match_federated() -> None:
     """
     cap = _cap(
         title="State news",
-        text=(
-            "A federated identity system is being adopted. "
-            "The Fed cut rates by 25 bps today."
-        ),
+        text=("A federated identity system is being adopted. The Fed cut rates by 25 bps today."),
     )
     ev = extract_evidence(cap, label_terms=["fed"], entity_terms=[], top_k=2)
     real_idx = next(i for i, s in enumerate(ev) if "Fed cut rates" in s)
@@ -197,6 +202,7 @@ def test_evidence_fed_does_not_match_federated() -> None:
 
 def test_clean_boilerplate_text() -> None:
     from catchem.evidence import clean_boilerplate_text
+
     text = "This is a real sentence. Follow us on Twitter for more updates. Click here to read more."
     cleaned = clean_boilerplate_text(text)
     assert cleaned == "This is a real sentence."
@@ -227,6 +233,7 @@ def test_split_sentences_edge_cases() -> None:
 
 def test_split_sentences_empty_part_mock() -> None:
     from unittest.mock import patch
+
     with patch("catchem.evidence._SENTENCE_SPLIT_RE") as mock_re:
         mock_re.split.return_value = ["", "Valid sentence"]
         assert split_sentences("some text") == ["Valid sentence"]
@@ -234,7 +241,10 @@ def test_split_sentences_empty_part_mock() -> None:
 
 def test_sentence_word_match_empty_term() -> None:
     from catchem.evidence import _sentence_word_match
+
     assert _sentence_word_match("hello world", "") is False
+    assert _sentence_word_match("hello world", "world") is True
+    assert _sentence_word_match("hello world", "nonexistent") is False
 
 
 def test_extract_evidence_edge_cases() -> None:
@@ -259,5 +269,3 @@ def test_extract_evidence_edge_cases() -> None:
 def test_build_reason_text_edge_cases() -> None:
     # empty asset/reason and missing sentiment
     assert build_reason_text([], [], None) == "general | no-specific-reason | sentiment=unknown"
-
-

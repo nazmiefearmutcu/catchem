@@ -6,6 +6,7 @@ against the chosen labels (zero-shot top hits + entity hits).
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Iterable, Sequence
 
@@ -54,6 +55,11 @@ def split_sentences(text: str) -> list[str]:
     return out
 
 
+@functools.lru_cache(maxsize=1024)
+def _get_term_pattern(term_lc: str) -> re.Pattern:
+    return re.compile(rf"(?<![a-z0-9]){re.escape(term_lc)}(?![a-z0-9])")
+
+
 def _sentence_word_match(sentence_lc: str, term_lc: str) -> bool:
     """Word-boundary match — pre-fix `term in sentence_lc` was substring,
     so the term "rate" matched "operating" and "fed" matched "federated".
@@ -62,7 +68,7 @@ def _sentence_word_match(sentence_lc: str, term_lc: str) -> bool:
     """
     if not term_lc:
         return False
-    return re.search(rf"(?<![a-z0-9]){re.escape(term_lc)}(?![a-z0-9])", sentence_lc) is not None
+    return _get_term_pattern(term_lc).search(sentence_lc) is not None
 
 
 def extract_evidence(
@@ -84,13 +90,17 @@ def extract_evidence(
     if not terms:
         # No labels yet — return the first sentence as a sane fallback.
         return [sentences[0]]
+
+    # Pre-compile the terms for this function call to minimize lookup/compilation overhead
+    compiled_patterns = [_get_term_pattern(t) for t in terms]
+
     scored: list[tuple[float, int, str]] = []
     for idx, s in enumerate(sentences):
         s_lc = s.lower()
-        score = sum(1.0 for t in terms if _sentence_word_match(s_lc, t))
+        score = sum(1.0 for pattern in compiled_patterns if pattern.search(s_lc) is not None)
         if idx == 0:
             score += 0.5  # title boost
-        scored.append((score, -idx, s))   # later sentences lose ties
+        scored.append((score, -idx, s))  # later sentences lose ties
     scored.sort(reverse=True)
     seen: set[str] = set()
     out: list[str] = []
@@ -106,7 +116,9 @@ def extract_evidence(
     return out
 
 
-def build_reason_text(asset_classes: Iterable[str], reason_codes: Iterable[str], sentiment_label: str | None) -> str:
+def build_reason_text(
+    asset_classes: Iterable[str], reason_codes: Iterable[str], sentiment_label: str | None
+) -> str:
     asset_part = "/".join(asset_classes) or "general"
     reason_part = "/".join(reason_codes) or "no-specific-reason"
     sent_part = f"sentiment={sentiment_label}" if sentiment_label else "sentiment=unknown"

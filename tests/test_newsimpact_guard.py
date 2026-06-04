@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from fusion_stack.newsimpact_guarded_adapter import (
-    NewsImpactGuardError,
+from catchem.newsimpact_guarded_adapter import (
     NewsImpactGuardedAdapter,
+    NewsImpactGuardError,
     snapshot_guard_state,
 )
-from fusion_stack.settings import FusionMode, load_settings, reload_settings
-
+from catchem.settings import load_settings, reload_settings
 
 NEWSIMPACT_REAL = Path("/Users/nazmi/Desktop/Projeler/proje/merged_news")
 
@@ -110,12 +108,12 @@ def test_verify_script_fails_on_flipped_gate(tmp_path: Path) -> None:
 
 @pytest.mark.guard
 def test_service_in_production_safe_never_loads_diagnostic_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_MODE", "production_safe")
+    monkeypatch.setenv("CATCHEM_MODE", "production_safe")
     # Even if the operator forces the diagnostic flag to true, prod-safe must refuse.
-    monkeypatch.setenv("FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
+    monkeypatch.setenv("CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED", "true")
     reload_settings()
     s = load_settings()
-    from fusion_stack.service import build_service
+    from catchem.service import build_service
     svc = build_service(s)
     assert svc.diagnostic_enabled is False
 
@@ -143,3 +141,113 @@ def _make_fake_quarantined_root(tmp_path: Path) -> Path:
     }
     (root / "models/governance_index/governance_index.json").write_text(json.dumps(idx))
     return root
+
+
+@pytest.mark.guard
+def test_assert_protected_artifacts_unmodified_happy(tmp_path: Path) -> None:
+    from catchem.newsimpact_guarded_adapter import _sha256_file, assert_protected_artifacts_unmodified
+    p1 = tmp_path / "file1.txt"
+    p1.write_text("hello", encoding="utf-8")
+    sha1 = _sha256_file(p1)
+    baseline = {"file1.txt": sha1}
+    assert_protected_artifacts_unmodified(tmp_path, baseline)
+
+
+@pytest.mark.guard
+def test_assert_protected_artifacts_unmodified_missing(tmp_path: Path) -> None:
+    from catchem.newsimpact_guarded_adapter import assert_protected_artifacts_unmodified
+    baseline = {"missing.txt": "some_sha"}
+    with pytest.raises(NewsImpactGuardError, match="protected_artifact_missing"):
+        assert_protected_artifacts_unmodified(tmp_path, baseline)
+
+
+@pytest.mark.guard
+def test_assert_protected_artifacts_unmodified_modified(tmp_path: Path) -> None:
+    from catchem.newsimpact_guarded_adapter import assert_protected_artifacts_unmodified
+    p1 = tmp_path / "file1.txt"
+    p1.write_text("hello", encoding="utf-8")
+    baseline = {"file1.txt": "wrong_sha"}
+    with pytest.raises(NewsImpactGuardError, match="protected_artifact_modified"):
+        assert_protected_artifacts_unmodified(tmp_path, baseline)
+
+
+@pytest.mark.guard
+def test_snapshot_guard_state_corrupt_json(tmp_path: Path) -> None:
+    idx_path = tmp_path / "models/governance_index/governance_index.json"
+    idx_path.parent.mkdir(parents=True)
+    idx_path.write_text("not json", encoding="utf-8")
+    with pytest.raises(NewsImpactGuardError, match=r"governance_index\.json unreadable"):
+        snapshot_guard_state(tmp_path)
+
+
+@pytest.mark.guard
+def test_snapshot_guard_state_no_candidates(tmp_path: Path) -> None:
+    idx_path = tmp_path / "models/governance_index/governance_index.json"
+    idx_path.parent.mkdir(parents=True)
+    idx_path.write_text("{}", encoding="utf-8")
+    with pytest.raises(NewsImpactGuardError, match=r"governance_index\.json contains no candidates"):
+        snapshot_guard_state(tmp_path)
+
+
+@pytest.mark.guard
+def test_adapter_invalid_mode(tmp_path: Path) -> None:
+    fake_root = _make_fake_quarantined_root(tmp_path)
+    with pytest.raises(NewsImpactGuardError, match="mode_not_in_allow_list"):
+        NewsImpactGuardedAdapter(
+            newsimpact_root=fake_root,
+            mode="invalid_mode",
+            diagnostic_flag=True,
+        )
+
+
+@pytest.mark.guard
+def test_snapshot_missing_forbidden_operations(tmp_path: Path) -> None:
+    root = tmp_path / "fake_newsimpact_no_forbidden"
+    (root / "models/governance_index").mkdir(parents=True)
+    idx = {
+        "candidates": [
+            {
+                "candidate_id": "fake",
+                "governance_status": "QUARANTINED_REGRESSIVE_MULTIMODAL",
+                "fusion_verdict_class": "FUSION_REGRESSIVE",
+                "gate_failure_status": {
+                    "release_gate_passed": False,
+                },
+            }
+        ]
+    }
+    (root / "models/governance_index/governance_index.json").write_text(json.dumps(idx))
+    snap = snapshot_guard_state(root)
+    assert snap.safe_to_publish is False
+    assert snap.safe_to_promote is False
+
+
+@pytest.mark.guard
+def test_snapshot_guard_state_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(NewsImpactGuardError, match=r"governance_index\.json missing"):
+        snapshot_guard_state(tmp_path)
+
+
+@pytest.mark.guard
+def test_guard_snapshot_as_dict(tmp_path: Path) -> None:
+    from catchem.newsimpact_guarded_adapter import GuardSnapshot
+    snap = GuardSnapshot(
+        governance_index_path=tmp_path / "index.json",
+        governance_index_sha256="abc",
+        release_gate_passed=True,
+        quarantine_state="SAFE",
+        safe_to_publish=True,
+        safe_to_promote=True,
+        fusion_verdict_class="CLASS_A",
+    )
+    d = snap.as_dict()
+    assert d["governance_index_path"] == str(tmp_path / "index.json")
+    assert d["governance_index_sha256"] == "abc"
+    assert d["release_gate_passed"] is True
+    assert d["quarantine_state"] == "SAFE"
+    assert d["safe_to_publish"] is True
+    assert d["safe_to_promote"] is True
+    assert d["fusion_verdict_class"] == "CLASS_A"
+
+
+

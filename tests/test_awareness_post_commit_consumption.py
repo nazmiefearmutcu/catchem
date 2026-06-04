@@ -1,9 +1,9 @@
-"""Verify fusion_stack consumes Awareness only AFTER durable JSONL commit.
+"""Verify catchem consumes Awareness only AFTER durable JSONL commit.
 
 We achieve this by checking three things:
   1. iter_finalized_files skips .tmp files (in-flight chunks).
   2. ReplayRunner advances the offset only for captures that succeed.
-  3. fusion_stack never imports awareness internals at module load time
+  3. catchem never imports awareness internals at module load time
      (so it cannot accidentally touch the worker engine).
 """
 
@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.awareness_reader import iter_finalized_files
-from fusion_stack.awareness_replay import ReplayRunner
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.settings import load_settings
-from fusion_stack.storage import Storage
+from catchem.awareness_reader import iter_finalized_files
+from catchem.awareness_replay import ReplayRunner
+from catchem.schemas import AwarenessCaptureView
+from catchem.settings import load_settings
+from catchem.storage import Storage
 
 
 @pytest.mark.regression
@@ -40,7 +40,7 @@ def test_replay_offset_advances_only_on_success(tmp_path: Path, write_jsonl, syn
     path = write_jsonl(rows)
 
     db = Storage(
-        db_path=tmp_path / "fusion.sqlite3",
+        db_path=tmp_path / "catchem.sqlite3",
         parquet_dir=tmp_path / "parquet",
         dlq_dir=tmp_path / "dlq",
     )
@@ -61,19 +61,19 @@ def test_replay_offset_advances_only_on_success(tmp_path: Path, write_jsonl, syn
 
 
 @pytest.mark.regression
-def test_fusion_stack_does_not_import_awareness_internals() -> None:
-    """If awareness is not installed, fusion_stack must still import cleanly."""
+def test_catchem_does_not_import_awareness_internals() -> None:
+    """If awareness is not installed, catchem must still import cleanly."""
     # The package was already imported by the test runner; check that no awareness
     # submodule is loaded.
     awareness_internals = [k for k in sys.modules if k.startswith("awareness.workers") or k.startswith("awareness.dedup")]
-    assert awareness_internals == [], f"fusion_stack accidentally imported awareness internals: {awareness_internals}"
+    assert awareness_internals == [], f"catchem accidentally imported awareness internals: {awareness_internals}"
 
 
 @pytest.mark.regression
 def test_settings_default_mode_is_production_safe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FUSION_MODE", raising=False)
+    monkeypatch.delenv("CATCHEM_MODE", raising=False)
     # Pull the YAML default which is production_safe.
-    from fusion_stack.settings import reload_settings
+    from catchem.settings import reload_settings
     reload_settings()
     s = load_settings()
     # Either YAML default 'production_safe' or explicit env should win — env is unset here.

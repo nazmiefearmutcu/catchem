@@ -3,26 +3,31 @@
 ## First-time setup
 
 ```bash
-cd /Users/nazmi/Desktop/Projeler/proje/fusion_stack
-bash scripts/fusion_bootstrap_and_run.sh
+cd /Users/nazmi/Desktop/Projeler/proje/catchem
+bash scripts/catchem_bootstrap_and_run.sh
 ```
 
 This is idempotent. You can re-run it any time. The script:
 
 - creates `.venv` via `uv` (or falls back to `venv`)
-- installs `fusion_stack[dev]` and `awareness` editable (if available)
+- installs `catchem[dev]` and `awareness` editable (if available)
 - runs the guard verifier — aborts if the NewsImpact release gate has flipped
+- installs frontend `npm` deps and builds the SPA into `src/catchem/static/app`
 - creates `data/{results,cache,db,logs,vector_index,golden,kaggle,replay}`
 - runs one replay pass over Awareness JSONL
 - starts the API on `127.0.0.1:8087` in the background
+- opens **<http://127.0.0.1:8087/>** for the premium UI; `/legacy` for the old dashboard
+
+Re-runs are cheap. To skip the npm build when you haven't changed `frontend/`:
+`bash scripts/catchem_bootstrap_and_run.sh --skip-frontend-build`.
 
 After bootstrap, you can use the CLI directly:
 
 ```bash
 source .venv/bin/activate
-fusion-stack status | python -m json.tool
-fusion-stack run --mode replay_existing --max-records 200
-fusion-stack serve
+catchem status | python -m json.tool
+catchem run --mode replay_existing --max-records 200
+catchem serve
 ```
 
 ## Operational modes
@@ -30,7 +35,7 @@ fusion-stack serve
 ### `production_safe` (default)
 
 ```bash
-FUSION_MODE=production_safe fusion-stack run
+CATCHEM_MODE=production_safe catchem run
 ```
 
 Diagnostic adapter is hard-refused. The supervisor logs at startup
@@ -39,7 +44,7 @@ Diagnostic adapter is hard-refused. The supervisor logs at startup
 ### `replay_existing`
 
 ```bash
-fusion-stack run --mode replay_existing --max-records 1000
+catchem run --mode replay_existing --max-records 1000
 ```
 
 Processes finalized JSONL files in `<awareness>/data/jsonl/captures/Y/M/D/`
@@ -49,7 +54,7 @@ exactly-once processing across restarts.
 ### `live_tail`
 
 ```bash
-fusion-stack run --mode live_tail
+catchem run --mode live_tail
 ```
 
 Long-running. Re-scans the JSONL root every `live.poll_seconds` and processes
@@ -58,9 +63,9 @@ any new committed rows. Stops cleanly on SIGINT.
 ### `research_diagnostic` (requires explicit opt-in)
 
 ```bash
-FUSION_MODE=research_diagnostic \
-FUSION_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=true \
-fusion-stack run --mode research_diagnostic
+CATCHEM_MODE=research_diagnostic \
+CATCHEM_GUARDS__NEWSIMPACT_DIAGNOSTIC_ENABLED=true \
+catchem run --mode research_diagnostic
 ```
 
 The diagnostic adapter loads a read-only payload from NewsImpact governance and
@@ -69,7 +74,7 @@ attaches it to each record. It cannot override `is_finance_relevant`.
 ## HF model warming (optional)
 
 ```bash
-bash scripts/fusion_bootstrap_and_run.sh --with-ml
+bash scripts/catchem_bootstrap_and_run.sh --with-ml
 # or, separately:
 python scripts/warm_hf_models.py
 ```
@@ -92,11 +97,11 @@ bootstrap continues.
 
 | Path | Contents |
 |---|---|
-| `data/db/fusion.sqlite3` | Record index, offsets, DLQ |
+| `data/db/catchem.sqlite3` | Record index, offsets, DLQ |
 | `data/results/records-*.parquet` | Rotated parquet exports |
 | `data/results/dlq/` | Failed captures (placeholder) |
 | `data/vector_index/<capture_id>.npy` | Per-record embeddings |
-| `data/logs/fusion_stack.log` | Structured JSON log |
+| `data/logs/catchem.log` | Structured JSON log |
 | `data/logs/api.out` | API server stdout/stderr |
 | `data/logs/api.pid` | API PID |
 | `data/golden/` | Optional curated regression fixtures |
@@ -106,14 +111,34 @@ bootstrap continues.
 
 ```bash
 curl -s http://127.0.0.1:8087/healthz
-curl -s http://127.0.0.1:8087/metrics       | python -m json.tool
-curl -s http://127.0.0.1:8087/dashboard     | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/summary    | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/guards     | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/benchmark/latest | python -m json.tool
+curl -s http://127.0.0.1:8087/ui/matrix     | python -m json.tool
 curl -s http://127.0.0.1:8087/recent?limit=20
 curl -s http://127.0.0.1:8087/records/by-asset-class/rates
 curl -s "http://127.0.0.1:8087/records/by-symbol/AAPL"
 curl -s -X POST -H 'content-type: application/json' \
     -d '{"max_records": 100}' http://127.0.0.1:8087/replay
+curl -s -N --max-time 4 -H 'Accept: text/event-stream' http://127.0.0.1:8087/ui/stream
 ```
+
+## UI dev mode
+
+For hot reload on the React app while iterating:
+
+```bash
+# Terminal 1
+catchem serve
+
+# Terminal 2
+cd frontend && npm install && npm run dev
+# → open http://localhost:5173 (Vite proxies /ui/* to the API on :8087)
+```
+
+The bundle in `src/catchem/static/app` is **only** rebuilt by
+`npm run build` (or the bootstrap script). The Python serving path always
+looks at that directory, never at the Vite dev server.
 
 ## Stopping the API
 
@@ -126,11 +151,15 @@ rm -f data/logs/api.pid
 
 | Symptom | Probable cause | Fix |
 |---|---|---|
-| `bootstrap` exits with `FAIL: governance_index.json missing` | merged_news not present or path wrong | Set `NEWSIMPACT_REPO_PATH` or place the repo at the default path. |
+| `bootstrap` exits with `FAIL: governance_index.json missing` | merged_news not present or path wrong | Set `CATCHEM_PATHS__NEWSIMPACT_REPO=/path/to/merged_news` (double underscore) or place the repo at the default path. |
 | `release_gate_passed_unexpectedly_true` | Someone (or something) mutated governance metadata. | Investigate. Do **not** suppress the check. |
-| `fusion-stack run` exits with `awareness path missing` | Awareness data dir not where expected | `FUSION_PATHS__AWARENESS_DATA_DIR=...` |
-| No records appearing | All inputs may be filtered. Run `fusion-stack run --mode replay_existing --max-records 50` and inspect `data/results/dlq/`. |
+| `catchem run` exits with `awareness path missing` | Awareness data dir not where expected | `CATCHEM_PATHS__AWARENESS_DATA_DIR=...` |
+| No records appearing | All inputs may be filtered. Run `catchem run --mode replay_existing --max-records 50` and inspect `data/results/dlq/`. |
 | `transformers` import error during ML run | venv missing optional extra | `uv pip install -e ".[ml]"` |
+| `GET /` returns the placeholder page after `pip install dist/*.whl` | static dir installed via wheel `force-include` regressed | Re-check `[tool.hatch.build.targets.wheel] force-include` and re-run `tests/test_static_dashboard_packaged_install.py::test_wheel_install_smoke_serves_dashboard` |
+| `CATCHEM_LIVE__POLL_SECONDS` ignored | someone reverted `settings_customise_sources` source order | Re-run `tests/test_settings_live_env_override.py` and restore env-above-init ordering |
+| Diagnostic data appears in a `/recent` payload during prod-safe | redaction layer skipped at API surface | Re-check `redact_records_for_mode` calls in `api.py` |
+| Bundle JS appears at `/static/app/...` instead of `/assets/...` | StaticFiles mount uses the wrong path | Verify `api.py` mounts `/assets` from the resolved `assets` subdir |
 
 ## NewsImpact safety: when to be paranoid
 

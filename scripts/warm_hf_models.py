@@ -11,7 +11,6 @@ import os
 import sys
 from pathlib import Path
 
-
 TARGETS = [
     ("transformers", "ProsusAI/finbert"),
     ("transformers", "facebook/bart-large-mnli"),
@@ -32,7 +31,7 @@ def warm() -> int:
         return 0
 
     rc = 0
-    for backend, repo in TARGETS:
+    for _backend, repo in TARGETS:
         try:
             print(f"[warm] downloading {repo} …")
             snapshot_download(repo_id=repo, cache_dir=str(cache))

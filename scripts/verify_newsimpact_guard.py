@@ -6,7 +6,7 @@ Usage:
     python scripts/verify_newsimpact_guard.py /path/to/merged_news
 
 Designed to be called from the bootstrap script and from CI. Never imports
-fusion_stack source code itself so it can run before the package is installed.
+catchem source code itself so it can run before the package is installed.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-
 
 REL = "models/governance_index/governance_index.json"
 EXPECTED_QUARANTINE = "QUARANTINED_REGRESSIVE_MULTIMODAL"

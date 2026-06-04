@@ -9,13 +9,13 @@ storage), `ml` (requires the optional ML extra).
 | File | What it proves |
 |---|---|
 | `test_existing_repo_regressions.py::test_awareness_doccapture_schema_unmodified` | The Awareness `doc.py` field list is intact. |
-| `test_existing_repo_regressions.py::test_awareness_jsonl_writer_signature_unmodified` | The JSONL writer's public surface has not been mutated by fusion_stack. |
-| `test_existing_repo_regressions.py::test_newsimpact_final_best_pt_not_modified_by_fusion_run` | Replays a tiny batch and reasserts `final_best.pt` (if present) is byte-identical. |
-| `test_existing_repo_regressions.py::test_no_fusion_call_into_v7_runner_training_path` | Static check: no fusion_stack module references `v[3-7]_runner` or `pipeline_v7`. |
-| `test_doccapture_contract.py::test_view_validates_real_jsonl` | Parse a real Awareness JSONL row through fusion_stack's view. |
+| `test_existing_repo_regressions.py::test_awareness_jsonl_writer_signature_unmodified` | The JSONL writer's public surface has not been mutated by catchem. |
+| `test_existing_repo_regressions.py::test_newsimpact_final_best_pt_not_modified_by_catchem_run` | Replays a tiny batch and reasserts `final_best.pt` (if present) is byte-identical. |
+| `test_existing_repo_regressions.py::test_no_catchem_call_into_v7_runner_training_path` | Static check: no catchem module references `v[3-7]_runner` or `pipeline_v7`. |
+| `test_doccapture_contract.py::test_view_validates_real_jsonl` | Parse a real Awareness JSONL row through catchem's view. |
 | `test_doccapture_contract.py::test_view_is_not_strict_about_extras` | New optional fields on the upstream side don't break us. |
 | `test_awareness_post_commit_consumption.py::test_skip_tmp_files` | We never read `.jsonl.tmp` (in-flight) chunks. |
-| `test_awareness_post_commit_consumption.py::test_fusion_stack_does_not_import_awareness_internals` | We didn't accidentally import `awareness.workers` / `awareness.dedup`. |
+| `test_awareness_post_commit_consumption.py::test_catchem_does_not_import_awareness_internals` | We didn't accidentally import `awareness.workers` / `awareness.dedup`. |
 | `test_awareness_post_commit_consumption.py::test_settings_default_mode_is_production_safe` | Default mode out of the box is production_safe. |
 
 ## Group B — Unit tests
@@ -58,17 +58,90 @@ storage), `ml` (requires the optional ML extra).
 | `test_service_replay_mode.py::test_replay_produces_records` | End-to-end replay over synthetic captures; finance vs sports triage; evidence present. |
 | `test_service_replay_mode.py::test_replay_idempotent` | Re-running replay does not double-process. |
 | `test_service_live_mode_smoke.py::test_tail_picks_up_new_files` | Drop a JSONL file mid-run, tail consumes it. |
-| `test_single_command_smoke.py::test_bootstrap_shell_runs_end_to_end` | `fusion_bootstrap_and_run.sh` exits 0 from a clean state. |
+| `test_single_command_smoke.py::test_bootstrap_shell_runs_end_to_end` | `catchem_bootstrap_and_run.sh` exits 0 from a clean state. |
 | `test_storage_and_api.py::test_api_healthz_and_recent` | API up, dashboard endpoints respond. |
 | `test_storage_and_api.py::test_api_process_one_and_lookup` | API `/process-one` end-to-end. |
+
+## Group E — /ui aggregation + legacy preservation
+
+| File | Coverage |
+|---|---|
+| `test_ui_endpoints.py::test_root_serves_html_or_fallback` | `GET /` returns SPA shell or the friendly placeholder. |
+| `test_ui_endpoints.py::test_legacy_dashboard_still_served` | `/legacy` and `/legacy-dashboard` still serve the vanilla page. |
+| `test_ui_endpoints.py::test_ui_summary_shape` | `/ui/summary` returns the documented payload keys. |
+| `test_ui_endpoints.py::test_ui_facets_returns_paired_arrays` | Facet entries are `[label, count]` tuples. |
+| `test_ui_endpoints.py::test_ui_timeline_buckets_have_total_and_relevant` | Timeline series shape. |
+| `test_ui_endpoints.py::test_ui_top_symbols_and_reasons` | Leaderboards expose `symbol`/`reason` + `count`. |
+| `test_ui_endpoints.py::test_ui_matrix` | Asset×reason matrix is square. |
+| `test_ui_endpoints.py::test_ui_guards_reflects_real_state` | Live guard snapshot intact (gate=false, quarantine). |
+| `test_ui_endpoints.py::test_ui_benchmark_latest` | Golden-set runs and reports relevance F1. |
+| `test_ui_endpoints.py::test_ui_benchmark_history_is_safe_when_missing` | No history file ⇒ empty list, not 500. |
+| `test_ui_endpoints.py::test_ui_symbol_aggregation` | `/ui/symbol/{sym}` returns the aggregated shape. |
+| `test_ui_endpoints.py::test_diagnostic_flag_in_summary_when_research_mode` | Research mode reports `diagnostic_allowed=true`. |
+| `test_ui_endpoints.py::test_production_safe_summary_refuses_diagnostic` | Even with env flag on, prod-safe reports `diagnostic_allowed=false`. |
+
+## Group F — frontend Vitest
+
+| File | Coverage |
+|---|---|
+| `frontend/src/tests/safeHref.test.ts` | `safeHref` accepts http/https only, rejects `javascript:` / `file:` / null. |
+| `frontend/src/tests/StatusBanner.test.tsx` | Banner shows quarantine + release_gate, warns in diagnostic mode, reds out on guard error. |
+| `frontend/src/tests/feedMerge.test.ts` | `mergeByCaptureId` dedupes + sorts; `newCaptureIds` diff; `isIncompleteRecord`; fallback to `created_at` when `published_ts` is missing; empty-input tolerance. |
+
+## Group I — Catchem desktop endpoints (Python)
+
+| File | Coverage |
+|---|---|
+| `test_catchem_endpoints.py::test_demo_paste_happy_path` | `POST /ui/demo/paste` returns `DemoRunResponse` shape; record is relevant; symbols + reasons match expectations. |
+| `test_catchem_endpoints.py::test_demo_paste_validation_rejects_empty` | Empty title/text → 422. |
+| `test_catchem_endpoints.py::test_demo_paste_validation_rejects_oversized_text` | >5MB → 413. |
+| `test_catchem_endpoints.py::test_demo_paste_deterministic_capture_id` | Same input → same `capture_id`. |
+| `test_catchem_endpoints.py::test_demo_upload_txt` | `.txt` upload → score. |
+| `test_catchem_endpoints.py::test_demo_upload_markdown_extracts_heading` | `# H1` becomes title hint. |
+| `test_catchem_endpoints.py::test_demo_upload_html_strips_scripts` | `<script>` / `<style>` content does not leak into the response. |
+| `test_catchem_endpoints.py::test_demo_upload_jsonl_uses_text_field` | JSONL row's `text` field is the body. |
+| `test_catchem_endpoints.py::test_demo_upload_rejects_unsupported_suffix` | `.exe` → 422. |
+| `test_catchem_endpoints.py::test_demo_upload_rejects_oversized` | >5MB → 422. |
+| `test_catchem_endpoints.py::test_demo_upload_rejects_empty_body` | Empty body → 422. |
+| `test_catchem_endpoints.py::test_app_info_shape` | `/ui/app-info` documented keys; `diagnostic_allowed=false` in prod-safe. |
+| `test_catchem_endpoints.py::test_sidecar_status_shape` | `/ui/sidecar-status` keys + pid > 0. |
+| `test_catchem_endpoints.py::test_log_tail_empty_when_no_log_yet` | Missing log file → empty list, not 500. |
+| `test_catchem_endpoints.py::test_log_tail_rejects_silly_limits` | `lines=0` and `lines=99999` → 422. |
+| `test_catchem_endpoints.py::test_demo_paste_jsonl_basename_only` | No directory separators in `jsonl_basename`. |
+| `test_catchem_endpoints.py::test_app_info_does_not_leak_filesystem_paths` | `/ui/app-info` payload contains no `/Users/...` or `/etc/...`. |
+
+## Group J — Catchem desktop shell (Rust)
+
+| File | Coverage |
+|---|---|
+| `desktop/catchem/src-tauri/src/security.rs::tests::rejects_javascript_data_file_schemes` | `is_safe_external_url` rejects `javascript:`, `data:`, `file:`, `vbscript:`, `ftp:`, empty. |
+| `desktop/catchem/src-tauri/src/security.rs::tests::accepts_http_and_https` | `is_safe_external_url` accepts http/https case-insensitively. |
+| `desktop/catchem/src-tauri/src/security.rs::tests::internal_navigation_locked_to_local_api` | `is_allowed_internal_url` allows only `http://127.0.0.1:<port>` and `http://localhost:<port>`. |
+
+## Group G — UI hardening / bug-hunt remediation (Python)
+
+| File | Coverage |
+|---|---|
+| `test_static_dashboard_packaged_install.py` | importlib.resources lookup; CATCHEM_STATIC_DIR override + traversal rejection; wheel canary that builds the wheel and opens its ZIP to confirm `catchem/static/dashboard.html` is packaged. |
+| `test_settings_live_env_override.py` | env > YAML > defaults for nested fields (`live.poll_seconds`, `live.tail_max_per_tick`, `replay.batch_size`, `mode`, `use_ml_stubs`); invalid values reject; unknown keys ignored. |
+| `test_guard_redaction_in_production.py` | `diagnostic_multimodal_*` scrubbed on every list/detail/summary endpoint; `/ui/guards` never leaks filesystem paths; `/metrics` diagnostic pinned False; diagnostic adapter never constructed in production_safe (mock-verified). |
+| `test_records_by_asset_class_contract.py` | List routes return COMPACT summary shape; `text_excerpt`/`evidence_sentences`/`component_scores`/`model_versions`/`processing_mode`/`diagnostic_multimodal_result` forbidden in summaries. |
+| `test_record_detail_contract.py` | Detail routes return full rich shape including `component_scores`, `evidence_sentences`, `model_versions`, `processing_mode`. |
+| `test_dashboard_xss_fixture.py` | Security headers (CSP, XCTO, Referrer-Policy, XFO) present; legacy dashboard avoids unsafe DOM sinks; `safeHref` helper present; every `target=_blank` carries `rel=noopener`; API returns JSON not HTML. |
+| `test_golden_schema_and_history.py` | `validate_golden_row` rejects malformed rows loudly; `load_extended` strict-mode raises, lax-mode skips; `BenchmarkReport.to_dict()` carries `schema_version`, `generated_at`, `dataset_name`; hard-negative golden items remain pinned. |
+| `test_metrics_contract.py` | Stable JSON contract for `/metrics` and `/ui/summary` — required keys, ISO timestamps, prod-safe diagnostic pin. |
+| `test_duplicate_and_incomplete_records.py` | `insert_record` dedupes by `capture_id`; label inverted index rebuilds on overwrite; JSONL reader skips garbage; DLQ records failures. |
+| `test_timestamp_handling.py` | Naive datetimes coerced to UTC; ISO strings round-trip; missing `published_ts` allowed; storage serializes as ISO 8601. |
 
 ## Running
 
 ```bash
-make test           # everything
-make test-fast      # skip ml + smoke + integration
-make test-guards    # guard only (red here = stop the world)
-make test-smoke     # end-to-end shell
+make test               # full Python suite (192 tests now)
+make test-fast          # skip ml + smoke + integration
+make test-guards        # guard only (red here = stop the world)
+make test-smoke         # end-to-end shell
+(cd frontend && npm test)                  # Vitest UI tests (13)
+(cd desktop/catchem/src-tauri && cargo test --lib)   # Rust security tests (3)
 ```
 
 The `ml` marker is opt-in and runs only when `pip install -e ".[ml]"` has been

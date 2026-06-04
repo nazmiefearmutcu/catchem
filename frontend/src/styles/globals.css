@@ -1,0 +1,459 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark (default) tokens. Overridden in :root.light below. */
+    --bg: #0e1014;
+    --bg-elev: #161922;
+    --bg-elev2: #1f2531;
+    --border: #232838;
+    --border-subtle: #1a1f2a;
+    --fg: #e7ebf0;
+    --fg-dim: #9aa3b2;
+    /* fg-muted bumped from #6b7385 → #878faa for WCAG 2.1 AA contrast
+       (≥4.5:1 on all three bg surfaces; previously 3.23–4.00). */
+    --fg-muted: #878faa;
+    --accent: #5fb3ff;
+    color-scheme: dark;
+  }
+  :root:not(.dark) {
+    --bg: #fafbfc;
+    --bg-elev: #ffffff;
+    --bg-elev2: #f1f3f5;
+    --border: #e3e6eb;
+    --border-subtle: #ecedf0;
+    --fg: #0e1014;
+    --fg-dim: #525968;
+    /* fg-muted darkened from #7e8696 → #666c7c for WCAG 2.1 AA contrast
+       (≥4.5:1 on all three bg surfaces; previously 3.29–3.66). */
+    --fg-muted: #666c7c;
+    /* --accent darkened from #5fb3ff → #1e6fdd for WCAG 2.1 AA contrast
+       on light surfaces (~5.4:1 on #fafbfc; previously ~2.7:1).
+       Tailwind's bg-accent / from-accent/* still use the hardcoded
+       #5fb3ff from tailwind.config — those utilities are kept for
+       dark-theme bias; light-theme heroes use .hero-gradient below
+       which reads var(--accent). */
+    --accent: #1e6fdd;
+    color-scheme: light;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+  }
+  ::selection {
+    background: rgba(95, 179, 255, 0.3);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border bg-[color:var(--bg-elev)] border-[color:var(--border)] p-3;
+    transition: border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+  }
+  /* Hover lift only when the card is itself interactive or contains an interactive descendant.
+     Pure data cards (no <a>/<button> inside) stay static — feels less buggy. */
+  @media (prefers-reduced-motion: no-preference) {
+    a.card:hover,
+    button.card:hover,
+    .card:hover:has(a:not(.no-hover)),
+    .card:hover:has(button:not(.no-hover)) {
+      border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px -6px color-mix(in srgb, var(--accent) 25%, transparent);
+    }
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-2.5 py-0.5 text-xs;
+    transition: border-color 200ms ease, background-color 200ms ease;
+  }
+  /* Hover only when the chip is interactive (link/button or chip-active selectable). */
+  @media (prefers-reduced-motion: no-preference) {
+    a.chip:hover,
+    button.chip:hover,
+    .chip.chip-active:hover,
+    .chip:hover:has(a:not(.no-hover)),
+    .chip:hover:has(button:not(.no-hover)) {
+      border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+      background-color: color-mix(in srgb, var(--accent) 8%, var(--bg-elev2));
+    }
+  }
+  .chip-active {
+    @apply !bg-accent !text-[#0b1018] !border-accent;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1 rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-xs hover:bg-[color:var(--bg-elev2)] transition-colors;
+  }
+  .btn-accent {
+    @apply !bg-accent !text-[#0b1018] !border-accent hover:opacity-90;
+  }
+  .input {
+    @apply rounded-md border border-[color:var(--border)] bg-[color:var(--bg-elev)] px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-accent;
+  }
+  .label {
+    @apply text-[10px] uppercase tracking-wider text-[color:var(--fg-dim)];
+  }
+  .kbd {
+    @apply rounded border border-[color:var(--border)] bg-[color:var(--bg-elev2)] px-1.5 py-0.5 text-[10px] font-mono;
+  }
+
+  /* Decorative hero blobs are visual noise and can force mobile overflow. */
+  [class*="blur-3xl"] {
+    display: none !important;
+  }
+}
+
+@layer utilities {
+  /* Hero gradient — single class to replace the long
+       `bg-gradient-to-br from-accent/15 via-[color:var(--bg-elev)] to-[color:var(--bg-elev)]`
+     blob across every hero section. Reads `var(--accent)` so light theme
+     gets the darker, more saturated stop automatically. Light theme also
+     bumps the start opacity (28%) since a /15 over a near-white surface
+     desaturated to ~rgb(245 248 252) and lost all visual weight. */
+  .hero-gradient {
+    background-image: linear-gradient(
+      to bottom right,
+      color-mix(in srgb, var(--accent) 15%, var(--bg-elev)),
+      var(--bg-elev),
+      var(--bg-elev)
+    );
+  }
+  :root:not(.dark) .hero-gradient {
+    background-image: linear-gradient(
+      to bottom right,
+      color-mix(in srgb, var(--accent) 22%, var(--bg-elev)),
+      var(--bg-elev),
+      var(--bg-elev)
+    );
+  }
+  /* Keyboard-only focus ring (WCAG 2.1 AA). Suppress the default outline
+     on mouse-click focus, then paint a strong accent ring on
+     `:focus-visible` (real keyboard focus). `border-radius: inherit`
+     keeps the ring shape consistent with the target element's corners
+     (cards, pills, buttons all inherit their own radius). */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+  /* Skip-to-content link — visually-hidden until keyboard focus reveals it
+     in the top-left of the viewport. Sits above sticky header (z-50). */
+  .skip-link {
+    position: absolute;
+    top: -64px;
+    left: 8px;
+    z-index: 50;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: top 160ms ease;
+  }
+  .skip-link:focus,
+  .skip-link:focus-visible {
+    top: 8px;
+    outline: 2px solid var(--fg);
+    outline-offset: 2px;
+  }
+  /* Subtle fade-in for tab content transitions on /scan. */
+  @keyframes catchem-fadein {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fadein {
+    animation: catchem-fadein 220ms ease-out both;
+  }
+  /* News-feed flash for newly-arrived rows (FeedRow + Reviews compare). */
+  @keyframes catchem-feed-flash {
+    0%   { background-color: rgba(95, 179, 255, 0.18); }
+    100% { background-color: transparent; }
+  }
+  .animate-feed-flash {
+    animation: catchem-feed-flash 4.6s ease-out both;
+  }
+  /* Vestibular-disorder safety: even with the global motion shortener at
+     the bottom of this file (animation-duration: 0.01ms), a freshly-rendered
+     row would still paint the saturated blue start-frame for one tick. Hard
+     off + transparent bg here guarantees no flash for reduced-motion users. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-feed-flash {
+      animation: none;
+      background-color: transparent;
+    }
+  }
+  /* Pulse for the news poller "+N" badge counter. */
+  @keyframes catchem-count-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+  }
+  .animate-count-pulse {
+    animation: catchem-count-pulse 1.6s ease-in-out 2;
+  }
+  /* Steady pulse-dot for connection-state indicators (sidebar, feed, scan). */
+  @keyframes catchem-pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.4); opacity: 0.55; }
+  }
+  .animate-pulse-dot {
+    animation: catchem-pulse-dot 1.4s ease-in-out infinite;
+  }
+  /* Shimmer sweep for Skeleton loaders — left-to-right gradient pass. */
+  @keyframes skeleton-shimmer {
+    100% { transform: translateX(200%); }
+  }
+  .animate-skeleton-shimmer {
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+  /* Canonical shimmer for Skeleton (v22) — moves the background-position
+     of a 3-stop linear gradient across the element. The middle stop carries
+     8% of the theme accent so the sweep tints subtly (blue on dark, indigo
+     on light) instead of pure greyscale. `animate-skeleton-shimmer` above
+     is retained for legacy callers (EChart fallback). */
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--bg-elev2) 92%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 8%, var(--bg-elev2)) 50%,
+      color-mix(in srgb, var(--bg-elev2) 92%, transparent) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-shimmer {
+      animation: none;
+      background: var(--bg-elev2);
+    }
+  }
+  /* Page-level enter animation — re-fires on every route change via
+     `<div key={location.pathname}>` wrapper around the Outlet. */
+  @keyframes page-enter {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-page-enter {
+    animation: page-enter 220ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-page-enter {
+      animation: none;
+    }
+  }
+  /* Slide-up + fade-in for full-screen modal overlays (ShortcutOverlay,
+     future dialogs). Duration matches `.animate-page-enter` for a
+     consistent feel. `prefers-reduced-motion: reduce` collapses the
+     translate so the overlay still appears, just without motion. */
+  @keyframes modal-enter {
+    from { opacity: 0; transform: translateY(8px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .animate-modal-enter {
+    animation: modal-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-modal-enter {
+      animation: none;
+    }
+  }
+  /* Toast tray enter/exit animations. The tray (top-right) renders new
+     toasts with `.toast-enter` (slide in from the right + fade in) and
+     dismissed toasts with `.toast-exit` (slide out + fade out). Exit
+     duration (200ms) matches the JS cleanup timer in ToastTray.tsx; if
+     either changes, update both. */
+  @keyframes toast-slide-in {
+    from { opacity: 0; transform: translateX(16px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes toast-slide-out {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(16px); }
+  }
+  .toast-enter {
+    animation: toast-slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .toast-exit {
+    animation: toast-slide-out 200ms cubic-bezier(0.4, 0, 1, 1) both;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast-enter,
+    .toast-exit {
+      animation: none;
+    }
+  }
+  /* Sticky bulk-action toolbar (Feed page) slide-up + fade-in from below.
+     Mirrors `.animate-page-enter` timing so a freshly-rendered toolbar
+     reads as part of the same composition. Reduced-motion collapses the
+     translate so the pill still appears, just without movement. */
+  @keyframes toolbar-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-toolbar-rise {
+    animation: toolbar-rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-toolbar-rise {
+      animation: none;
+    }
+  }
+  /* Respect reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Print stylesheet — ⌘P / Save as PDF
+ *
+ * Browser print preview on the dark cockpit produces an unreadable inky
+ * dump. This @media print block:
+ *   1. Re-paints tokens light: white background, black text, visible borders.
+ *   2. Hides app chrome (header/nav/modals/floating buttons) — paper only
+ *      needs the analyst content.
+ *   3. Converts hero gradients to flat white so we don't waste toner.
+ *   4. Turns interactive cards into bordered boxes that don't break across
+ *      pages.
+ *   5. Reveals real URLs after external links (an old print-CSS trick that
+ *      makes the printed page self-contained).
+ *   6. Sets sensible page margins + 10pt body type.
+ *
+ * Everything is scoped inside @media print — screen rendering is untouched.
+ * Buttons that should NOT print get class="no-print" (already hidden by the
+ * generic `button` rule, but `.no-print` works on any element).
+ * ------------------------------------------------------------------------- */
+@media print {
+  /* Force light tokens regardless of dark/light mode at print time */
+  :root,
+  :root.dark,
+  :root:not(.dark) {
+    --bg: #ffffff;
+    --bg-elev: #ffffff;
+    --bg-elev2: #f5f5f5;
+    --fg: #000000;
+    --fg-dim: #333333;
+    --fg-muted: #666666;
+    --border: #cccccc;
+    --border-subtle: #dddddd;
+    --accent: #1e6fdd;
+    --good: #0a7044;
+    --warn: #a06a00;
+    --bad: #a51d2d;
+    color-scheme: light;
+  }
+
+  /* Hide app chrome and anything explicitly opted-out via .no-print */
+  header,
+  footer,
+  nav,
+  .skip-link,
+  .no-print,
+  [role="dialog"],
+  [role="tooltip"],
+  [data-testid="help-drawer-trigger"],
+  .sticky,
+  .fixed,
+  nav[aria-label="Primary"],
+  .live-dot,
+  .toast-tray,
+  .command-palette,
+  .search-palette,
+  .shortcut-overlay,
+  .onboarding-modal,
+  .sidecar-banner,
+  button {
+    display: none !important;
+  }
+
+  /* Don't waste paper on hero gradients / radial blurs */
+  .hero-gradient,
+  [class*="bg-gradient"],
+  [class*="blur-3xl"],
+  [class*="blur-2xl"],
+  [class*="blur-xl"] {
+    background: white !important;
+    filter: none !important;
+  }
+
+  /* Visible borders on paper + keep cards intact across page breaks */
+  .card,
+  section.card,
+  section[class*="rounded-xl"] {
+    border: 1px solid #333 !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 12px;
+    background: white !important;
+  }
+
+  /* Print-friendly typography */
+  body {
+    font-size: 10pt;
+    line-height: 1.4;
+    background: white !important;
+    color: black !important;
+  }
+
+  h1 { font-size: 16pt; margin-top: 0; }
+  h2 { font-size: 13pt; }
+  h3 { font-size: 11pt; }
+
+  /* Make tables print-friendly */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  table th,
+  table td {
+    border: 1px solid #aaa;
+    padding: 4px 6px;
+    text-align: left;
+  }
+
+  /* Reveal real URLs after external links (skip anchors and js: links) */
+  a[href]:not([href^="#"]):not([href^="javascript:"])::after {
+    content: " (" attr(href) ")";
+    font-size: 8pt;
+    color: #666;
+  }
+
+  /* Pop-ups that may be open at print time */
+  [aria-expanded="true"] + div[role="dialog"] {
+    display: none !important;
+  }
+
+  /* Page margins (US letter, generous gutters) */
+  @page {
+    margin: 1in;
+    size: letter;
+  }
+
+  /* Kill all motion at print time — preview should be instant + stable */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

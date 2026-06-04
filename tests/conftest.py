@@ -11,18 +11,38 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.settings import FusionMode, Settings, load_settings, reload_settings
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+VENV_SITE_PACKAGES = next(
+    (
+        p
+        for p in (PROJECT_ROOT / ".venv").glob(
+            f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        )
+        if p.is_dir()
+    ),
+    None,
+)
+SRC_ROOT = PROJECT_ROOT / "src"
+if VENV_SITE_PACKAGES is not None and str(VENV_SITE_PACKAGES) not in sys.path:
+    # Let `pytest -q` work from the repo root even when the shell did not
+    # activate `.venv` first. This keeps the test harness aligned with the
+    # local checkout's dependency set instead of the system Python.
+    sys.path.insert(0, str(VENV_SITE_PACKAGES))
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
+from catchem.schemas import AwarenessCaptureView  # noqa: E402
+from catchem.settings import Settings, load_settings, reload_settings  # noqa: E402
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEWSIMPACT_DEFAULT = Path("/Users/nazmi/Desktop/Projeler/proje/merged_news")
 AWARENESS_DEFAULT = Path("/Users/nazmi/Desktop/Projeler/proje/awareness")
 
@@ -34,18 +54,34 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     Tests that change env vars themselves should call ``reload_settings()`` so
     the cached Settings instance is rebuilt. The autouse fixture handles the
     initial setup but not subsequent monkeypatches inside the test body.
+
+    CI escape hatch: when the caller has pre-set ``CATCHEM_PATHS__NEWSIMPACT_REPO``
+    or ``CATCHEM_PATHS__AWARENESS_REPO`` in the process env (typical for GitHub
+    Actions, which synthesizes a quarantined governance fixture under /tmp),
+    we honor that path instead of pointing at the developer's local repos.
+    Captured BEFORE the env wipe so the override survives the cleanup.
     """
+    ci_newsimpact = os.environ.get("CATCHEM_PATHS__NEWSIMPACT_REPO")
+    ci_awareness = os.environ.get("CATCHEM_PATHS__AWARENESS_REPO")
+
     for k in list(os.environ.keys()):
-        if k.startswith("FUSION_"):
+        if k.startswith("CATCHEM_"):
             monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("FUSION_PATHS__FUSION_OUTPUT_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_REPO", str(AWARENESS_DEFAULT))
-    monkeypatch.setenv("FUSION_PATHS__NEWSIMPACT_REPO", str(NEWSIMPACT_DEFAULT))
+    monkeypatch.setenv("CATCHEM_PATHS__CATCHEM_OUTPUT_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_REPO", ci_awareness or str(AWARENESS_DEFAULT))
+    monkeypatch.setenv("CATCHEM_PATHS__NEWSIMPACT_REPO", ci_newsimpact or str(NEWSIMPACT_DEFAULT))
     # Point at an empty awareness dir by default so replay tests don't accidentally
     # sweep the entire real repo. Tests that exercise the real repo override this.
-    monkeypatch.setenv("FUSION_PATHS__AWARENESS_DATA_DIR", str(tmp_path / "aw"))
-    monkeypatch.setenv("FUSION_MODELS__USE_ML_STUBS", "true")
-    monkeypatch.setenv("FUSION_LOGGING__LEVEL", "WARNING")
+    monkeypatch.setenv("CATCHEM_PATHS__AWARENESS_DATA_DIR", str(tmp_path / "aw"))
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "true")
+    monkeypatch.setenv("CATCHEM_LOGGING__LEVEL", "WARNING")
+    # Unit/integration tests are offline by default even when the developer's
+    # local .env opts the app into live ingestion, archiving, or DeepSeek.
+    # Tests that exercise those paths opt in explicitly with monkeypatch.
+    monkeypatch.setenv("CATCHEM_NEWS__POLLER_ENABLED", "false")
+    monkeypatch.setenv("CATCHEM_ARCHIVE__ENABLED", "false")
+    monkeypatch.setenv("CATCHEM_REVIEWERS__DEEPSEEK__ENABLED", "false")
+    monkeypatch.setenv("CATCHEM_REVIEWERS__DEEPSEEK__API_KEY", "")
     reload_settings()
 
 
@@ -88,8 +124,8 @@ def synth_capture() -> Callable[..., AwarenessCaptureView]:
             source_type=source_type,
             discovery_channel=f"rss:{domain}",
             language=language,
-            fetch_ts=datetime.now(timezone.utc),
-            observed_ts=datetime.now(timezone.utc),
+            fetch_ts=datetime.now(UTC),
+            observed_ts=datetime.now(UTC),
             published_ts=published_ts,
             content_hash="abc123",
             robots_decision="not_applicable",
@@ -114,8 +150,8 @@ def synth_non_finance_capture() -> AwarenessCaptureView:
         source_type="rss",
         discovery_channel="rss:espn.com",
         language="en",
-        fetch_ts=datetime.now(timezone.utc),
-        observed_ts=datetime.now(timezone.utc),
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
     )
 
 

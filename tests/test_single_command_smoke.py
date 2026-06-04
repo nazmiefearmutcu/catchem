@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,14 +19,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.smoke
 def test_bootstrap_shell_runs_end_to_end(tmp_path: Path) -> None:
     env = os.environ.copy()
-    env["FUSION_PATHS__FUSION_OUTPUT_DIR"] = str(tmp_path / "out")
-    env["FUSION_NO_API"] = "1"
-    env["FUSION_SKIP_RUN"] = "0"
-    env["FUSION_MAX_RECORDS"] = "5"
-    env["FUSION_MODELS__USE_ML_STUBS"] = "true"
-    env["FUSION_MODE"] = "replay_existing"
+    env["CATCHEM_PATHS__CATCHEM_OUTPUT_DIR"] = str(tmp_path / "out")
+    env["CATCHEM_NO_API"] = "1"
+    env["CATCHEM_SKIP_RUN"] = "0"
+    env["CATCHEM_MAX_RECORDS"] = "5"
+    env["CATCHEM_MODELS__USE_ML_STUBS"] = "true"
+    env["CATCHEM_MODE"] = "replay_existing"
 
-    script = PROJECT_ROOT / "scripts" / "fusion_bootstrap_and_run.sh"
+    script = PROJECT_ROOT / "scripts" / "catchem_bootstrap_and_run.sh"
     res = subprocess.run(
         ["bash", str(script), "--no-api", "--max=5"],
         cwd=str(PROJECT_ROOT),

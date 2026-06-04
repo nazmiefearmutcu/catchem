@@ -1,6 +1,6 @@
 """DocCapture compatibility tests.
 
-These tests load a real Awareness JSONL row (if present) and assert fusion_stack
+These tests load a real Awareness JSONL row (if present) and assert catchem
 can validate it. They also check the AwarenessCaptureView accepts the real-world
 field set without dropping data.
 """
@@ -12,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from fusion_stack.awareness_reader import parse_capture_line
-from fusion_stack.schemas import AwarenessCaptureView
-
+from catchem.awareness_reader import parse_capture_line
+from catchem.schemas import AwarenessCaptureView
 
 REQUIRED_KEYS = (
     "doc_id", "capture_id", "source_type", "source_name", "discovery_channel",
@@ -56,12 +55,12 @@ def test_view_validates_real_jsonl(real_jsonl_root: Path | None) -> None:
         if parsed >= 10:
             break
     assert seen > 0
-    assert parsed > 0, "fusion_stack failed to parse any real Awareness rows"
+    assert parsed > 0, "catchem failed to parse any real Awareness rows"
 
 
 @pytest.mark.regression
 def test_view_is_not_strict_about_extras() -> None:
-    """If Awareness adds new optional fields, fusion_stack should keep working."""
+    """If Awareness adds new optional fields, catchem should keep working."""
     raw = {
         "capture_id": "c",
         "doc_id": "d",

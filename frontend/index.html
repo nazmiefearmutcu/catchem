@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="catchem — local analyst workstation for news-to-finance intelligence" />
+    <title>catchem</title>
+    <script>
+      // Set theme as early as possible to prevent FOUC.
+      (function () {
+        try {
+          var t = localStorage.getItem("catchem.theme") || "dark";
+          if (t === "light") document.documentElement.classList.remove("dark");
+          else document.documentElement.classList.add("dark");
+        } catch (e) { /* localStorage blocked */ }
+      })();
+    </script>
+    <script>
+      // Capture the boot token before the JS bundle loads so the first
+      // health probe can reuse it even if the URL is normalized later.
+      (function () {
+        try {
+          var token = "";
+          try {
+            var name = window.name || "";
+            if (name.indexOf("catchem.boot_token=") === 0) {
+              token = name.slice("catchem.boot_token=".length);
+            }
+          } catch (e) { /* window.name blocked */ }
+          if (!token) {
+            try {
+              token = new URL(window.location.href).searchParams.get("boot_token") || "";
+            } catch (e) { /* invalid URL */ }
+          }
+          if (token) {
+            window.__CATCHEM_BOOT_TOKEN__ = token;
+            try {
+              window.name = "catchem.boot_token=" + token;
+            } catch (e) { /* best effort only */ }
+          }
+        } catch (e) { /* boot token capture best effort */ }
+      })();
+    </script>
+  </head>
+  <body class="bg-bg text-fg font-mono antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

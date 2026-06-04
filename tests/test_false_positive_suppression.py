@@ -7,13 +7,13 @@ portrait" case that snuck through in the v1 scoring.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from fusion_stack.schemas import AwarenessCaptureView
-from fusion_stack.service import build_service
-from fusion_stack.settings import load_settings, reload_settings
+from catchem.schemas import AwarenessCaptureView
+from catchem.service import build_service
+from catchem.settings import load_settings, reload_settings
 
 
 @pytest.mark.regression
@@ -21,7 +21,7 @@ def test_nazi_looted_portrait_is_not_finance(monkeypatch: pytest.MonkeyPatch) ->
     """Historical false-positive: a human-interest art story scored 0.355 — just
     above the floor — because reason_code_max(geopolitics) = 0.73 dragged the
     weighted sum over the line. The asset-class gate fixes this."""
-    monkeypatch.setenv("FUSION_MODELS__USE_ML_STUBS", "true")
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "true")
     reload_settings()
 
     svc = build_service(load_settings())
@@ -38,8 +38,8 @@ def test_nazi_looted_portrait_is_not_finance(monkeypatch: pytest.MonkeyPatch) ->
         source_type="rss",
         url="https://bbc.com/news/nazi-portrait",
         language="en",
-        fetch_ts=datetime.now(timezone.utc),
-        observed_ts=datetime.now(timezone.utc),
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
     )
     rec = svc.process(cap)
     assert rec.is_finance_relevant is False, (
@@ -53,8 +53,8 @@ def test_strong_geopolitics_without_assets_only_if_very_strong() -> None:
     """If geopolitics scores extremely high (≥0.85) we *do* allow relevance —
     a real geopolitical-shock headline like an invasion can move markets even
     without an explicit asset class in the title."""
-    from fusion_stack.scoring import ScoringInputs, score
-    from fusion_stack.taxonomy import default_taxonomy_path, load_taxonomy
+    from catchem.scoring import ScoringInputs, score
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
 
     tax = load_taxonomy(default_taxonomy_path())
     out = score(
@@ -76,7 +76,7 @@ def test_strong_geopolitics_without_assets_only_if_very_strong() -> None:
 
 @pytest.mark.regression
 def test_finance_story_with_weak_asset_score_still_passes(synth_capture, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FUSION_MODELS__USE_ML_STUBS", "true")
+    monkeypatch.setenv("CATCHEM_MODELS__USE_ML_STUBS", "true")
     reload_settings()
     svc = build_service(load_settings())
     cap = synth_capture()  # Fed/rates story

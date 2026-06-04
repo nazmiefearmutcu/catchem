@@ -13,7 +13,7 @@ maturity levels:
 A destructive merge would either compromise Awareness's clean release semantics
 (by mixing in a quarantined module) or compromise NewsImpact's governance (by
 losing track of the quarantine boundary in a hybrid repo). The sidecar approach
-sidesteps both problems: `fusion_stack` lives in a sibling directory, installs
+sidesteps both problems: `catchem` lives in a sibling directory, installs
 the upstreams editable, and consumes them through narrow read-only surfaces.
 
 ## The data flow
@@ -30,12 +30,12 @@ the upstreams editable, and consumes them through narrow read-only surfaces.
                                  │                                          │
                                  ▼                                          ▼
                 ┌────────────────────────────────────────────────────────────────────────┐
-                │                       fusion_stack supervisor                         │
+                │                       catchem supervisor                         │
                 │                                                                       │
                 │   awareness_reader → awareness_replay (offsets, idempotent)           │
                 │       │                                                               │
                 │       ▼                                                               │
-                │   FusionService.process(cap)                                          │
+                │   CatchemService.process(cap)                                          │
                 │       │                                                               │
                 │       ├── A. FastPrefilter        (rules + domain priors)             │
                 │       ├── B. ZeroShot             (bart-large-mnli OR stub)           │
@@ -101,7 +101,7 @@ missing.
 
 Three sinks share a single SQLite database for metadata:
 
-- **SQLite** (`data/db/fusion.sqlite3`) — record index, label inverted index,
+- **SQLite** (`data/db/catchem.sqlite3`) — record index, label inverted index,
   offsets, model versions, DLQ.
 - **Parquet** (`data/results/records-*.parquet`) — rotated batched exports for
   downstream analytics.
@@ -115,7 +115,7 @@ to `dlq` and do not advance the offset.
 
 Three independent checks gate every diagnostic activation:
 
-1. `fusion_stack` mode must be `research_diagnostic`.
+1. `catchem` mode must be `research_diagnostic`.
 2. `guards.newsimpact_diagnostic_enabled` must be `true`.
 3. `governance_index.json` must still report `release_gate_passed: false`.
 
@@ -129,7 +129,8 @@ Read `docs/SOURCE_OF_TRUTH.md` for the full statement.
 
 - Awareness not pip-installed → JSONL replay still works.
 - NewsImpact missing entirely → SymbolMapper falls back to the internal
-  registry; ChartContextReader returns "unavailable".
+  registry; ChartContextReader is dormant/offline metadata only and returns
+  "unavailable"; production records do not emit chart context.
 - HF cache empty / no internet → stubs run.
 - Kaggle credentials missing → downloads skipped with status code 0.
 - `final_best.pt` absent → guards still pass because the verifier reads

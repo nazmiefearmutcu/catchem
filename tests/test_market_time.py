@@ -134,6 +134,8 @@ def test_aggregate_skips_records_with_bad_or_missing_timestamps() -> None:
         {"finance_relevance_score": 0.9},
         {"published_ts": None, "created_at": None, "finance_relevance_score": 0.9},
         {"published_ts": "", "finance_relevance_score": 0.9},
+        # Invalid timestamp with timezone suffix to trigger ValueError in parser
+        {"published_ts": "2026-99-99T99:99:99Z", "finance_relevance_score": 0.9},
         # A naive (no timezone) ISO string is rejected — _parse_ts
         # requires tz-aware values to keep classification correct.
         {"published_ts": "2026-05-27T14:00:00", "finance_relevance_score": 0.9},

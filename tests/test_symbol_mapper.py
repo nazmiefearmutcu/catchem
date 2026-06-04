@@ -131,6 +131,7 @@ def test_maybe_merge_newsimpact(tmp_path: Path) -> None:
     # Write a valid JSON manifest
     valid_json = manifests_dir / "valid.json"
     import json as _json
+
     valid_json.write_text(_json.dumps({"aliases": {"NewsimpactCompany": "NIMP"}}), encoding="utf-8")
 
     # Write a corrupt JSON manifest
@@ -215,3 +216,13 @@ def test_symbol_mapper_missing_branches(tmp_path: Path) -> None:
     assert len(m_json_nondict.map_text("not-a-dict")) == 0
 
 
+def test_alias_pattern_cache() -> None:
+    from catchem.symbol_mapper import _alias_pattern
+
+    _alias_pattern.cache_clear()
+    pat1 = _alias_pattern("testalias")
+    pat2 = _alias_pattern("testalias")
+    assert pat1 is pat2
+    stats = _alias_pattern.cache_info()
+    assert stats.hits == 1
+    assert stats.misses == 1

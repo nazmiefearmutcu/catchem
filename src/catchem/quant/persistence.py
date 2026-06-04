@@ -44,12 +44,13 @@ class PersistenceBucket:
 @lru_cache(maxsize=1024)
 def _parse_day_cached(ts_str: str) -> str | None:
     try:
-        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00") if "Z" in ts_str else ts_str)
-    except (ValueError, TypeError):
+        from catchem.storage import _parse_iso_ts_cached
+        ts = _parse_iso_ts_cached(ts_str)
+    except Exception:
         return None
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    return ts.astimezone(UTC).strftime("%Y-%m-%d")
+    ts_utc = ts.astimezone(UTC)
+    return f"{ts_utc.year:04d}-{ts_utc.month:02d}-{ts_utc.day:02d}"
+
 
 
 def _parse_day(ts_str: str | None) -> str | None:

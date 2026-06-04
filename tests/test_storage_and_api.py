@@ -551,3 +551,67 @@ def test_storage_write_parquet_empty(tmp_path: Path) -> None:
     s._write_parquet([], 1)
     assert len(list((tmp_path / "parq").glob("*.parquet"))) == 0
     s.close()
+
+
+def test_storage_wal_autocheckpoint_and_checkpoint(tmp_path: Path) -> None:
+    s = Storage(
+        db_path=tmp_path / "catchem.sqlite3",
+        parquet_dir=tmp_path / "parq",
+        dlq_dir=tmp_path / "dlq",
+        wal_autocheckpoint=12345,
+    )
+    with s._connection() as conn:
+        res = conn.execute("PRAGMA wal_autocheckpoint").fetchone()
+        assert res[0] == 12345
+
+    s.checkpoint()
+
+    settings = load_settings()
+    assert settings.storage.wal_autocheckpoint == 10000
+
+    s.close()
+
+
+def test_replay_runner_triggers_checkpoint(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from catchem.awareness_replay import ReplayRunner
+
+    mock_storage = MagicMock()
+    mock_storage.get_offset.return_value = MagicMock(line_offset=0)
+
+    # Create a dummy jsonl file
+    dummy_file = tmp_path / "dummy.jsonl"
+    dummy_file.write_text('{"capture_id": "c1", "doc_id": "d1", "text": "hello"}\n', encoding="utf-8")
+
+    runner = ReplayRunner(root=tmp_path, storage=mock_storage, pattern="*.jsonl")
+
+    handle_mock = MagicMock()
+    runner.run_once(handle_mock)
+
+    assert mock_storage.checkpoint.call_count == 1
+
+    mock_storage.checkpoint.reset_mock()
+    runner.run_once(handle_mock, max_records=1)
+    assert mock_storage.checkpoint.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_news_poller_triggers_checkpoint() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from catchem.news_poller import NewsPoller
+
+    mock_sup = MagicMock()
+    mock_sup.storage = MagicMock()
+
+    settings = load_settings()
+    poller = NewsPoller(supervisor=mock_sup, settings=settings)
+
+    poller._poll_once = AsyncMock(return_value=1)
+
+    mock_client = AsyncMock()
+    n = await poller._run_one_tick(mock_client)
+    assert n == 1
+    assert mock_sup.storage.checkpoint.call_count == 1
+

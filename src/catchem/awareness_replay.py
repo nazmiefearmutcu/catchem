@@ -69,10 +69,12 @@ class ReplayRunner:
 
                 if max_records and processed >= max_records:
                     self.storage.save_offset(offset)
+                    self.storage.checkpoint()
                     return {"processed": processed, "skipped": skipped, "failed": failed}
 
             # End of file — persist final offset.
             self.storage.save_offset(offset)
+            self.storage.checkpoint()
         return {"processed": processed, "skipped": skipped, "failed": failed}
 
     def tail(

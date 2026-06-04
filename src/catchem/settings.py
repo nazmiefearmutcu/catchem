@@ -133,6 +133,7 @@ class StorageConfig(BaseModel):
     dlq_dir: str = "data/results/dlq"
     vector_index_dir: str = "data/vector_index"
     rotate_parquet_records: int = 5000
+    wal_autocheckpoint: int = 10000
 
 
 class LoggingConfig(BaseModel):

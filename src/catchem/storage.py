@@ -266,11 +266,13 @@ class Storage:
         parquet_dir: Path,
         dlq_dir: Path,
         rotate_parquet_records: int = 5000,
+        wal_autocheckpoint: int = 10000,
     ) -> None:
         self.db_path = db_path
         self.parquet_dir = parquet_dir
         self.dlq_dir = dlq_dir
         self.rotate_parquet_records = max(100, int(rotate_parquet_records))
+        self.wal_autocheckpoint = max(0, int(wal_autocheckpoint))
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.parquet_dir.mkdir(parents=True, exist_ok=True)
@@ -307,6 +309,7 @@ class Storage:
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30.0, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(f"PRAGMA wal_autocheckpoint={self.wal_autocheckpoint}")
         # SQLite ships with foreign keys disabled per-connection (legacy
         # default the project maintainers refuse to change). Without this
         # PRAGMA, ``ON DELETE CASCADE`` declarations like the one on
@@ -630,6 +633,18 @@ class Storage:
 
         if rows_to_flush:
             self._write_parquet(rows_to_flush, parquet_seq)
+
+    def checkpoint(self) -> None:
+        """Manually execute a non-blocking PASSIVE WAL checkpoint.
+
+        Under WAL mode, commits append to the WAL file. Auto-checkpoints
+        periodically write WAL frames back to the database, which can stall
+        active writers. Invoking this manually (e.g. between poller ticks or
+        after replay blocks) outside of active write transactions allows the database
+        to reclaim WAL space asynchronously without stalling active ingestion.
+        """
+        with self._lock, self._connection() as conn:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
     def _write_parquet(self, rows: list[dict[str, Any]], seq: int) -> None:
         if not rows:
@@ -1213,4 +1228,5 @@ def load_storage_from_settings(settings: Any) -> Storage:
         parquet_dir=_resolve_storage_dir(out_dir, settings.storage.parquet_results_dir),
         dlq_dir=_resolve_storage_dir(out_dir, settings.storage.dlq_dir),
         rotate_parquet_records=settings.storage.rotate_parquet_records,
+        wal_autocheckpoint=settings.storage.wal_autocheckpoint,
     )

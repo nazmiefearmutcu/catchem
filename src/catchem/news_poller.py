@@ -1149,6 +1149,7 @@ class NewsPoller:
             else:
                 self.empty_ticks += 1
             self.last_error = None
+            await asyncio.to_thread(self._sup.storage.checkpoint)
             return n
         except Exception as exc:
             self.last_error = repr(exc)

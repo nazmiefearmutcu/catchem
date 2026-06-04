@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from functools import lru_cache
 
 from ..logging import get_logger
 from ..news_poller import (
@@ -66,6 +67,14 @@ _NEW_JSON_URL = "https://www.reddit.com/r/{sub}/new.json?limit=50"
 # Permalinks are site-relative ("/r/stocks/comments/abc/title/"); prefix the
 # canonical host so the dedup key + the clickable Live-Feed link are absolute.
 _REDDIT_BASE = "https://www.reddit.com"
+
+
+@lru_cache(maxsize=2048)
+def _parse_epoch_cached(created: float | int) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(created, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _parse_reddit(body: bytes, fallback_domain: str) -> list[ParsedItem]:
@@ -116,10 +125,22 @@ def _parse_reddit(body: bytes, fallback_domain: str) -> list[ParsedItem]:
         # datetime so it matches the ParsedItem contract; tolerate a missing
         # or unparseable value by falling back to "now".
         created = data.get("created_utc")
-        try:
-            published_ts = datetime.fromtimestamp(float(created), tz=UTC)
-        except (TypeError, ValueError, OSError, OverflowError):
+        if isinstance(created, bool):
             published_ts = datetime.now(UTC)
+        else:
+            try:
+                if isinstance(created, (int, float)):
+                    val = created
+                else:
+                    val = float(created)
+
+                dt = _parse_epoch_cached(val)
+                if dt is not None:
+                    published_ts = dt
+                else:
+                    published_ts = datetime.now(UTC)
+            except (TypeError, ValueError):
+                published_ts = datetime.now(UTC)
 
         items.append(
             ParsedItem(

@@ -73,6 +73,13 @@ WS_BACKOFF_LADDER_SECONDS: tuple[float, ...] = (1.0, 2.0, 5.0, 15.0, 30.0, 60.0)
 # backoff loop reconnect.
 MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024
 
+# Hard ceiling on the WebSocket frame payload size (bytes). The default in the
+# websockets library is 1MB, but we set a custom, explicit limit of 4MB to align
+# with MAX_SSE_BUFFER_BYTES. Any message exceeding this limit is rejected,
+# closing the connection to prevent memory pressure or OOM issues from hostile
+# or misconfigured peers.
+MAX_WS_MESSAGE_BYTES = 4 * 1024 * 1024
+
 # Common JSON keys a squawk/news frame uses for its title + URL. Frames vary
 # wildly across providers, so we probe a small ordered set rather than pin one
 # shape. First non-empty wins. Operators with an exotic frame can pre-transform
@@ -381,9 +388,7 @@ def _iter_sse_data_lines(buffer: str) -> tuple[list[str], str]:
     payloads: list[str] = []
     for block in blocks:
         data_lines = [
-            line[len("data:") :].lstrip(" ")
-            for line in block.split("\n")
-            if line.startswith("data:")
+            line[len("data:") :].lstrip(" ") for line in block.split("\n") if line.startswith("data:")
         ]
         if data_lines:
             payloads.append("\n".join(data_lines))
@@ -546,9 +551,7 @@ class WebSocketNewsChannel:
             # Skip WS-kind sources when no WS lib is available; SSE always runs.
             if spec.kind != "sse" and self._lib is None:
                 continue
-            task = loop.create_task(
-                self._run_source(spec), name=f"catchem-ws-{spec.name}"
-            )
+            task = loop.create_task(self._run_source(spec), name=f"catchem-ws-{spec.name}")
             self._tasks.append(task)
             spawned += 1
         logger.info("ws_push_started", spawned=spawned, sources=len(self._sources), library=self._lib)
@@ -651,11 +654,15 @@ class WebSocketNewsChannel:
         elif self._lib == "websockets":
             import websockets
 
-            async with websockets.connect(spec.url) as ws:
+            async with websockets.connect(spec.url, max_size=MAX_WS_MESSAGE_BYTES) as ws:
                 self._mark_connected(st)
                 async for message in ws:
                     if self._stop.is_set():
                         return
+                    if len(message) > MAX_WS_MESSAGE_BYTES:
+                        raise ValueError(
+                            f"WebSocket message size {len(message)} exceeds limit of {MAX_WS_MESSAGE_BYTES} bytes"
+                        )
                     await self._handle_frame(spec, st, message)
         elif self._lib == "httpx_ws":
             import httpx
@@ -667,6 +674,10 @@ class WebSocketNewsChannel:
                     self._mark_connected(st)
                     while not self._stop.is_set():
                         message = await ws.receive_text()
+                        if len(message) > MAX_WS_MESSAGE_BYTES:
+                            raise ValueError(
+                                f"WebSocket message size {len(message)} exceeds limit of {MAX_WS_MESSAGE_BYTES} bytes"
+                            )
                         await self._handle_frame(spec, st, message)
         else:  # pragma: no cover - start() guards this
             raise RuntimeError("no_ws_library")
@@ -786,9 +797,7 @@ class WebSocketNewsChannel:
             # eviction. This keeps the firehose self-healing across transient
             # failures while preserving exact-URL dedup for ingested frames.
             self._seen.discard(canon)
-            logger.info(
-                "ws_push_ingest_failed", source=spec.name, url=item.url, error=str(exc)
-            )
+            logger.info("ws_push_ingest_failed", source=spec.name, url=item.url, error=str(exc))
 
     def _ingest_one(self, item: ParsedItem) -> None:
         """Process one item through the shared supervisor — `news_poller` parity.
@@ -817,6 +826,7 @@ class WebSocketNewsChannel:
 
 __all__ = [
     "DEFAULT_WS_SOURCES",
+    "MAX_WS_MESSAGE_BYTES",
     "WS_BACKOFF_LADDER_SECONDS",
     "WebSocketNewsChannel",
     "WsSourceSpec",

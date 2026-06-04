@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
 from urllib.parse import urlparse
 
 import httpx
@@ -589,25 +590,36 @@ def _strip_source_suffix(title: str, source_name: str | None) -> str:
     return title
 
 
-def _parse_ts(value: str | None) -> datetime:
-    """Best-effort timestamp parser. Returns now() on failure."""
-    if value:
-        # Try RFC 822 (RSS) and ISO 8601 (Atom).
+@lru_cache(maxsize=2048)
+def _parse_ts_cached(value: str) -> datetime:
+    # Try RFC 822 (RSS) and ISO 8601 (Atom).
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    except (TypeError, ValueError):
+        pass
+
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f%z"):
         try:
-            dt = parsedate_to_datetime(value)
+            dt = datetime.strptime(value, fmt)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=UTC)
             return dt.astimezone(UTC)
         except (TypeError, ValueError):
+            continue
+
+    raise ValueError(f"Unable to parse timestamp: {value}")
+
+
+def _parse_ts(value: str | None) -> datetime:
+    """Best-effort timestamp parser. Returns now() on failure."""
+    if value:
+        try:
+            return _parse_ts_cached(value)
+        except (TypeError, ValueError):
             pass
-        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f%z"):
-            try:
-                dt = datetime.strptime(value, fmt)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=UTC)
-                return dt.astimezone(UTC)
-            except ValueError:
-                continue
     return datetime.now(UTC)
 
 

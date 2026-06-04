@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -44,6 +45,17 @@ PRICING_PER_1M = {
 # Sentinel set on the connection-level timeout. 30s is plenty for the
 # article-classification prompt; off-peak DeepSeek calls land in 1-3s.
 _HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+
+
+def _clean_text(text: str) -> str:
+    """Consolidate spaces, tabs, and newlines to save tokens and memory footprint."""
+    if not text:
+        return ""
+    # Consolidate spaces and tabs
+    text = re.sub(r"[ \t]+", " ", text)
+    # Consolidate multiple newlines
+    text = re.sub(r"[\r\n]+", "\n", text)
+    return text.strip()
 
 
 class DeepSeekReviewer:
@@ -94,7 +106,11 @@ class DeepSeekReviewer:
     # ── core call ────────────────────────────────────────────────────────
     def review(self, cap: AwarenessCaptureView) -> ReviewPayload:
         t0 = time.perf_counter()
-        body_text = cap.text or ""
+        raw_body = cap.text or ""
+        # Performance/memory optimization: slice early to avoid processing huge strings
+        if len(raw_body) > 12000:
+            raw_body = raw_body[:12000]
+        body_text = _clean_text(raw_body)[:6000]
         user_prompt = build_user_prompt(
             taxonomy=self._taxonomy,
             title=cap.title,
@@ -185,8 +201,7 @@ class DeepSeekReviewer:
     def _estimate_usd(self, *, input_tokens: int, output_tokens: int) -> float:
         prices = PRICING_PER_1M.get(self.model, PRICING_PER_1M["deepseek-chat"])
         return round(
-            input_tokens / 1_000_000 * prices["input"]
-            + output_tokens / 1_000_000 * prices["output"],
+            input_tokens / 1_000_000 * prices["input"] + output_tokens / 1_000_000 * prices["output"],
             6,
         )
 
@@ -214,21 +229,26 @@ def _payload_from_parsed(
     valid_assets = set(taxonomy.asset_class_ids)
     valid_reasons = set(taxonomy.reason_code_ids)
     asset_classes = tuple(
-        x for x in _as_str_list(parsed.get("asset_classes")) if x in valid_assets
+        x for x in _as_str_list(parsed.get("asset_classes"), max_items=32) if x in valid_assets
     )
     reason_codes = tuple(
-        x for x in _as_str_list(parsed.get("impact_reason_codes")) if x in valid_reasons
+        x for x in _as_str_list(parsed.get("impact_reason_codes"), max_items=32) if x in valid_reasons
     )
-    symbols = tuple(_as_str_list(parsed.get("candidate_symbols"))[:8])
-    evidence = tuple(_as_str_list(parsed.get("evidence_sentences"))[:3])
+    symbols = tuple(x[:50] for x in _as_str_list(parsed.get("candidate_symbols"), max_items=8))
+    evidence = tuple(x[:500] for x in _as_str_list(parsed.get("evidence_sentences"), max_items=3))
 
     sentiment_label_raw = parsed.get("sentiment_label")
     sentiment_label = (
         sentiment_label_raw
-        if isinstance(sentiment_label_raw, str)
-        and sentiment_label_raw in {"positive", "neutral", "negative"}
+        if isinstance(sentiment_label_raw, str) and sentiment_label_raw in {"positive", "neutral", "negative"}
         else None
     )
+
+    reason_text = parsed.get("reason_text")
+    if isinstance(reason_text, str):
+        reason_text = reason_text.strip()[:1000]
+    else:
+        reason_text = None
 
     return ReviewPayload(
         capture_id=cap.capture_id,
@@ -242,7 +262,7 @@ def _payload_from_parsed(
         sentiment_label=sentiment_label,
         sentiment_score=_as_optional_clamped_float(parsed.get("sentiment_score")),
         evidence_sentences=evidence,
-        reason_text=(parsed.get("reason_text") if isinstance(parsed.get("reason_text"), str) else None),
+        reason_text=reason_text,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         usd_cost=usd_cost,
@@ -251,10 +271,18 @@ def _payload_from_parsed(
     )
 
 
-def _as_str_list(value: Any) -> list[str]:
+def _as_str_list(value: Any, max_items: int | None = None) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(v).strip() for v in value if isinstance(v, (str, int, float)) and str(v).strip()]
+    res = []
+    for v in value:
+        if max_items is not None and len(res) >= max_items:
+            break
+        if isinstance(v, (str, int, float)):
+            s = str(v).strip()
+            if s:
+                res.append(s)
+    return res
 
 
 def _as_bool(value: Any) -> bool:

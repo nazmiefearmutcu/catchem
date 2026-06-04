@@ -25,6 +25,13 @@ def test_git_helpers_more():
         assert _git_sha_safe() is None
         assert _git_branch_safe() is None
 
+    # Test case when git returns successfully with non-empty output
+    mock_res_success = MagicMock(returncode=0, stdout="my-git-value\n")
+    with patch("subprocess.run", return_value=mock_res_success):
+        assert _git_sha_safe() == "my-git-value"
+        assert _git_branch_safe() == "my-git-value"
+
+
 
 def test_create_app_more_cors_and_static():
     settings = Settings()

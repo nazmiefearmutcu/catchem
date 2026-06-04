@@ -356,15 +356,44 @@ class Storage:
     def _init_db(self) -> None:
         from .migrations import apply_migrations
 
-        with self._lock, self._connection() as conn:
-            conn.executescript(_SCHEMA_SQL)
-            self._migrate_records_table(conn)
-            # Apply versioned migrations after the legacy ``IF NOT EXISTS``
-            # bootstrap. A pre-existing DB from before the migration
-            # framework lands at ``user_version = 0``; baseline migration
-            # #1 claims it idempotently. Future ALTER/CREATE INDEX work
-            # ships as appended entries in ``catchem.migrations``.
-            applied = apply_migrations(conn)
+        try:
+            with self._lock, self._connection() as conn:
+                conn.executescript(_SCHEMA_SQL)
+                self._migrate_records_table(conn)
+                # Apply versioned migrations after the legacy ``IF NOT EXISTS``
+                # bootstrap. A pre-existing DB from before the migration
+                # framework lands at ``user_version = 0``; baseline migration
+                # #1 claims it idempotently. Future ALTER/CREATE INDEX work
+                # ships as appended entries in ``catchem.migrations``.
+                applied = apply_migrations(conn)
+        except sqlite3.DatabaseError as e:
+            logger.error("database_corrupted_attempting_recovery", error=str(e), db=str(self.db_path))
+            if self.db_path.is_file():
+                import uuid
+                corrupt_path = self.db_path.with_name(f"{self.db_path.name}.corrupt.{uuid.uuid4().hex[:8]}")
+                try:
+                    self.db_path.rename(corrupt_path)
+                    logger.warning("database_quarantined", corrupt_path=str(corrupt_path))
+                except Exception as rename_err:
+                    logger.error("failed_to_quarantine_database", error=str(rename_err))
+
+                for suffix in ["-wal", "-shm"]:
+                    sidecar = self.db_path.with_name(self.db_path.name + suffix)
+                    if sidecar.exists():
+                        try:
+                            sidecar.unlink()
+                            logger.info("database_sidecar_removed", path=str(sidecar))
+                        except Exception as unlink_err:
+                            logger.error("failed_to_remove_sidecar", error=str(unlink_err))
+
+                # Retry initialization after quarantining/removing files
+                with self._lock, self._connection() as conn:
+                    conn.executescript(_SCHEMA_SQL)
+                    self._migrate_records_table(conn)
+                    applied = apply_migrations(conn)
+            else:
+                raise
+
         if applied:
             logger.info(
                 "schema_migrated",
@@ -373,6 +402,7 @@ class Storage:
                 names=[m.name for m in applied],
             )
         logger.info("storage_initialized", db=str(self.db_path), parquet=str(self.parquet_dir))
+
 
     def _migrate_records_table(self, conn: sqlite3.Connection) -> None:
         columns = {str(r["name"]) for r in conn.execute("PRAGMA table_info(records)").fetchall()}

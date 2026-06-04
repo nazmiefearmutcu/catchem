@@ -14,11 +14,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 
 from .bootstrap import bootstrap as bootstrap_call
 from .logging import configure_logging, get_logger
-from .settings import CatchemMode, load_settings, reload_settings
+from .settings import CatchemMode, reload_settings
+from .settings import load_settings as _real_load_settings
 from .supervisor import Supervisor
+
+
+def load_settings(*args, **kwargs):
+    try:
+        return _real_load_settings(*args, **kwargs)
+    except ValidationError as e:
+        import sys
+        sys.stderr.write(f"Configuration error: {e}\n")
+        raise typer.Exit(1) from e
+
 
 app = typer.Typer(no_args_is_help=True, help="catchem: finance-relevance layer over Awareness.")
 logger = get_logger("catchem.cli")
@@ -1712,5 +1724,24 @@ def cli_ping_deepseek(
         raise typer.Exit(1)
 
 
+# Wrap Typer CLI execution to catch Pydantic validation errors on invalid environment settings gracefully
+_original_call = app.__call__
+
+
+def _wrapped_app_call(*args, **kwargs):
+    from pydantic import ValidationError
+    try:
+        return _original_call(*args, **kwargs)
+    except ValidationError as e:
+        import sys
+        sys.stderr.write(f"Configuration error: {e}\n")
+        raise typer.Exit(1) from e
+
+
+
+app.__call__ = _wrapped_app_call
+
+
 if __name__ == "__main__":
     app()
+

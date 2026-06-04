@@ -51,7 +51,10 @@ def test_processing_mode_values_are_stable() -> None:
 
 def test_sentiment_label_values_are_stable() -> None:
     assert {m.value for m in SentimentLabel} == {
-        "positive", "neutral", "negative", "unknown",
+        "positive",
+        "neutral",
+        "negative",
+        "unknown",
     }
 
 
@@ -88,8 +91,12 @@ def test_capture_view_naive_datetime_coerced_to_utc() -> None:
     naive = datetime(2026, 5, 16, 12, 0, 0)
     assert naive.tzinfo is None
     cap = AwarenessCaptureView(
-        capture_id="c", doc_id="d", text="x",
-        fetch_ts=naive, observed_ts=naive, published_ts=naive,
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts=naive,
+        observed_ts=naive,
+        published_ts=naive,
     )
     for ts in (cap.fetch_ts, cap.observed_ts, cap.published_ts):
         assert ts is not None
@@ -105,9 +112,7 @@ def test_capture_view_aware_datetime_preserved() -> None:
 
 def test_capture_view_string_timestamp_parsed_by_pydantic() -> None:
     # Covers the `isinstance(v, str): return v` pass-through (let pydantic parse).
-    cap = AwarenessCaptureView(
-        capture_id="c", doc_id="d", text="x", fetch_ts="2026-05-16T12:00:00Z"
-    )
+    cap = AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="2026-05-16T12:00:00Z")
     assert cap.fetch_ts is not None
     assert cap.fetch_ts.year == 2026
 
@@ -116,9 +121,7 @@ def test_capture_view_int_epoch_timestamp_falls_through_validator() -> None:
     # Covers schemas.py line 74: a non-None, non-datetime, non-str value is
     # returned unchanged from the before-validator and parsed by pydantic
     # (pydantic accepts int epoch seconds for datetime fields).
-    cap = AwarenessCaptureView(
-        capture_id="c", doc_id="d", text="x", fetch_ts=1_700_000_000
-    )
+    cap = AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts=1_700_000_000)
     assert cap.fetch_ts is not None
     assert cap.fetch_ts.tzinfo is not None
 
@@ -264,20 +267,10 @@ def test_replay_offset_round_trip() -> None:
 def test_schemas_coverage_gaps() -> None:
     # 1. ValueError exception in date string parsing (lines 81-82)
     with pytest.raises(ValidationError):
-        AwarenessCaptureView(
-            capture_id="c",
-            doc_id="d",
-            text="x",
-            fetch_ts="not-a-valid-date"
-        )
+        AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="not-a-valid-date")
 
     # 2. String timestamp without offset is naive, gets tzinfo=UTC (line 84)
-    cap = AwarenessCaptureView(
-        capture_id="c",
-        doc_id="d",
-        text="x",
-        fetch_ts="2026-05-16T12:00:00"
-    )
+    cap = AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="2026-05-16T12:00:00")
     assert cap.fetch_ts is not None
     assert cap.fetch_ts.tzinfo == UTC
 
@@ -301,3 +294,80 @@ def test_schemas_coverage_gaps() -> None:
     assert rec_tz.published_ts.tzinfo == UTC
     assert rec_tz.created_at.tzinfo == UTC
 
+
+def test_schema_timestamp_parsing_caching_and_fast_paths() -> None:
+    # 1. 20-character Z/z format
+    cap1 = AwarenessCaptureView(
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts="2026-05-27T14:30:00Z",
+        observed_ts="2026-05-27T14:30:00z",
+    )
+    assert cap1.fetch_ts is not None and cap1.fetch_ts.tzinfo == UTC
+    assert cap1.observed_ts is not None and cap1.observed_ts.tzinfo == UTC
+
+    # 2. 24-character Z/z format
+    cap2 = AwarenessCaptureView(
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts="2026-05-27T14:30:00.123Z",
+        observed_ts="2026-05-27T14:30:00.123z",
+    )
+    assert cap2.fetch_ts is not None and cap2.fetch_ts.microsecond == 123000
+    assert cap2.observed_ts is not None and cap2.observed_ts.microsecond == 123000
+
+    # 3. 19-character naive format
+    cap3 = AwarenessCaptureView(
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts="2026-05-27T14:30:00",
+        observed_ts="2026-05-27t14:30:00",
+    )
+    assert cap3.fetch_ts is not None and cap3.fetch_ts.tzinfo == UTC
+    assert cap3.observed_ts is not None and cap3.observed_ts.tzinfo == UTC
+
+    # 3.5. Lowercase 't' in 20/24 char formats
+    cap3_5 = AwarenessCaptureView(
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts="2026-05-27t14:30:00Z",
+        observed_ts="2026-05-27t14:30:00.123Z",
+    )
+    assert cap3_5.fetch_ts is not None and cap3_5.observed_ts is not None
+
+    # 4. Offset bearing format (standard and short fallback)
+    cap4 = AwarenessCaptureView(
+        capture_id="c",
+        doc_id="d",
+        text="x",
+        fetch_ts="2026-05-27T14:30:00+03:00",
+        observed_ts="2026-05-27T14:30+03:00",
+    )
+    assert cap4.fetch_ts is not None and cap4.fetch_ts.tzinfo is not None
+    assert cap4.observed_ts is not None and cap4.observed_ts.tzinfo is not None
+
+    # 4.5. Short naive format (fallback path with naive string)
+    cap4_5 = AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="2026-05-27T14:30")
+    assert cap4_5.fetch_ts is not None and cap4_5.fetch_ts.tzinfo == UTC
+
+    # 5. Invalid values triggering ValueError in fast paths and standard fallback
+    # YYYY-MM-DDTHH:MM:SSZ with invalid month/day
+    with pytest.raises(ValidationError):
+        AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="2026-99-99T99:99:99Z")
+    # YYYY-MM-DDTHH:MM:SS.mmmZ with invalid month/day
+    with pytest.raises(ValidationError):
+        AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="2026-99-99T99:99:99.999Z")
+    # YYYY-MM-DDTHH:MM:SS with invalid month/day
+    with pytest.raises(ValidationError):
+        AwarenessCaptureView(capture_id="c", doc_id="d", text="x", fetch_ts="2026-99-99T99:99:99")
+
+    # 6. Verify caching (direct helper call checks cache efficiency)
+    from catchem.schemas import _parse_utc_ts_cached
+
+    dt1 = _parse_utc_ts_cached("2026-05-27T14:30:00Z")
+    dt2 = _parse_utc_ts_cached("2026-05-27T14:30:00Z")
+    assert dt1 is dt2  # cache hit yields the exact same object

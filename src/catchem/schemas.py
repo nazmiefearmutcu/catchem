@@ -8,6 +8,7 @@ We mirror Awareness's design choice of `extra="forbid"` so additions are explici
 
 from __future__ import annotations
 
+import functools
 import math
 from datetime import UTC, datetime
 from enum import Enum
@@ -35,6 +36,89 @@ class SentimentLabel(str, Enum):  # noqa: UP042
     NEUTRAL = "neutral"
     NEGATIVE = "negative"
     UNKNOWN = "unknown"
+
+
+@functools.lru_cache(maxsize=8192)
+def _parse_utc_ts_cached(raw: str) -> datetime:
+    """Cached fast-path parser for ISO-8601 strings, stamping naive as UTC."""
+    val_len = len(raw)
+
+    # 20-char Z-ending: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SSz
+    if (
+        val_len == 20
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and (raw[10] == "T" or raw[10] == "t")
+        and raw[13] == ":"
+        and raw[16] == ":"
+        and (raw[19] == "Z" or raw[19] == "z")
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    # 24-char Z-ending: YYYY-MM-DDTHH:MM:SS.mmmZ or YYYY-MM-DDTHH:MM:SS.mmmz
+    if (
+        val_len == 24
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and (raw[10] == "T" or raw[10] == "t")
+        and raw[13] == ":"
+        and raw[16] == ":"
+        and raw[19] == "."
+        and (raw[23] == "Z" or raw[23] == "z")
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                int(raw[20:23]) * 1000,
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    # 19-char naive ISO string: YYYY-MM-DDTHH:MM:SS
+    if (
+        val_len == 19
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and (raw[10] == "T" or raw[10] == "t")
+        and raw[13] == ":"
+        and raw[16] == ":"
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    # Fallback to standard parsing
+    normalized = raw.replace("Z", "+00:00").replace("z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 class AwarenessCaptureView(BaseModel):
@@ -77,11 +161,9 @@ class AwarenessCaptureView(BaseModel):
             # and this before-mode validator would never run again to stamp it,
             # silently defeating the UTC-coercion contract.
             try:
-                parsed = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                parsed = _parse_utc_ts_cached(v)
             except ValueError:
                 return v  # not ISO; let pydantic surface the error
-            if parsed.tzinfo is None:
-                return parsed.replace(tzinfo=UTC)
             return parsed
         return v
 
@@ -155,11 +237,7 @@ class FinancialImpactRecord(BaseModel):
     def _finite_components(cls, v: dict[str, float]) -> dict[str, float]:
         # Same NaN/Inf JSON-serialization hole as sentiment_score; drop any
         # non-finite component value rather than emit an uncompliant float.
-        return {
-            k: f
-            for k, f in v.items()
-            if isinstance(f, (int, float)) and math.isfinite(f)
-        }
+        return {k: f for k, f in v.items() if isinstance(f, (int, float)) and math.isfinite(f)}
 
     @field_validator("published_ts", "created_at")
     @classmethod

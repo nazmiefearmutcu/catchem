@@ -110,7 +110,7 @@ def test_parse_feed_drops_items_missing_required_fields() -> None:
     items = parse_feed(body, fallback_domain="example.com")
     titles = [i.title for i in items]
     assert "No link here" not in titles  # missing link → dropped
-    assert "No body" in titles           # falls back to title
+    assert "No body" in titles  # falls back to title
 
 
 def test_parse_feed_returns_empty_on_malformed_xml() -> None:
@@ -149,16 +149,22 @@ def test_parse_feed_uses_google_news_source_domain() -> None:
 
 def test_stale_item_filter_uses_max_age_seconds() -> None:
     now = datetime(2026, 5, 18, 12, 0, tzinfo=UTC)
-    assert _is_stale_published_ts(
-        datetime(2026, 5, 1, 12, 0, tzinfo=UTC),
-        now,
-        max_age_seconds=14 * 24 * 3600,
-    ) is True
-    assert _is_stale_published_ts(
-        datetime(2026, 5, 17, 12, 0, tzinfo=UTC),
-        now,
-        max_age_seconds=14 * 24 * 3600,
-    ) is False
+    assert (
+        _is_stale_published_ts(
+            datetime(2026, 5, 1, 12, 0, tzinfo=UTC),
+            now,
+            max_age_seconds=14 * 24 * 3600,
+        )
+        is True
+    )
+    assert (
+        _is_stale_published_ts(
+            datetime(2026, 5, 17, 12, 0, tzinfo=UTC),
+            now,
+            max_age_seconds=14 * 24 * 3600,
+        )
+        is False
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -216,13 +222,9 @@ def test_canonical_url_strips_trailing_slash() -> None:
 
 
 def test_canonical_url_lowercases_host_but_keeps_path_case() -> None:
-    assert _canonical_url("https://ReutERS.com/Article/X") == _canonical_url(
-        "https://reuters.com/Article/X"
-    )
+    assert _canonical_url("https://ReutERS.com/Article/X") == _canonical_url("https://reuters.com/Article/X")
     # Different path case is a different URL — publishers use case-sensitive paths.
-    assert _canonical_url("https://reuters.com/article/X") != _canonical_url(
-        "https://reuters.com/article/x"
-    )
+    assert _canonical_url("https://reuters.com/article/X") != _canonical_url("https://reuters.com/article/x")
 
 
 def test_canonical_url_falls_back_on_unparseable_input() -> None:
@@ -230,6 +232,33 @@ def test_canonical_url_falls_back_on_unparseable_input() -> None:
     # the literal string (defense in depth).
     assert _canonical_url("") == ""
     assert _canonical_url("not a url") == "not a url"
+
+
+def test_parse_feed_coverage_gaps(monkeypatch) -> None:
+    import xml.etree.ElementTree as ET
+
+    # 1. Test item as root (so parent_stack is empty)
+    item_root = b"<item><title>A</title><link>B</link><description>C</description></item>"
+    items = parse_feed(item_root, fallback_domain="x.com")
+    assert len(items) == 1
+
+    # 2. Test entry as root (so parent_stack is empty)
+    entry_root = b'<entry xmlns="http://www.w3.org/2005/Atom"><title>A</title><link href="B"/><content>C</content></entry>'
+    items = parse_feed(entry_root, fallback_domain="x.com")
+    assert len(items) == 1
+
+    # 3. Test empty parent_stack on end event (unbalanced or custom mock)
+    def mock_iterparse(*args, **kwargs):
+        class MockElement:
+            tag = "dummy"
+
+            def clear(self):
+                pass
+
+        return [("end", MockElement())]
+
+    monkeypatch.setattr(ET, "iterparse", mock_iterparse)
+    assert parse_feed(b"<dummy/>") == []
 
 
 def test_seen_cache_dedups_tracking_param_variants_after_canonicalization() -> None:
@@ -272,17 +301,22 @@ def test_default_poll_interval_matches_ui_fallback() -> None:
     not yet populated (cold boot, brief race).
     See Round 6 Bug 3."""
     from catchem.settings import NewsConfig
+
     assert NewsConfig().poll_interval_seconds == 10.0
 
 
 def test_news_poller_floors_interval_to_10s() -> None:
     """A misconfigured interval shouldn't hammer publishers."""
+
     class _StubSupervisor:
         pass
+
     class _StubSettings:
         class paths:
             from pathlib import Path
+
             catchem_output_dir = Path("/tmp")
+
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
         settings=_StubSettings(),  # type: ignore[arg-type]
@@ -295,10 +329,13 @@ def test_news_poller_floors_interval_to_10s() -> None:
 def test_news_poller_status_fields_start_zeroed() -> None:
     class _StubSupervisor:
         pass
+
     class _StubSettings:
         class paths:
             from pathlib import Path
+
             catchem_output_dir = Path("/tmp")
+
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
         settings=_StubSettings(),  # type: ignore[arg-type]
@@ -319,10 +356,13 @@ def test_news_poller_status_fields_start_zeroed() -> None:
 def test_news_poller_records_per_feed_health() -> None:
     class _StubSupervisor:
         pass
+
     class _StubSettings:
         class paths:
             from pathlib import Path
+
             catchem_output_dir = Path("/tmp")
+
     spec = FeedSpec("sample-feed", "https://example.com/rss", "example.com")
     poller = NewsPoller(
         supervisor=_StubSupervisor(),  # type: ignore[arg-type]
@@ -356,14 +396,17 @@ def test_news_poller_records_per_feed_health() -> None:
 # Public read-only accessors (v34 MED 20)
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def _make_poller(**kw) -> NewsPoller:
     """Shared stub builder for the property-accessor tests."""
+
     class _StubSupervisor:
         pass
 
     class _StubSettings:
         class paths:
             from pathlib import Path
+
             catchem_output_dir = Path("/tmp")
 
     return NewsPoller(

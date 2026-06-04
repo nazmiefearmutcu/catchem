@@ -1,0 +1,173 @@
+name: ci
+
+on:
+  push:
+    branches: [main, feat/**, fix/**]
+  pull_request:
+    branches: [main, feat/**]
+  workflow_dispatch:
+
+# Read-only on contents. Never publishes artifacts, never touches NewsImpact.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "20"
+  FUSION_MODELS__USE_ML_STUBS: "true"
+  FUSION_MODE: "production_safe"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install fusion_stack[dev] + build
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install build
+      - name: Synthesize quarantined NewsImpact fixture
+        run: |
+          mkdir -p /tmp/newsimpact-fixture/models/governance_index
+          cat > /tmp/newsimpact-fixture/models/governance_index/governance_index.json <<'EOF'
+          {
+            "candidates": [{
+              "candidate_id": "ci-fixture",
+              "governance_status": "QUARANTINED_REGRESSIVE_MULTIMODAL",
+              "fusion_verdict_class": "FUSION_REGRESSIVE",
+              "forbidden_operations": ["benchmark","export","promotion","training"],
+              "allowed_operations": ["eval","diagnostic"],
+              "gate_failure_status": {
+                "release_gate_passed": false,
+                "candidate_status": "failed_gate_diagnostic",
+                "failure_codes": ["PERMUTED_LABEL_TOO_CLOSE_TO_CHART_ONLY"]
+              }
+            }],
+            "deterministic": true,
+            "safeguards": {"no_external_publish": true, "no_governance_mutation": true}
+          }
+          EOF
+          echo "FUSION_PATHS__NEWSIMPACT_REPO=/tmp/newsimpact-fixture" >> $GITHUB_ENV
+      - name: Guard verifier (must exit 0)
+        run: python scripts/verify_newsimpact_guard.py /tmp/newsimpact-fixture
+      - name: pytest (full suite)
+        run: pytest tests -q --tb=line
+      - name: Wheel canary
+        run: |
+          rm -rf dist
+          python -m build --wheel --outdir dist
+          python - <<'EOF'
+          import zipfile, glob, sys
+          wheels = glob.glob("dist/fusion_stack-*.whl")
+          assert wheels, f"no wheel produced"
+          with zipfile.ZipFile(wheels[0]) as z:
+              names = z.namelist()
+          assert any(n == "fusion_stack/static/dashboard.html" for n in names), \
+              f"static files missing from wheel: {[n for n in names if 'static' in n]}"
+          print("ok: wheel contains fusion_stack/static/dashboard.html")
+          EOF
+      - name: Golden benchmark schema + F1 floor
+        run: |
+          python - <<'EOF'
+          import json
+          from fusion_stack.golden import GOLDEN_SCHEMA_VERSION, SYNTHETIC, run_benchmark
+          from fusion_stack.service import build_service
+          from fusion_stack.settings import load_settings, reload_settings
+          reload_settings()
+          rep = run_benchmark(build_service(load_settings()), SYNTHETIC)
+          out = rep.to_dict()
+          assert out["schema_version"] == GOLDEN_SCHEMA_VERSION
+          assert out["relevance"]["f1"] >= 0.83, out["relevance"]
+          print(json.dumps({"f1": out["relevance"]["f1"], "n": out["n"]}, indent=2))
+          EOF
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Typecheck
+        working-directory: frontend
+        run: npx tsc -b --noEmit
+      - name: Vitest
+        working-directory: frontend
+        run: npm test
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+      - name: Confirm bundle is inside the package static dir
+        run: |
+          test -f src/fusion_stack/static/app/index.html
+          test -d src/fusion_stack/static/app/assets
+
+  api-smoke:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install + serve background
+        env:
+          FUSION_PATHS__FUSION_OUTPUT_DIR: "${{ runner.temp }}/fusion-data"
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[dev]"
+          nohup python -m fusion_stack.cli serve > api.out 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8087/healthz && break
+            sleep 1
+          done
+      - name: Headers + /metrics
+        run: |
+          curl -fsS -D headers.txt http://127.0.0.1:8087/healthz > /dev/null
+          grep -i 'content-security-policy' headers.txt
+          grep -i 'x-content-type-options:.*nosniff' headers.txt
+          grep -i 'x-frame-options:.*deny' headers.txt
+          curl -fsS http://127.0.0.1:8087/metrics | python -m json.tool
+      - name: /ui/guards must NOT leak governance_index_path
+        run: |
+          python - <<'EOF'
+          import json, urllib.request
+          body = json.loads(urllib.request.urlopen("http://127.0.0.1:8087/ui/guards").read())
+          assert "governance_index_path" not in body, body
+          print(json.dumps(body, indent=2))
+          EOF
+      - name: Demo CLI end-to-end (pasted-news flow)
+        run: |
+          fusion-stack demo \
+            --title "Federal Reserve raises rates by 25 bps" \
+            --text-file docs/examples/news_fed.txt \
+            --domain reuters.com
+      - name: Tail API log on failure
+        if: failure()
+        run: tail -120 api.out || true

@@ -17,7 +17,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from .schemas import AwarenessCaptureView
 from .service import FusionService
@@ -201,6 +201,39 @@ class LabelStats:
         return 2 * p * r / (p + r) if (p + r) else 0.0
 
 
+GOLDEN_SCHEMA_VERSION = 1
+"""Bump this when the golden output shape changes in a breaking way."""
+
+REQUIRED_GOLDEN_FIELDS = (
+    "capture_id",
+    "title",
+    "text",
+    "expected_finance_relevant",
+)
+
+
+def validate_golden_row(row: object) -> dict:
+    """Validate a raw dict from extended.jsonl. Raises ValueError on failure.
+
+    We want loud failures on malformed extended golden sets so a stale or
+    accidentally-truncated row doesn't silently destroy the metric.
+    """
+    if not isinstance(row, dict):
+        raise ValueError(f"golden row must be a JSON object, got {type(row).__name__}")
+    missing = [k for k in REQUIRED_GOLDEN_FIELDS if k not in row]
+    if missing:
+        raise ValueError(f"golden row missing required fields {missing}: {row.get('capture_id', '<no-id>')}")
+    if not isinstance(row["expected_finance_relevant"], bool):
+        raise ValueError(
+            f"expected_finance_relevant must be bool, got {type(row['expected_finance_relevant']).__name__}"
+        )
+    for k in ("expected_asset_classes", "expected_reason_codes", "expected_symbols"):
+        v = row.get(k)
+        if v is not None and not isinstance(v, list):
+            raise ValueError(f"{k} must be a list when present (golden id={row['capture_id']!r})")
+    return row
+
+
 @dataclass
 class BenchmarkReport:
     relevance: LabelStats = field(default_factory=LabelStats)
@@ -211,9 +244,13 @@ class BenchmarkReport:
     sentiment_correct: int = 0
     sentiment_total: int = 0
     per_item: list[dict] = field(default_factory=list)
+    dataset_name: str = "synthetic_v1"
 
     def to_dict(self) -> dict:
         return {
+            "schema_version": GOLDEN_SCHEMA_VERSION,
+            "dataset_name": self.dataset_name,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "relevance": {"precision": self.relevance.precision, "recall": self.relevance.recall, "f1": self.relevance.f1},
             "asset_class_f1": {k: s.f1 for k, s in self.asset_class.items()},
             "reason_code_f1": {k: s.f1 for k, s in self.reason_code.items()},
@@ -233,17 +270,30 @@ def _stats_for_set(predicted: set[str], expected: set[str], bucket: dict[str, La
         bucket.setdefault(k, LabelStats()).fn += 1
 
 
-def load_extended(path: Path) -> list[GoldenItem]:
-    """Read additional golden items from a JSONL file. Optional."""
+def load_extended(path: Path, *, strict: bool = True) -> list[GoldenItem]:
+    """Read additional golden items from a JSONL file. Optional.
+
+    By default (`strict=True`), malformed rows raise ValueError loudly so a
+    truncated or stale extended file does not silently degrade the metric.
+    Pass `strict=False` to skip bad rows and continue.
+    """
     if not path.exists():
         return []
     out: list[GoldenItem] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
             data = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            if strict:
+                raise ValueError(f"{path}:{lineno} — invalid JSON: {exc}") from exc
+            continue
+        try:
+            data = validate_golden_row(data)
+        except ValueError:
+            if strict:
+                raise
             continue
         out.append(GoldenItem(
             capture_id=str(data["capture_id"]),

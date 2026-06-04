@@ -3,11 +3,20 @@
 
 mode: production_safe                # production_safe | replay_existing | live_tail | research_diagnostic
 
-paths:
-  awareness_repo: "/Users/nazmi/Desktop/Projeler/proje/awareness"
-  newsimpact_repo: "/Users/nazmi/Desktop/Projeler/proje/merged_news"
-  awareness_data_dir: "/Users/nazmi/Desktop/Projeler/proje/awareness/data"
-  fusion_output_dir: "/Users/nazmi/Desktop/Projeler/proje/fusion_stack/data"
+# Paths intentionally left to defaults so CI / containers / fresh clones
+# resolve to portable, writable locations. Override via env on the dev box:
+#
+#   FUSION_PATHS__AWARENESS_REPO=/Users/.../awareness
+#   FUSION_PATHS__NEWSIMPACT_REPO=/Users/.../merged_news
+#   FUSION_PATHS__AWARENESS_DATA_DIR=/Users/.../awareness/data
+#   FUSION_PATHS__FUSION_OUTPUT_DIR=/Users/.../fusion_stack/data
+#
+# Pydantic defaults:
+#   awareness_repo       /tmp/awareness-missing            (lookup-only; safe if absent)
+#   newsimpact_repo      /tmp/merged_news-missing          (lookup-only; safe if absent)
+#   awareness_data_dir   /tmp/awareness-missing/data       (returns 0 captures if absent)
+#   fusion_output_dir    <project_root>/data               (the one the API mkdirs at startup)
+paths: {}
 
 models:
   sentiment_default: "ProsusAI/finbert"

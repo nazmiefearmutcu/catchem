@@ -38,12 +38,16 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 # ── /ui/demo/paste ──────────────────────────────────────────────────────────
 
+
 def test_demo_paste_happy_path(client: TestClient) -> None:
-    r = client.post("/ui/demo/paste", json={
-        "title": "Fed raises rates by 25 bps",
-        "text": FED_ARTICLE,
-        "domain": "reuters.com",
-    })
+    r = client.post(
+        "/ui/demo/paste",
+        json={
+            "title": "Fed raises rates by 25 bps",
+            "text": FED_ARTICLE,
+            "domain": "reuters.com",
+        },
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     # DemoRunResponse shape
@@ -69,10 +73,13 @@ def test_demo_paste_validation_rejects_empty(client: TestClient) -> None:
 
 
 def test_demo_paste_validation_rejects_oversized_text(client: TestClient) -> None:
-    r = client.post("/ui/demo/paste", json={
-        "title": "t",
-        "text": "x" * (5 * 1024 * 1024 + 1),
-    })
+    r = client.post(
+        "/ui/demo/paste",
+        json={
+            "title": "t",
+            "text": "x" * (5 * 1024 * 1024 + 1),
+        },
+    )
     assert r.status_code == 413
 
 
@@ -85,6 +92,7 @@ def test_demo_paste_deterministic_capture_id(client: TestClient) -> None:
 
 
 # ── /ui/demo/upload ─────────────────────────────────────────────────────────
+
 
 def test_demo_upload_txt(client: TestClient) -> None:
     r = client.post(
@@ -132,10 +140,7 @@ def test_demo_upload_html_strips_scripts(client: TestClient) -> None:
 
 
 def test_demo_upload_jsonl_uses_text_field(client: TestClient) -> None:
-    jsonl = (
-        '{"text": "' + FED_ARTICLE.replace('"', '\\"') + '"}\n'
-        '{"not_text": "ignored"}\n'
-    )
+    jsonl = '{"text": "' + FED_ARTICLE.replace('"', '\\"') + '"}\n{"not_text": "ignored"}\n'
     r = client.post(
         "/ui/demo/upload",
         files={"file": ("articles.jsonl", io.BytesIO(jsonl.encode()), "application/jsonl")},
@@ -175,13 +180,20 @@ def test_demo_upload_rejects_empty_body(client: TestClient) -> None:
 
 # ── /ui/app-info ────────────────────────────────────────────────────────────
 
+
 def test_app_info_shape(client: TestClient) -> None:
     r = client.get("/ui/app-info")
     assert r.status_code == 200
     body = r.json()
     for k in (
-        "name", "version", "mode", "use_ml_stubs", "diagnostic_allowed",
-        "static_bundle_present", "model_versions", "generated_at",
+        "name",
+        "version",
+        "mode",
+        "use_ml_stubs",
+        "diagnostic_allowed",
+        "static_bundle_present",
+        "model_versions",
+        "generated_at",
     ):
         assert k in body, f"missing {k}"
     # production_safe by default → diagnostic_allowed False
@@ -191,13 +203,21 @@ def test_app_info_shape(client: TestClient) -> None:
 
 # ── /ui/sidecar-status ──────────────────────────────────────────────────────
 
+
 def test_sidecar_status_shape(client: TestClient) -> None:
     r = client.get("/ui/sidecar-status")
     assert r.status_code == 200
     body = r.json()
     for k in (
-        "healthy", "api_host", "api_port", "pid", "uptime_seconds",
-        "records", "dlq", "diagnostic_enabled", "generated_at",
+        "healthy",
+        "api_host",
+        "api_port",
+        "pid",
+        "uptime_seconds",
+        "records",
+        "dlq",
+        "diagnostic_enabled",
+        "generated_at",
     ):
         assert k in body
     assert body["healthy"] is True
@@ -221,6 +241,7 @@ def test_sidecar_status_reports_actual_bind_not_settings_default() -> None:
     """
     from catchem.api import create_app, record_bind
     from catchem.settings import load_settings, reload_settings
+
     reload_settings()
     record_bind("127.0.0.1", 9090)
     app = create_app(load_settings())
@@ -228,13 +249,13 @@ def test_sidecar_status_reports_actual_bind_not_settings_default() -> None:
         body = c.get("/ui/sidecar-status").json()
         assert body["api_host"] == "127.0.0.1"
         assert body["api_port"] == 9090, (
-            f"expected the actual bind port (9090) to win over settings "
-            f"default; got {body['api_port']}"
+            f"expected the actual bind port (9090) to win over settings default; got {body['api_port']}"
         )
     # Reset for downstream tests that depend on the settings fallback.
     record_bind("__reset__", 0)
     # Direct hit to the module to wipe the recorded values.
     import catchem.api as _api
+
     _api._BIND_HOST = None
     _api._BIND_PORT = None
 
@@ -245,10 +266,12 @@ def test_sidecar_status_falls_back_to_settings_when_bind_unrecorded() -> None:
     fall back to settings.api.host/port rather than expose `None`.
     """
     import catchem.api as _api
+
     _api._BIND_HOST = None
     _api._BIND_PORT = None
     from catchem.api import create_app
     from catchem.settings import load_settings, reload_settings
+
     reload_settings()
     s = load_settings()
     app = create_app(s)
@@ -259,6 +282,7 @@ def test_sidecar_status_falls_back_to_settings_when_bind_unrecorded() -> None:
 
 
 # ── /ui/log-tail ────────────────────────────────────────────────────────────
+
 
 def test_log_tail_empty_when_no_log_yet(client: TestClient) -> None:
     r = client.get("/ui/log-tail?lines=10")
@@ -275,11 +299,16 @@ def test_log_tail_rejects_silly_limits(client: TestClient) -> None:
 
 # ── No path leakage ─────────────────────────────────────────────────────────
 
+
 def test_demo_paste_jsonl_basename_only(client: TestClient) -> None:
-    r = client.post("/ui/demo/paste", json={
-        "title": "x", "text": "The Fed raised rates 25bps citing inflation.",
-        "domain": "reuters.com",
-    })
+    r = client.post(
+        "/ui/demo/paste",
+        json={
+            "title": "x",
+            "text": "The Fed raised rates 25bps citing inflation.",
+            "domain": "reuters.com",
+        },
+    )
     body = r.json()
     # No absolute path or directory separators
     assert "/" not in body["jsonl_basename"]
@@ -291,3 +320,32 @@ def test_app_info_does_not_leak_filesystem_paths(client: TestClient) -> None:
     flat = str(body)
     assert "/Users/" not in flat
     assert "/etc/" not in flat
+
+
+def test_demo_paste_custom_max_upload_size_limit() -> None:
+    from catchem.api import create_app
+    from catchem.settings import load_settings, reload_settings
+
+    reload_settings()
+    s = load_settings()
+    s.api.max_upload_size_bytes = 10
+    app = create_app(s)
+    with TestClient(app) as c:
+        r = c.post(
+            "/ui/demo/paste",
+            json={
+                "title": "Short",
+                "text": "12345678901",
+            },
+        )
+        assert r.status_code == 413
+        assert "text exceeds size cap" in r.text
+
+        r2 = c.post(
+            "/ui/demo/paste",
+            json={
+                "title": "Short",
+                "text": "1234567890",
+            },
+        )
+        assert r2.status_code != 413

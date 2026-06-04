@@ -99,19 +99,30 @@ def _as_iter(value: Any) -> Iterable[Any]:
 
 def _clean_set(values: Any) -> frozenset[str]:
     """Return a frozenset of non-empty, stripped strings."""
+    iterable = _as_iter(values)
+    if not iterable:
+        return frozenset()
     out: set[str] = set()
-    for v in _as_iter(values):
-        if v is None:
-            continue
-        s = str(v).strip()
-        if s:
-            out.add(s)
+    for v in iterable:
+        if v is not None:
+            s = str(v).strip()
+            if s:
+                out.add(s)
     return frozenset(out)
 
 
 def _clean_symbols(values: Any) -> frozenset[str]:
     """Symbols are case-insensitive — normalize to upper for matching."""
-    return frozenset(s.upper() for s in _clean_set(values))
+    iterable = _as_iter(values)
+    if not iterable:
+        return frozenset()
+    out: set[str] = set()
+    for v in iterable:
+        if v is not None:
+            s = str(v).strip().upper()
+            if s:
+                out.add(s)
+    return frozenset(out)
 
 
 def _relevance(record: dict) -> float | None:
@@ -137,7 +148,7 @@ def _capture_id(record: dict) -> str:
 
 
 def _build_asset_reason_cells(
-    records: list[dict],
+    parsed_records: list[tuple[frozenset[str], frozenset[str], frozenset[str], float | None, str]],
     *,
     min_pair_count: int,
     top_n: int,
@@ -151,12 +162,9 @@ def _build_asset_reason_cells(
     row_total: Counter[str] = Counter()
     col_total: Counter[str] = Counter()
 
-    for rec in records:
-        assets = _clean_set(rec.get("asset_classes"))
-        reasons = _clean_set(rec.get("impact_reason_codes"))
+    for assets, reasons, _, rel, _ in parsed_records:
         if not assets or not reasons:
             continue
-        rel = _relevance(rec)
         for asset in assets:
             for reason in reasons:
                 key = (asset, reason)
@@ -195,9 +203,7 @@ def _build_asset_reason_cells(
         )
 
     # Deterministic sort: lift DESC, then count DESC, then alpha asset, reason.
-    cells.sort(
-        key=lambda c: (-c.lift, -c.count, c.asset_class, c.reason_code)
-    )
+    cells.sort(key=lambda c: (-c.lift, -c.count, c.asset_class, c.reason_code))
     return tuple(cells[:top_n])
 
 
@@ -207,7 +213,7 @@ def _build_asset_reason_cells(
 
 
 def _build_symbol_edges(
-    records: list[dict],
+    parsed_records: list[tuple[frozenset[str], frozenset[str], frozenset[str], float | None, str]],
     *,
     min_edge_weight: int,
     top_n: int,
@@ -218,11 +224,9 @@ def _build_symbol_edges(
     # tests can pin "first three records I saw this edge in".
     edge_samples: dict[tuple[str, str], list[str]] = {}
 
-    for rec in records:
-        symbols = _clean_symbols(rec.get("candidate_symbols"))
+    for _, _, symbols, _, cid in parsed_records:
         if len(symbols) < 2:
             continue
-        cid = _capture_id(rec)
         # Sort once so combinations() produces lex-ordered pairs directly.
         ordered = sorted(symbols)
         for sym_a, sym_b in combinations(ordered, 2):
@@ -257,7 +261,7 @@ def _build_symbol_edges(
 
 
 def _build_asset_concentration(
-    records: list[dict],
+    parsed_records: list[tuple[frozenset[str], frozenset[str], frozenset[str], float | None, str]],
 ) -> tuple[AssetConcentration, ...]:
     """Per-asset reason-mix concentration via Herfindahl index."""
     # For each asset, count both records (for record_count) and (asset,reason)
@@ -266,11 +270,9 @@ def _build_asset_concentration(
     asset_records: Counter[str] = Counter()
     asset_reason_counts: dict[str, Counter[str]] = {}
 
-    for rec in records:
-        assets = _clean_set(rec.get("asset_classes"))
+    for assets, reasons, _, _, _ in parsed_records:
         if not assets:
             continue
-        reasons = _clean_set(rec.get("impact_reason_codes"))
         for asset in assets:
             asset_records[asset] += 1
             if not reasons:
@@ -299,8 +301,7 @@ def _build_asset_concentration(
 
         # Share probabilities, then sum-of-squares = Herfindahl.
         shares: list[tuple[str, float]] = [
-            (reason, count / reason_total)
-            for reason, count in reason_counter.items()
+            (reason, count / reason_total) for reason, count in reason_counter.items()
         ]
         # float clamp to [0,1] — a single reason yields exactly 1.0 by math
         # but rounding could nudge it; defensive clamp keeps the contract.
@@ -376,23 +377,32 @@ def compute_co_occurrence(
             asset_concentration=(),
         )
 
-    # Pre-pass for the "distinct" summary counters. We do this once rather
-    # than threading sets through every builder.
+    # Pre-pass for the "distinct" summary counters and pre-cleaning fields.
     distinct_assets: set[str] = set()
     distinct_reasons: set[str] = set()
     distinct_symbols: set[str] = set()
-    for rec in records:
-        distinct_assets.update(_clean_set(rec.get("asset_classes")))
-        distinct_reasons.update(_clean_set(rec.get("impact_reason_codes")))
-        distinct_symbols.update(_clean_symbols(rec.get("candidate_symbols")))
 
-    cells = _build_asset_reason_cells(
-        records, min_pair_count=min_pair_count, top_n=top_n_cells
-    )
-    edges = _build_symbol_edges(
-        records, min_edge_weight=min_edge_weight, top_n=top_n_edges
-    )
-    concentration = _build_asset_concentration(records)
+    parsed_records = []
+    for rec in records:
+        assets = _clean_set(rec.get("asset_classes"))
+        reasons = _clean_set(rec.get("impact_reason_codes"))
+        symbols = _clean_symbols(rec.get("candidate_symbols"))
+
+        distinct_assets.update(assets)
+        distinct_reasons.update(reasons)
+        distinct_symbols.update(symbols)
+
+        # Relevance is only needed if there are both assets and reasons
+        relevance = _relevance(rec) if (assets and reasons) else None
+
+        # capture_id is only needed if symbols has at least 2 elements
+        capture_id = _capture_id(rec) if len(symbols) >= 2 else ""
+
+        parsed_records.append((assets, reasons, symbols, relevance, capture_id))
+
+    cells = _build_asset_reason_cells(parsed_records, min_pair_count=min_pair_count, top_n=top_n_cells)
+    edges = _build_symbol_edges(parsed_records, min_edge_weight=min_edge_weight, top_n=top_n_edges)
+    concentration = _build_asset_concentration(parsed_records)
 
     return CoOccurrenceReport(
         total_records=len(records),

@@ -122,11 +122,15 @@ def test_every_item_has_utc_published_ts() -> None:
 
 
 def test_title_less_hits_are_skipped() -> None:
-    body = json.dumps({"hits": [
-        {"url": "https://x.example.com/a", "objectID": "1"},  # no title
-        {"title": "   ", "url": "https://x.example.com/b", "objectID": "2"},  # blank
-        {"title": "good one", "url": "https://ok.example.com/x", "objectID": "3"},
-    ]}).encode("utf-8")
+    body = json.dumps(
+        {
+            "hits": [
+                {"url": "https://x.example.com/a", "objectID": "1"},  # no title
+                {"title": "   ", "url": "https://x.example.com/b", "objectID": "2"},  # blank
+                {"title": "good one", "url": "https://ok.example.com/x", "objectID": "3"},
+            ]
+        }
+    ).encode("utf-8")
     items = _parse_hn(body, fallback_domain="news.ycombinator.com")
     assert len(items) == 1
     assert items[0].title == "good one"
@@ -142,10 +146,18 @@ def test_invalid_json_returns_empty_list() -> None:
 
 def test_malformed_created_at_falls_back_to_now_utc() -> None:
     before = datetime.now(UTC)
-    body = json.dumps({"hits": [
-        {"title": "no timestamp here", "url": "https://x.example.com/a", "objectID": "1",
-         "created_at": "not-a-real-date"},
-    ]}).encode("utf-8")
+    body = json.dumps(
+        {
+            "hits": [
+                {
+                    "title": "no timestamp here",
+                    "url": "https://x.example.com/a",
+                    "objectID": "1",
+                    "created_at": "not-a-real-date",
+                },
+            ]
+        }
+    ).encode("utf-8")
     items = _parse_hn(body, fallback_domain="news.ycombinator.com")
     after = datetime.now(UTC)
     assert len(items) == 1
@@ -198,16 +210,38 @@ def test_hn_algolia_edge_cases() -> None:
 
     # 1. created_at_i is a boolean (must fall back to created_at or now())
     items1 = _parse_hn(
-        json.dumps({"hits": [{"title": "Test Boolean", "url": "https://foo.com", "created_at_i": True, "created_at": "2025-05-28T14:30:00Z"}]}).encode("utf-8"),
-        "fallback"
+        json.dumps(
+            {
+                "hits": [
+                    {
+                        "title": "Test Boolean",
+                        "url": "https://foo.com",
+                        "created_at_i": True,
+                        "created_at": "2025-05-28T14:30:00Z",
+                    }
+                ]
+            }
+        ).encode("utf-8"),
+        "fallback",
     )
     assert len(items1) == 1
     assert items1[0].published_ts == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
 
     # 2. created_at_i is integer overflowing (must fall back to ISO or now())
     items2 = _parse_hn(
-        json.dumps({"hits": [{"title": "Test Overflow", "url": "https://foo.com", "created_at_i": 999999999999999, "created_at": "2025-05-28T14:30:00Z"}]}).encode("utf-8"),
-        "fallback"
+        json.dumps(
+            {
+                "hits": [
+                    {
+                        "title": "Test Overflow",
+                        "url": "https://foo.com",
+                        "created_at_i": 999999999999999,
+                        "created_at": "2025-05-28T14:30:00Z",
+                    }
+                ]
+            }
+        ).encode("utf-8"),
+        "fallback",
     )
     assert len(items2) == 1
     assert items2[0].published_ts == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
@@ -221,14 +255,79 @@ def test_hn_algolia_edge_cases() -> None:
 
     # 4. objectID is missing/empty/None when url is absent
     items3 = _parse_hn(
-        json.dumps({"hits": [
-            {"title": "Missing ID and URL"}, # skips
-            {"title": "Empty ID and URL", "objectID": "   "}, # skips
-            {"title": "Null ID and URL", "objectID": None}, # skips
-            {"title": "Valid ID", "objectID": "123"}, # parses
-        ]}).encode("utf-8"),
-        "fallback"
+        json.dumps(
+            {
+                "hits": [
+                    {"title": "Missing ID and URL"},  # skips
+                    {"title": "Empty ID and URL", "objectID": "   "},  # skips
+                    {"title": "Null ID and URL", "objectID": None},  # skips
+                    {"title": "Valid ID", "objectID": "123"},  # parses
+                ]
+            }
+        ).encode("utf-8"),
+        "fallback",
     )
     assert len(items3) == 1
     assert items3[0].title == "Valid ID"
 
+
+def test_hn_algolia_timestamp_caching_and_fast_paths() -> None:
+    from catchem.news_sources.hn_algolia import (
+        _parse_created,
+        _parse_epoch_cached,
+        _parse_iso_cached,
+    )
+
+    # Clear caches first to get clean measurement
+    _parse_epoch_cached.cache_clear()
+    _parse_iso_cached.cache_clear()
+
+    # 1. Test epoch caching
+    hit_epoch = {"title": "Epoch", "created_at_i": 1748442600}
+    t1 = _parse_created(hit_epoch)
+    assert t1 == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # Second parse should be a cache hit
+    t2 = _parse_created(hit_epoch)
+    assert t2 == t1
+    info_epoch = _parse_epoch_cached.cache_info()
+    assert info_epoch.hits >= 1
+
+    # 2. Test ISO 24-character fast path
+    hit_iso24 = {"title": "ISO24", "created_at": "2025-05-28T14:30:00.000Z"}
+    t3 = _parse_created(hit_iso24)
+    assert t3 == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # Second parse should hit the cache
+    t4 = _parse_created(hit_iso24)
+    assert t4 == t3
+    info_iso = _parse_iso_cached.cache_info()
+    assert info_iso.hits >= 1
+
+    # 3. Test ISO 20-character fast path
+    hit_iso20 = {"title": "ISO20", "created_at": "2025-05-28T14:30:00Z"}
+    t5 = _parse_created(hit_iso20)
+    assert t5 == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # 4. Test ISO fallback (non-20, non-24 char valid ISO format)
+    hit_iso_fallback = {"title": "Fallback", "created_at": "2025-05-28T14:30:00+00:00"}
+    t6 = _parse_created(hit_iso_fallback)
+    assert t6 == datetime(2025, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # 5. Test ISO fast path ValueError fallback (invalid digit values for month/day/etc)
+    hit_iso_val_err20 = {"title": "ValErr20", "created_at": "2025-99-28T14:30:00Z"}
+    t7 = _parse_created(hit_iso_val_err20)
+    assert isinstance(t7, datetime)
+
+    hit_iso_val_err24 = {"title": "ValErr24", "created_at": "2025-99-28T14:30:00.000Z"}
+    t8 = _parse_created(hit_iso_val_err24)
+    assert isinstance(t8, datetime)
+
+    # 6. Test created_at being empty or non-string
+    hit_empty_iso = {"title": "EmptyISO", "created_at": "   "}
+    t9 = _parse_created(hit_empty_iso)
+    assert isinstance(t9, datetime)
+
+    hit_non_str_iso = {"title": "NonStrISO", "created_at": 12345}
+    t10 = _parse_created(hit_non_str_iso)
+    assert isinstance(t10, datetime)

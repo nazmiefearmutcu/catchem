@@ -48,6 +48,7 @@ def _pts(*values: float) -> list[dict]:
 # summarize_tone — happy path + aggregates
 # ──────────────────────────────────────────────────────────────────────────
 
+
 def test_summarize_basic_aggregates() -> None:
     """latest / mean / min / max / n_points on a clean series."""
     s = gt.summarize_tone(_pts(-2.0, 0.0, 2.0, 4.0), now=FIXED_NOW)
@@ -124,6 +125,7 @@ def test_summarize_single_point_no_trend() -> None:
 # summarize_tone — malformed / empty tolerance
 # ──────────────────────────────────────────────────────────────────────────
 
+
 def test_summarize_empty_series() -> None:
     """Empty input → neutral all-None summary, never raises."""
     s = gt.summarize_tone([], now=FIXED_NOW)
@@ -144,15 +146,15 @@ def test_summarize_drops_malformed_points() -> None:
     else is silently discarded rather than raising or poisoning the mean.
     """
     timeline = [
-        {"date": "20260528T000000Z", "value": 1.0},   # good
-        "not-a-dict",                                   # dropped
-        {"date": "20260528T010000Z"},                  # no value → dropped
+        {"date": "20260528T000000Z", "value": 1.0},  # good
+        "not-a-dict",  # dropped
+        {"date": "20260528T010000Z"},  # no value → dropped
         {"date": "20260528T020000Z", "value": "abc"},  # non-numeric → dropped
-        {"date": "20260528T030000Z", "value": None},   # None → dropped
+        {"date": "20260528T030000Z", "value": None},  # None → dropped
         {"date": "20260528T040000Z", "value": float("nan")},  # NaN → dropped
         {"date": "20260528T050000Z", "value": float("inf")},  # inf → dropped
-        {"date": "20260528T060000Z", "value": True},   # bool → dropped
-        {"date": "20260528T070000Z", "value": 3.0},    # good
+        {"date": "20260528T060000Z", "value": True},  # bool → dropped
+        {"date": "20260528T070000Z", "value": 3.0},  # good
     ]
     s = gt.summarize_tone(timeline, now=FIXED_NOW)
     assert s["n_points"] == 2
@@ -163,9 +165,7 @@ def test_summarize_drops_malformed_points() -> None:
 
 def test_summarize_numeric_string_value_coerced() -> None:
     """A numeric string value is coerced to float (defensive parsing)."""
-    s = gt.summarize_tone(
-        [{"date": "20260528T000000Z", "value": "2.5"}], now=FIXED_NOW
-    )
+    s = gt.summarize_tone([{"date": "20260528T000000Z", "value": "2.5"}], now=FIXED_NOW)
     assert s["n_points"] == 1
     assert s["latest_tone"] == 2.5
 
@@ -181,6 +181,7 @@ def test_summarize_not_a_list() -> None:
 # summarize_tone — date parsing variants + ordering
 # ──────────────────────────────────────────────────────────────────────────
 
+
 def test_summarize_epoch_date_parsing_and_ordering() -> None:
     """Epoch-second dates parse and the series is sorted chronologically.
 
@@ -190,7 +191,7 @@ def test_summarize_epoch_date_parsing_and_ordering() -> None:
     t_early = int(datetime(2026, 5, 28, 0, 0, tzinfo=UTC).timestamp())
     t_late = int(datetime(2026, 5, 28, 6, 0, tzinfo=UTC).timestamp())
     timeline = [
-        {"date": t_late, "value": 8.0},    # newest, given first
+        {"date": t_late, "value": 8.0},  # newest, given first
         {"date": t_early, "value": -8.0},  # oldest, given second
     ]
     s = gt.summarize_tone(timeline, now=FIXED_NOW)
@@ -202,11 +203,24 @@ def test_summarize_epoch_date_parsing_and_ordering() -> None:
 
 def test_summarize_iso_date_parsing() -> None:
     """A plain ISO-8601 date with trailing Z parses (defensive path)."""
-    s = gt.summarize_tone(
-        [{"date": "2026-05-28T00:00:00Z", "value": 1.0}], now=FIXED_NOW
-    )
+    s = gt.summarize_tone([{"date": "2026-05-28T00:00:00Z", "value": 1.0}], now=FIXED_NOW)
     assert s["n_points"] == 1
     assert s["latest_tone"] == 1.0
+
+
+def test_summarize_iso_date_parsing_non_utc() -> None:
+    """An ISO-8601 date with non-UTC offset parses and gets converted to UTC."""
+    s = gt.summarize_tone([{"date": "2026-05-28T12:00:00+03:00", "value": 1.0}], now=FIXED_NOW)
+    assert s["n_points"] == 1
+    assert s["latest_tone"] == 1.0
+
+
+def test_summarize_invalid_canonical_date_fallback() -> None:
+    """An invalid canonical date (e.g., Feb 30) raises ValueError during instantiation and fails over."""
+    s = gt.summarize_tone([{"date": "20260230T120000Z", "value": 1.0}], now=FIXED_NOW)
+    # The date is invalid so it won't be successfully parsed as a dated point, but the value is aggregated.
+    assert s["n_points"] == 1
+    assert s["mean_tone"] == 1.0
 
 
 def test_summarize_value_with_bad_date_still_counts() -> None:
@@ -217,7 +231,7 @@ def test_summarize_value_with_bad_date_still_counts() -> None:
     """
     timeline = [
         {"date": "20260528T000000Z", "value": 2.0},  # dated
-        {"date": "not-a-date", "value": 6.0},          # undated but valued
+        {"date": "not-a-date", "value": 6.0},  # undated but valued
     ]
     s = gt.summarize_tone(timeline, now=FIXED_NOW)
     assert s["n_points"] == 2
@@ -228,6 +242,7 @@ def test_summarize_value_with_bad_date_still_counts() -> None:
 # ──────────────────────────────────────────────────────────────────────────
 # fetch_tone — envelope extraction (mocked client, no network)
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class _FakeResponse:
     def __init__(self, payload):
@@ -291,6 +306,7 @@ def test_fetch_tone_unexpected_shape_returns_empty() -> None:
 # compute_global_tone — orchestration with mocked fetch_tone
 # ──────────────────────────────────────────────────────────────────────────
 
+
 def test_compute_global_tone_aggregates_by_theme(monkeypatch: pytest.MonkeyPatch) -> None:
     """Per-theme summaries + overall roll-up from a mocked fetch.
 
@@ -298,9 +314,9 @@ def test_compute_global_tone_aggregates_by_theme(monkeypatch: pytest.MonkeyPatch
     and the overall_tone equals the mean of the per-theme latest tones.
     """
     series_by_query = {
-        "stock market": _pts(0.0, 1.0, 2.0),          # latest 2.0
+        "stock market": _pts(0.0, 1.0, 2.0),  # latest 2.0
         "economy OR recession": _pts(-1.0, -2.0, -3.0),  # latest -3.0
-        "bitcoin OR crypto": _pts(4.0, 5.0, 6.0),     # latest 6.0
+        "bitcoin OR crypto": _pts(4.0, 5.0, 6.0),  # latest 6.0
         "federal reserve OR inflation": _pts(0.0, 0.0, 1.0),  # latest 1.0
     }
 
@@ -353,6 +369,7 @@ def test_compute_global_tone_defaults_themes(monkeypatch: pytest.MonkeyPatch) ->
 # GET /api/quant/global-tone — endpoint envelope + degraded path
 # ──────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """TestClient over a real lifespan with background tasks disabled."""
@@ -378,9 +395,7 @@ def _clear_tone_cache() -> None:
     api_mod._GLOBAL_TONE_CACHE["expires_at"] = 0.0
 
 
-def test_endpoint_envelope_and_by_theme(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_endpoint_envelope_and_by_theme(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy-path: fixture timeline → populated by_theme + schema_version.
 
     The handler imports ``fetch_tone`` indirectly (compute_global_tone calls
@@ -423,9 +438,7 @@ def test_endpoint_envelope_and_by_theme(
     assert data["overall_state"] in {"improving", "deteriorating", "stable"}
 
 
-def test_endpoint_degraded_when_all_fetches_fail(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_endpoint_degraded_when_all_fetches_fail(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """All-empty upstream → 200 with degraded=true and empty per-theme summaries."""
 
     async def empty_fetch(http_client, query, *, timespan="1d"):
@@ -446,9 +459,7 @@ def test_endpoint_degraded_when_all_fetches_fail(
         assert theme["latest_tone"] is None
 
 
-def test_endpoint_degraded_when_compute_raises(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_endpoint_degraded_when_compute_raises(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the orchestrator itself raises, the endpoint still 200s, degraded.
 
     Belt-and-suspenders: compute_global_tone is fail-soft, but the handler
@@ -485,9 +496,9 @@ def test_summarize_tone_latest_is_newest_dated_not_input_order() -> None:
     # last in the input list.
     timeline = [
         {"date": "20260101T000000Z", "value": -3.0},  # oldest
-        {"date": "20260103T000000Z", "value": 5.0},   # newest DATED
-        {"date": "20260102T000000Z", "value": 1.0},   # middle
-        {"value": 99.0},                               # date-less, last in input
+        {"date": "20260103T000000Z", "value": 5.0},  # newest DATED
+        {"date": "20260102T000000Z", "value": 1.0},  # middle
+        {"value": 99.0},  # date-less, last in input
     ]
     s = gt.summarize_tone(timeline)
     assert s["latest_tone"] == 5.0, "latest = newest dated point, not the date-less last item"
@@ -502,9 +513,7 @@ def test_summarize_tone_dateless_point_excluded_from_trend_and_latest() -> None:
     # improving dated series plus an injected date-less spike yields IDENTICAL
     # latest/trend/slope (the spike is excluded from the ordered sequence) while
     # still moving the order-free min.
-    dated_improving = [
-        {"date": f"202601{d:02d}T000000Z", "value": float(d)} for d in range(1, 11)
-    ]
+    dated_improving = [{"date": f"202601{d:02d}T000000Z", "value": float(d)} for d in range(1, 11)]
     base = gt.summarize_tone(dated_improving)
     with_spike = gt.summarize_tone([*dated_improving, {"value": -500.0}])
 
@@ -565,9 +574,7 @@ async def test_endpoint_single_flight_coalesces_concurrent_misses(
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
-        results = await asyncio.gather(
-            *(ac.get("/api/quant/global-tone") for _ in range(6))
-        )
+        results = await asyncio.gather(*(ac.get("/api/quant/global-tone") for _ in range(6)))
 
     assert all(r.status_code == 200 for r in results)
     # All six requests return the same payload…
@@ -609,11 +616,11 @@ def test_parse_point_date_accepts_multiple_encodings() -> None:
 
 def test_parse_point_date_returns_none_on_junk() -> None:
     assert gt._parse_point_date(None) is None
-    assert gt._parse_point_date(True) is None       # bool is NOT a usable epoch
+    assert gt._parse_point_date(True) is None  # bool is NOT a usable epoch
     assert gt._parse_point_date("") is None
     assert gt._parse_point_date("   ") is None
     assert gt._parse_point_date("not a date") is None
-    assert gt._parse_point_date([1, 2]) is None      # wrong type entirely
+    assert gt._parse_point_date([1, 2]) is None  # wrong type entirely
 
 
 def test_parse_point_date_overflow_and_exceptions() -> None:
@@ -650,9 +657,7 @@ def test_extract_timeline_data_unexpected_shapes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compute_global_tone_close_exception_and_deteriorating(
-    monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_compute_global_tone_close_exception_and_deteriorating(monkeypatch: pytest.MonkeyPatch) -> None:
     # Test httpx.AsyncClient close exception path (lines 439-440)
     from unittest.mock import patch
 
@@ -679,6 +684,3 @@ async def test_compute_global_tone_close_exception_and_deteriorating(
         # Test that we successfully processed even if aclose failed,
         # and that deteriorating state is correctly classified (line 462)
         assert res["overall_state"] == "deteriorating"
-
-
-

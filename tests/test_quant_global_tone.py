@@ -684,3 +684,45 @@ async def test_compute_global_tone_close_exception_and_deteriorating(monkeypatch
         # Test that we successfully processed even if aclose failed,
         # and that deteriorating state is correctly classified (line 462)
         assert res["overall_state"] == "deteriorating"
+
+
+def test_global_tone_optimization_coverage() -> None:
+    # 1. Test canonical GDELT stamp with leading/trailing spaces (redundant path check after strip)
+    assert gt._parse_point_date("  20260528T120000Z  ") == datetime(2026, 5, 28, 12, 0, 0, tzinfo=UTC)
+
+    # 2. Test invalid canonical GDELT stamps raising ValueError
+    assert gt._parse_point_date("20269999T120000Z") is None
+    assert gt._parse_point_date("  20269999T120000Z  ") is None
+
+    # 3. Test invalid ISO UTC format raising ValueError (e.g. invalid month/day)
+    assert gt._parse_point_date("2026-99-15T12:30:00Z") is None
+    assert gt._parse_point_date("2026-01-99T12:30:00Z") is None
+    assert gt._parse_point_date("2026-01-15T99:30:00Z") is None
+
+    # 4. Test string of length 19 or 20 that does not match hyphen/colon pattern or fails inner Z check
+    assert gt._parse_point_date("2026/01/15_12-30-00Z") is None
+    assert gt._parse_point_date("2026-01-15T12:30:00X") is None
+
+    # 5. Test slow path ISO parser fallback paths (e.g. millisecond-containing strings that bypass fast paths)
+    assert gt._parse_point_date("2026-01-15T12:30:00.000") == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+    assert gt._parse_point_date("2026-01-15T12:30:00.000Z") == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+    assert gt._parse_point_date("2026-01-15T12:30:00.000+03:00") == datetime(2026, 1, 15, 9, 30, tzinfo=UTC)
+
+    # 6. Test _coerce_value branches
+    # Float path
+    assert gt._coerce_value(3.14) == 3.14
+    assert gt._coerce_value(float("inf")) is None
+    assert gt._coerce_value(float("-inf")) is None
+    # Int path
+    assert gt._coerce_value(42) == 42.0
+    # String path with fast float conversions
+    assert gt._coerce_value("3.14") == 3.14
+    assert gt._coerce_value("  3.14  ") == 3.14
+    assert gt._coerce_value("inf") is None
+    assert gt._coerce_value("  inf  ") is None
+    assert gt._coerce_value("not-a-float") is None
+    assert gt._coerce_value("  not-a-float  ") is None
+    # None / bool
+    assert gt._coerce_value(None) is None
+    assert gt._coerce_value(True) is None
+    assert gt._coerce_value(False) is None

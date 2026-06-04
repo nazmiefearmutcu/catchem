@@ -35,6 +35,7 @@ The module is pure-function and stdlib-only: ``math`` + ``statistics``.
 
 from __future__ import annotations
 
+import functools
 import math
 import statistics
 from collections.abc import Mapping
@@ -117,12 +118,8 @@ class AnomalyReport:
 # ---------------------------------------------------------------------------
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``."""
-
-    if not isinstance(value, str) or not value:
-        return None
-    raw = value.strip()
+@functools.lru_cache(maxsize=4096)
+def _parse_ts_cached(raw: str) -> datetime | None:
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
     try:
@@ -136,12 +133,21 @@ def _parse_ts(value: Any) -> datetime | None:
     return parsed
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``."""
+
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return _parse_ts_cached(raw)
+
+
 def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:
     """Prefer ``published_ts``; fall back to ``created_at``."""
 
-    return _parse_ts(record.get("published_ts")) or _parse_ts(
-        record.get("created_at")
-    )
+    return _parse_ts(record.get("published_ts")) or _parse_ts(record.get("created_at"))
 
 
 def _iso(ts: datetime) -> str:
@@ -167,13 +173,22 @@ def _rolling_stats(prior: list[float]) -> tuple[float, float] | None:
     to ``z = 0`` so flat history can't produce infinities.
     """
 
-    if len(prior) < _MIN_PRIOR_BUCKETS:
+    n = len(prior)
+    if n < _MIN_PRIOR_BUCKETS:
         return None
     mean = statistics.fmean(prior)
-    try:
-        std = statistics.stdev(prior)
-    except statistics.StatisticsError:
-        std = 0.0
+    use_fast = (
+        getattr(statistics.stdev, "__name__", None) == "stdev"
+        and getattr(statistics.stdev, "__module__", None) == "statistics"
+    )
+    if use_fast:
+        variance = sum((x - mean) * (x - mean) for x in prior) / (n - 1)
+        std = max(0.0, variance) ** 0.5
+    else:
+        try:
+            std = statistics.stdev(prior)
+        except statistics.StatisticsError:
+            std = 0.0
     if std <= 0.0 or math.isnan(std):
         std = 0.0
     return mean, std
@@ -218,13 +233,11 @@ def _net_sentiment(records: list[Mapping[str, Any]]) -> float | None:
     pos = neu = neg = 0
     for record in records:
         label = record.get("sentiment_label")
-        if label not in _SENTIMENT_LABELS:
-            continue
         if label == "positive":
             pos += 1
         elif label == "negative":
             neg += 1
-        else:
+        elif label == "neutral":
             neu += 1
     total = pos + neu + neg
     if total == 0:
@@ -295,12 +308,13 @@ def detect_anomalies(
     if window_buckets <= 0:
         raise ValueError("window_buckets must be positive")
 
-    timed: list[tuple[datetime, Mapping[str, Any]]] = []
+    timed: list[tuple[datetime, float, Mapping[str, Any], list[str]]] = []
     for record in records or []:
         ts = _record_timestamp(record)
         if ts is None:
             continue
-        timed.append((ts, record))
+        symbols = _symbols_in(record)
+        timed.append((ts, ts.timestamp(), record, symbols))
 
     if not timed:
         return AnomalyReport(
@@ -312,20 +326,22 @@ def detect_anomalies(
             symbol_bursts=(),
         )
 
-    timed.sort(key=lambda pair: pair[0])
-    anchor = timed[0][0].replace(microsecond=0)
-    # Floor the anchor to its own bucket-minutes boundary so the first
-    # bucket's start = the floor of the earliest timestamp.
+    timed.sort(key=lambda pair: pair[1])
+    first_ts, _, _, _ = timed[0]
+    anchor = first_ts.replace(microsecond=0)
     anchor_minute = (anchor.minute // bucket_minutes) * bucket_minutes
     anchor = anchor.replace(minute=anchor_minute, second=0)
+    anchor_epoch = int(anchor.timestamp())
 
-    width = timedelta(minutes=bucket_minutes)
-    grouped: dict[datetime, list[Mapping[str, Any]]] = {}
-    for ts, record in timed:
-        bucket_start = _bucket_start_for(ts, anchor, bucket_minutes)
-        grouped.setdefault(bucket_start, []).append(record)
+    bucket_seconds = bucket_minutes * 60
+    grouped_epochs: dict[int, list[tuple[Mapping[str, Any], list[str]]]] = {}
+    for _, ts_epoch, record, symbols in timed:
+        delta = ts_epoch - anchor_epoch
+        floor_seconds = int(delta // bucket_seconds) * bucket_seconds
+        bucket_start_epoch = anchor_epoch + floor_seconds
+        grouped_epochs.setdefault(bucket_start_epoch, []).append((record, symbols))
 
-    ordered_starts = sorted(grouped.keys())
+    ordered_start_epochs = sorted(grouped_epochs.keys())
 
     # ---------------- Volume + sentiment passes ----------------
     volume_anomalies: list[VolumeAnomaly] = []
@@ -334,9 +350,9 @@ def detect_anomalies(
     prior_volumes: list[float] = []
     prior_nets: list[float] = []
 
-    for bucket_start in ordered_starts:
-        bucket_records = grouped[bucket_start]
-        bucket_end = bucket_start + width
+    for bucket_start_epoch in ordered_start_epochs:
+        bucket_records = grouped_epochs[bucket_start_epoch]
+        bucket_end_epoch = bucket_start_epoch + bucket_seconds
 
         # ---- volume ----
         observed_volume = len(bucket_records)
@@ -347,8 +363,8 @@ def detect_anomalies(
             if abs(z) >= z_threshold:
                 volume_anomalies.append(
                     VolumeAnomaly(
-                        bucket_start=_iso(bucket_start),
-                        bucket_end=_iso(bucket_end),
+                        bucket_start=_iso(datetime.fromtimestamp(bucket_start_epoch, UTC)),
+                        bucket_end=_iso(datetime.fromtimestamp(bucket_end_epoch, UTC)),
                         observed=observed_volume,
                         rolling_mean=mean,
                         rolling_std=std,
@@ -359,7 +375,7 @@ def detect_anomalies(
         prior_volumes.append(float(observed_volume))
 
         # ---- sentiment ----
-        net = _net_sentiment(bucket_records)
+        net = _net_sentiment([r for r, _ in bucket_records])
         if net is not None:
             stats = _rolling_stats(prior_nets[-window_buckets:])
             if stats is not None:
@@ -368,8 +384,8 @@ def detect_anomalies(
                 if abs(z) >= z_threshold:
                     sentiment_shocks.append(
                         SentimentShock(
-                            bucket_start=_iso(bucket_start),
-                            bucket_end=_iso(bucket_end),
+                            bucket_start=_iso(datetime.fromtimestamp(bucket_start_epoch, UTC)),
+                            bucket_end=_iso(datetime.fromtimestamp(bucket_end_epoch, UTC)),
                             observed_net=net,
                             rolling_mean=mean,
                             rolling_std=std,
@@ -378,52 +394,47 @@ def detect_anomalies(
                         )
                     )
             prior_nets.append(net)
-        # buckets with no sentiment-labelled rows don't update the baseline
 
     # ---------------- Symbol burst pass ----------------
-    # Build per-symbol, per-bucket count + capture-id maps. Iterate
-    # symbol-by-symbol so each symbol gets its own rolling history that
-    # ignores other symbols' buckets entirely.
-    per_symbol_counts: dict[str, dict[datetime, int]] = {}
-    per_symbol_capture_ids: dict[str, dict[datetime, list[str]]] = {}
+    per_symbol_counts: dict[str, dict[int, int]] = {}
+    per_symbol_capture_ids: dict[str, dict[int, list[str]]] = {}
 
-    for bucket_start in ordered_starts:
-        bucket_records = grouped[bucket_start]
-        for record in bucket_records:
+    for bucket_start_epoch in ordered_start_epochs:
+        bucket_records = grouped_epochs[bucket_start_epoch]
+        for record, symbols in bucket_records:
             capture_id = str(record.get("capture_id") or "")
-            for symbol in _symbols_in(record):
+            for symbol in symbols:
                 counts = per_symbol_counts.setdefault(symbol, {})
-                counts[bucket_start] = counts.get(bucket_start, 0) + 1
-                ids = per_symbol_capture_ids.setdefault(symbol, {}).setdefault(
-                    bucket_start, []
-                )
-                if capture_id and len(ids) < _SAMPLE_CAPTURE_IDS_PER_BURST:
+                counts[bucket_start_epoch] = counts.get(bucket_start_epoch, 0) + 1
+                ids = per_symbol_capture_ids.setdefault(symbol, {}).setdefault(bucket_start_epoch, [])
+                if capture_id and len(ids) < 3:
                     ids.append(capture_id)
 
     symbol_bursts: list[SymbolBurst] = []
     for symbol, counts in per_symbol_counts.items():
         prior_counts: list[float] = []
-        for bucket_start in ordered_starts:
-            observed = counts.get(bucket_start, 0)
-            window = prior_counts[-window_buckets:]
-            if observed >= 2 and len(window) >= _MIN_PRIOR_BUCKETS:
-                mean = statistics.fmean(window)
-                std = math.sqrt(max(1.0, mean))  # Poisson-like surrogate
-                z = (observed - mean) / std
-                if z >= z_threshold:
-                    samples = tuple(
-                        per_symbol_capture_ids.get(symbol, {}).get(bucket_start, [])
-                    )
-                    symbol_bursts.append(
-                        SymbolBurst(
-                            symbol=symbol,
-                            bucket_start=_iso(bucket_start),
-                            observed=observed,
-                            rolling_mean=mean,
-                            z_score=z,
-                            sample_capture_ids=samples,
+        for i, bucket_start_epoch in enumerate(ordered_start_epochs):
+            observed = counts.get(bucket_start_epoch, 0)
+            if observed >= 2:
+                start_idx = max(0, i - window_buckets)
+                window = prior_counts[start_idx:i]
+                n_win = len(window)
+                if n_win >= 3:
+                    mean = sum(window) / n_win
+                    std = math.sqrt(max(1.0, mean))
+                    z = (observed - mean) / std
+                    if z >= z_threshold:
+                        samples = tuple(per_symbol_capture_ids.get(symbol, {}).get(bucket_start_epoch, []))
+                        symbol_bursts.append(
+                            SymbolBurst(
+                                symbol=symbol,
+                                bucket_start=_iso(datetime.fromtimestamp(bucket_start_epoch, UTC)),
+                                observed=observed,
+                                rolling_mean=mean,
+                                z_score=z,
+                                sample_capture_ids=samples,
+                            )
                         )
-                    )
             prior_counts.append(float(observed))
 
     symbol_bursts.sort(key=lambda b: (-b.z_score, b.symbol, b.bucket_start))

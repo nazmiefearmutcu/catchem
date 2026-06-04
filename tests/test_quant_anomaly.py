@@ -27,9 +27,7 @@ _BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def _ts(offset_minutes: float) -> str:
-    return (_BASE + timedelta(minutes=offset_minutes)).replace(
-        microsecond=0
-    ).isoformat()
+    return (_BASE + timedelta(minutes=offset_minutes)).replace(microsecond=0).isoformat()
 
 
 def _record(
@@ -105,9 +103,7 @@ def test_invalid_window_buckets_raises() -> None:
 def test_single_bucket_no_anomalies() -> None:
     """One bucket of data => no priors => no anomalies on any axis."""
 
-    records = _records_in_bucket(
-        0, 50, candidate_symbols=["AAPL"], sentiment_label="positive"
-    )
+    records = _records_in_bucket(0, 50, candidate_symbols=["AAPL"], sentiment_label="positive")
     report = detect_anomalies(records)
     assert report.volume_anomalies == ()
     assert report.sentiment_shocks == ()
@@ -197,12 +193,8 @@ def test_sentiment_flip_to_deep_negative_fires_bearish_shock() -> None:
     # Net per bucket = (pos - 0) / (pos + neu): 0.83, 0.6, 0.75, 0.8, 0.67, 0.71, 0.78, 0.83.
     mix = [(5, 1), (3, 2), (3, 1), (4, 1), (4, 2), (5, 2), (7, 2), (5, 1)]
     for b, (pos, neu) in enumerate(mix):
-        records += _records_in_bucket(
-            b, pos, sentiment_label="positive", capture_prefix=f"pos-{b}"
-        )
-        records += _records_in_bucket(
-            b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}"
-        )
+        records += _records_in_bucket(b, pos, sentiment_label="positive", capture_prefix=f"pos-{b}")
+        records += _records_in_bucket(b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}")
     # Bucket 8: all negative.
     records += _records_in_bucket(8, 5, sentiment_label="negative")
     report = detect_anomalies(records)
@@ -220,12 +212,8 @@ def test_sentiment_buckets_with_no_labels_skip_baseline() -> None:
     records: list[dict] = []
     mix = [(5, 1), (3, 2), (3, 1), (4, 1), (4, 2), (5, 2), (7, 2), (5, 1)]
     for b, (pos, neu) in enumerate(mix):
-        records += _records_in_bucket(
-            b, pos, sentiment_label="positive", capture_prefix=f"pos-{b}"
-        )
-        records += _records_in_bucket(
-            b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}"
-        )
+        records += _records_in_bucket(b, pos, sentiment_label="positive", capture_prefix=f"pos-{b}")
+        records += _records_in_bucket(b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}")
     # Bucket 8: unlabelled — should be skipped silently.
     records += _records_in_bucket(8, 4, sentiment_label=None)
     # Bucket 9: deep negative — should still trip vs. the baseline that
@@ -246,13 +234,9 @@ def test_symbol_burst_fires_for_aapl() -> None:
 
     records: list[dict] = []
     for b in range(10):
-        records += _records_in_bucket(
-            b, 1, candidate_symbols=["AAPL"], capture_prefix=f"calm-{b}"
-        )
+        records += _records_in_bucket(b, 1, candidate_symbols=["AAPL"], capture_prefix=f"calm-{b}")
     # Bucket 10: 8 AAPL mentions.
-    records += _records_in_bucket(
-        10, 8, candidate_symbols=["AAPL"], capture_prefix="spike"
-    )
+    records += _records_in_bucket(10, 8, candidate_symbols=["AAPL"], capture_prefix="spike")
     report = detect_anomalies(records)
     aapl_bursts = [b for b in report.symbol_bursts if b.symbol == "AAPL"]
     assert len(aapl_bursts) == 1
@@ -268,12 +252,8 @@ def test_symbol_burst_sample_capture_ids_capped_at_3() -> None:
 
     records: list[dict] = []
     for b in range(10):
-        records += _records_in_bucket(
-            b, 1, candidate_symbols=["TSLA"], capture_prefix=f"calm-{b}"
-        )
-    records += _records_in_bucket(
-        10, 10, candidate_symbols=["TSLA"], capture_prefix="spike"
-    )
+        records += _records_in_bucket(b, 1, candidate_symbols=["TSLA"], capture_prefix=f"calm-{b}")
+    records += _records_in_bucket(10, 10, candidate_symbols=["TSLA"], capture_prefix="spike")
     report = detect_anomalies(records)
     tsla = [b for b in report.symbol_bursts if b.symbol == "TSLA"]
     assert len(tsla) == 1
@@ -291,9 +271,7 @@ def test_symbol_burst_requires_observed_at_least_2() -> None:
     for b in range(10):
         records += _records_in_bucket(b, 3, candidate_symbols=["AAPL"])
     # Bucket 10: exactly one FOO mention.
-    records += _records_in_bucket(
-        10, 1, candidate_symbols=["FOO"], capture_prefix="foo"
-    )
+    records += _records_in_bucket(10, 1, candidate_symbols=["FOO"], capture_prefix="foo")
     report = detect_anomalies(records)
     assert not any(b.symbol == "FOO" for b in report.symbol_bursts)
 
@@ -306,15 +284,11 @@ def test_symbol_bursts_sorted_by_z_desc_and_topn_respected() -> None:
     # Build 10 buckets where each symbol gets 1 mention/bucket.
     for b in range(10):
         for sym in symbols:
-            records += _records_in_bucket(
-                b, 1, candidate_symbols=[sym], capture_prefix=f"calm-{sym}-{b}"
-            )
+            records += _records_in_bucket(b, 1, candidate_symbols=[sym], capture_prefix=f"calm-{sym}-{b}")
     # Bucket 10: vary spike intensity per symbol.
     bursts = {"AAA": 12, "BBB": 6, "CCC": 4, "DDD": 3}
     for sym, n in bursts.items():
-        records += _records_in_bucket(
-            10, n, candidate_symbols=[sym], capture_prefix=f"spike-{sym}"
-        )
+        records += _records_in_bucket(10, n, candidate_symbols=[sym], capture_prefix=f"spike-{sym}")
     report = detect_anomalies(records, top_n_symbols=2)
     assert len(report.symbol_bursts) == 2
     # Sorted DESC by z_score.
@@ -522,12 +496,8 @@ def test_sentiment_flip_to_strong_positive_fires_bullish_shock() -> None:
     # Net per bucket is mildly negative with non-zero variance.
     mix = [(5, 1), (3, 2), (3, 1), (4, 1), (4, 2), (5, 2), (7, 2), (5, 1)]
     for b, (neg, neu) in enumerate(mix):
-        records += _records_in_bucket(
-            b, neg, sentiment_label="negative", capture_prefix=f"neg-{b}"
-        )
-        records += _records_in_bucket(
-            b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}"
-        )
+        records += _records_in_bucket(b, neg, sentiment_label="negative", capture_prefix=f"neg-{b}")
+        records += _records_in_bucket(b, neu, sentiment_label="neutral", capture_prefix=f"neu-{b}")
     # Bucket 8: all positive => net = +1.0.
     records += _records_in_bucket(8, 5, sentiment_label="positive")
     report = detect_anomalies(records)
@@ -597,3 +567,11 @@ def test_mean_std_statistics_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mean == pytest.approx(2.0)
     assert std == 0.0
 
+
+def test_helpers_coverage_fallback() -> None:
+    from catchem.quant.anomaly import _bucket_start_for, _iso
+
+    anchor = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    ts = datetime(2026, 1, 1, 12, 10, tzinfo=UTC)
+    assert _bucket_start_for(ts, anchor, 30) == anchor
+    assert _iso(anchor) == "2026-01-01T12:00:00+00:00"

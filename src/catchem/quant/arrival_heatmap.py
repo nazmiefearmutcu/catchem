@@ -44,13 +44,17 @@ class HeatmapCell:
 
 @functools.lru_cache(maxsize=8192)
 def _parse_ts_cached(value: str) -> datetime | None:
+    if len(value) < 11:
+        return None
+    suffix = value[-6:]
+    if not ("Z" in suffix or "z" in suffix or "+" in suffix or "-" in suffix):
+        return None
     try:
-        ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
+        from catchem.storage import _parse_iso_ts_cached
+
+        return _parse_iso_ts_cached(value)
+    except ValueError:
         return None
-    if ts.tzinfo is None:
-        return None
-    return ts
 
 
 def _parse_ts(value: Any) -> datetime | None:

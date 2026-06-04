@@ -142,3 +142,25 @@ def test_non_string_timezone_fallback() -> None:
     assert out["timezone"] == "America/New_York"
     by_key = {(c["weekday"], c["hour"]) for c in out["cells"] if c["count"]}
     assert by_key == {(2, 10)}
+
+
+def test_more_timestamp_parsing_cases() -> None:
+    # 1. Under 11 characters
+    out1 = compute_heatmap([_rec("not-a-date")])
+    assert out1["total_samples"] == 0
+
+    # 2. ValueError when parsing invalid datetime with timezone suffix
+    out2 = compute_heatmap([_rec("2026-99-99T99:99:99Z")])
+    assert out2["total_samples"] == 0
+
+    # 3. Lowercase 'z' suffix
+    out3 = compute_heatmap([_rec("2026-05-27T14:00:00z")])
+    assert out3["total_samples"] == 1
+
+    # 4. Positive offset suffix '+'
+    out4 = compute_heatmap([_rec("2026-05-27T14:00:00+02:00")])
+    assert out4["total_samples"] == 1
+
+    # 5. Negative offset suffix '-'
+    out5 = compute_heatmap([_rec("2026-05-27T14:00:00-05:00")])
+    assert out5["total_samples"] == 1

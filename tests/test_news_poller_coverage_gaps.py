@@ -609,3 +609,64 @@ async def test_news_poller_client_none_and_has_max_size_param():
     with patch("catchem.news_poller.fetch_feed_result", return_value=mock_res) as mock_fetch:
         await poller.poll_now()
         mock_fetch.assert_called_once()
+
+
+def test_feed_providers_registration_and_assembly():
+    from catchem.news_poller import (
+        _FEED_PROVIDERS,
+        DEFAULT_FEEDS,
+        FeedSpec,
+        assemble_feeds,
+        register_feed_provider,
+    )
+
+    # Backup the original providers list
+    original_providers = list(_FEED_PROVIDERS)
+    _FEED_PROVIDERS.clear()
+
+    try:
+        # Test decorator registration
+        @register_feed_provider
+        def my_provider():
+            return [
+                FeedSpec("provider-feed", "https://provider.com/rss", "provider.com"),
+                FeedSpec("duplicate-name-feed", "https://provider-dup.com/rss", "provider.com"),
+            ]
+
+        assert my_provider in _FEED_PROVIDERS
+
+        # Test another provider with duplicate name, duplicate URL, and an error
+        @register_feed_provider
+        def bad_and_duplicate_provider():
+            return [
+                FeedSpec("duplicate-name-feed", "https://another-url.com/rss", "another.com"),  # name collision
+                FeedSpec("some-other-feed", DEFAULT_FEEDS[0].url, "default-dup.com"),  # url collision
+            ]
+
+        @register_feed_provider
+        def raising_provider():
+            raise ValueError("bad provider")
+
+        # Assemble and verify results
+        feeds = assemble_feeds()
+
+        # Verify default feeds are present
+        assert all(f.name in {x.name for x in feeds} for f in DEFAULT_FEEDS)
+
+        # my_provider's unique feed should be there
+        assert any(f.name == "provider-feed" for f in feeds)
+        assert any(f.name == "duplicate-name-feed" for f in feeds)
+
+        # The duplicates should have been rejected (not present or original takes precedence)
+        # "duplicate-name-feed" should have the URL of my_provider, not bad_and_duplicate_provider
+        dup_feed = next(f for f in feeds if f.name == "duplicate-name-feed")
+        assert dup_feed.url == "https://provider-dup.com/rss"
+
+        # The url duplicate ("some-other-feed" which has the first default feed's URL) should not be admitted
+        assert not any(f.name == "some-other-feed" for f in feeds)
+
+    finally:
+        # Restore the original providers list
+        _FEED_PROVIDERS.clear()
+        _FEED_PROVIDERS.extend(original_providers)
+

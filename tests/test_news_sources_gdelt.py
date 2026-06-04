@@ -180,3 +180,36 @@ def test_gdelt_edge_cases() -> None:
     assert items2[0].title == "https://ok.example.com/x"
     assert items2[1].title == "https://ok.example.com/y"
 
+
+def test_gdelt_timestamp_parsing_optimized() -> None:
+    from catchem.news_sources.gdelt import _parse_seendate, _parse_seendate_cached
+
+    # Clear cache first to ensure predictable behavior
+    _parse_seendate_cached.cache_clear()
+
+    # Case 1: Standard format (valid)
+    t1 = _parse_seendate("20260528T143000Z")
+    assert t1 == datetime(2026, 5, 28, 14, 30, 0, tzinfo=UTC)
+
+    # Cache hit
+    info_before = _parse_seendate_cached.cache_info()
+    t1_cached = _parse_seendate("20260528T143000Z")
+    info_after = _parse_seendate_cached.cache_info()
+    assert t1 == t1_cached
+    assert info_after.hits == info_before.hits + 1
+
+    # Case 2: Standard format length/structure but invalid numbers
+    # Should fail int conversion or datetime bounds, fallback to strptime (which also fails), and return now(UTC)
+    t2 = _parse_seendate("20269928T143000Z")
+    assert isinstance(t2, datetime)
+    assert t2.tzinfo == UTC
+
+    # Case 3: Non-standard format (different length/structure)
+    t3 = _parse_seendate("not-a-real-date")
+    assert isinstance(t3, datetime)
+
+    # Case 4: Non-string input should bypass cache and return now(UTC)
+    t4 = _parse_seendate(123456789)
+    assert isinstance(t4, datetime)
+
+

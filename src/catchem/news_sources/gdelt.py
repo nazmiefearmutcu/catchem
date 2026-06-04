@@ -25,6 +25,7 @@ from __future__ import annotations
 import html
 import json
 from datetime import UTC, datetime
+from functools import lru_cache
 from urllib.parse import quote_plus, urlparse
 
 from ..news_poller import (
@@ -66,6 +67,28 @@ def _build_url(query: str) -> str:
     )
 
 
+@lru_cache(maxsize=2048)
+def _parse_seendate_cached(value: str) -> datetime | None:
+    """Cached fast-path parser for GDELT ``YYYYMMDDTHHMMSSZ`` format."""
+    if len(value) == 16 and value[8] == "T" and value[15] == "Z":
+        try:
+            return datetime(
+                int(value[0:4]),
+                int(value[4:6]),
+                int(value[6:8]),
+                int(value[9:11]),
+                int(value[11:13]),
+                int(value[13:15]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+    try:
+        return datetime.strptime(value, _GDELT_TS_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
 def _parse_seendate(value: object) -> datetime:
     """Parse GDELT's ``YYYYMMDDTHHMMSSZ`` stamp → tz-aware UTC datetime.
 
@@ -73,10 +96,9 @@ def _parse_seendate(value: object) -> datetime:
     record never poisons the whole batch.
     """
     if isinstance(value, str) and value:
-        try:
-            return datetime.strptime(value, _GDELT_TS_FORMAT).replace(tzinfo=UTC)
-        except ValueError:
-            pass
+        parsed = _parse_seendate_cached(value)
+        if parsed is not None:
+            return parsed
     return datetime.now(UTC)
 
 

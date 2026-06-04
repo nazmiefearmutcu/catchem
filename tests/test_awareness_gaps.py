@@ -288,3 +288,41 @@ def test_regex_cache() -> None:
     stats = _get_word_boundary_pattern.cache_info()
     assert stats.hits == 1
     assert stats.misses == 1
+
+
+def test_coerce_dt_caching_and_fast_paths() -> None:
+    from catchem.awareness_gaps import _coerce_dt, _coerce_dt_cached
+
+    _coerce_dt_cached.cache_clear()
+
+    # 1. Test 20-char format
+    dt1 = _coerce_dt("2026-05-29T12:00:00Z")
+    assert dt1 is not None
+    assert dt1.year == 2026
+    assert dt1.month == 5
+    assert dt1.day == 29
+    assert dt1.hour == 12
+    assert dt1.minute == 0
+    assert dt1.second == 0
+
+    # Test cache hit
+    dt2 = _coerce_dt("2026-05-29T12:00:00Z")
+    assert dt1 == dt2
+    stats = _coerce_dt_cached.cache_info()
+    assert stats.hits == 1
+
+    # 2. Test 20-char format ValueError / invalid date
+    assert _coerce_dt("2026-13-29T12:00:00Z") is None
+
+    # 3. Test 24-char format
+    dt3 = _coerce_dt("2026-05-29T12:00:00.123Z")
+    assert dt3 is not None
+    assert dt3.microsecond == 123000
+
+    # 4. Test 24-char format ValueError / invalid date
+    assert _coerce_dt("2026-13-29T12:00:00.123Z") is None
+
+    # 5. Test non-20/24 Z-ending fallback parsing
+    dt4 = _coerce_dt("2026-05-29T12:00:00.1Z")
+    assert dt4 is not None
+    assert dt4.microsecond == 100000

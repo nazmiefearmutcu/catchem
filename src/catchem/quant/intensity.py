@@ -79,15 +79,17 @@ def _coerce_float(value: Any) -> float:
     flags to silently coerce to 1.0.
     """
 
-    if value is None or isinstance(value, bool):
+    t = type(value)
+    if t is float:
+        return value if math.isfinite(value) else 0.0
+    if t is int:
+        return float(value)
+    if value is None or t is bool:
         return 0.0
     try:
         f = float(value)
     except (TypeError, ValueError):
         return 0.0
-    # Drop NaN/Inf like every sibling quant module — a non-finite score would
-    # propagate through `relevance * abs(sentiment)` into the aggregate and
-    # 500 the /api/quant/intensity panel via the allow_nan=False renderer.
     if not math.isfinite(f):
         return 0.0
     return f
@@ -103,7 +105,12 @@ def _finite_or_none(value: Any) -> float | None:
     crash Starlette's JSONResponse renderer (allow_nan=False) with HTTP 500.
     Mirrors schemas._finite_sentiment.
     """
-    if value is None or isinstance(value, bool):
+    t = type(value)
+    if t is float:
+        return value if math.isfinite(value) else None
+    if t is int:
+        return float(value)
+    if value is None or t is bool:
         return None
     try:
         f = float(value)
@@ -123,9 +130,12 @@ def _record_intensity(record: dict) -> float:
     positive one). Returns 0.0 for any record missing one half.
     """
 
-    relevance = _coerce_float(record.get("finance_relevance_score"))
-    sentiment = _coerce_float(record.get("sentiment_score"))
-    return relevance * abs(sentiment)
+    relevance = record.get("finance_relevance_score")
+    sentiment = record.get("sentiment_score")
+    if type(relevance) is float and type(sentiment) is float:
+        if math.isfinite(relevance) and math.isfinite(sentiment):
+            return relevance * abs(sentiment)
+    return _coerce_float(relevance) * abs(_coerce_float(sentiment))
 
 
 def _build_top_records(
@@ -175,12 +185,24 @@ def compute_overall(records: list[dict]) -> IntensityBucket:
         )
 
     pairs: list[tuple[float, dict]] = []
+    total_intensity = 0.0
+    max_intensity = 0.0
+    count_high = 0
+    sample_size = 0
+
     for r in records:
         if not isinstance(r, dict):
             continue
-        pairs.append((_record_intensity(r), r))
+        intensity = _record_intensity(r)
+        total_intensity += intensity
+        if intensity > max_intensity:
+            max_intensity = intensity
+        if intensity > _HIGH_INTENSITY_CUTOFF:
+            count_high += 1
+        sample_size += 1
+        pairs.append((intensity, r))
 
-    if not pairs:
+    if sample_size == 0:
         return IntensityBucket(
             scope="overall",
             sample_size=0,
@@ -190,16 +212,13 @@ def compute_overall(records: list[dict]) -> IntensityBucket:
             top_records=[],
         )
 
-    intensities = [p[0] for p in pairs]
-    mean = sum(intensities) / len(intensities)
-    max_i = max(intensities)
-    high = sum(1 for i in intensities if i > _HIGH_INTENSITY_CUTOFF)
+    mean = total_intensity / sample_size
     return IntensityBucket(
         scope="overall",
-        sample_size=len(pairs),
+        sample_size=sample_size,
         mean_intensity=mean,
-        max_intensity=max_i,
-        count_high_intensity=high,
+        max_intensity=max_intensity,
+        count_high_intensity=count_high,
         top_records=_build_top_records(pairs),
     )
 
@@ -224,28 +243,32 @@ def compute_by_scope(
     buckets: dict[str, list[tuple[float, dict]]] = defaultdict(list)
     scope_label = _SCOPE_LABELS.get(scope_key, scope_key)
 
-    for r in records or []:
+    for r in records:
         if not isinstance(r, dict):
             continue
         intensity = _record_intensity(r)
-        scope_value = r.get(scope_key) or []
+        scope_value = r.get(scope_key)
         if isinstance(scope_value, list):
-            iterable: Iterable[Any] = scope_value
-        else:
-            iterable = [scope_value]
-        for s in iterable:
-            if not s or not isinstance(s, str):
-                continue
-            buckets[s].append((intensity, r))
+            for s in scope_value:
+                if s and isinstance(s, str):
+                    buckets[s].append((intensity, r))
+        elif scope_value and isinstance(scope_value, str):
+            buckets[scope_value].append((intensity, r))
 
     results: list[IntensityBucket] = []
     for bucket_name, items in buckets.items():
         if not items:
             continue
-        intensities = [i for i, _ in items]
-        mean = sum(intensities) / len(intensities)
-        max_i = max(intensities)
-        high = sum(1 for i in intensities if i > _HIGH_INTENSITY_CUTOFF)
+        total_intensity = 0.0
+        max_i = items[0][0]
+        high = 0
+        for intensity, _ in items:
+            total_intensity += intensity
+            if intensity > max_i:
+                max_i = intensity
+            if intensity > _HIGH_INTENSITY_CUTOFF:
+                high += 1
+        mean = total_intensity / len(items)
         results.append(
             IntensityBucket(
                 scope=f"{scope_label}:{bucket_name}",

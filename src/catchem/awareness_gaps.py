@@ -66,6 +66,70 @@ _SYMBOL_FIELDS: tuple[str, ...] = (
 _TS_FIELDS: tuple[str, ...] = ("published_ts", "created_at", "timestamp", "ts")
 
 
+@functools.lru_cache(maxsize=8192)
+def _coerce_dt_cached(raw: str) -> datetime | None:
+    """Cached fast-path parser for stripped ISO-8601 strings."""
+    val_len = len(raw)
+
+    # 20-char Z-ending: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SSz
+    if (
+        val_len == 20
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and (raw[10] == "T" or raw[10] == "t")
+        and raw[13] == ":"
+        and raw[16] == ":"
+        and (raw[19] == "Z" or raw[19] == "z")
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    # 24-char Z-ending: YYYY-MM-DDTHH:MM:SS.mmmZ or YYYY-MM-DDTHH:MM:SS.mmmz
+    if (
+        val_len == 24
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and (raw[10] == "T" or raw[10] == "t")
+        and raw[13] == ":"
+        and raw[16] == ":"
+        and raw[19] == "."
+        and (raw[23] == "Z" or raw[23] == "z")
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                int(raw[20:23]) * 1000,
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    # Fallback to datetime.fromisoformat
+    normalized = raw
+    if normalized.endswith(("Z", "z")):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 def _coerce_dt(value: Any) -> datetime | None:
     """Best-effort parse of a record timestamp into an aware ``datetime``.
 
@@ -82,13 +146,7 @@ def _coerce_dt(value: Any) -> datetime | None:
         raw = value.strip()
         if not raw:
             return None
-        if raw.endswith(("Z", "z")):
-            raw = raw[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw)
-        except ValueError:
-            return None
-        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+        return _coerce_dt_cached(raw)
     return None
 
 

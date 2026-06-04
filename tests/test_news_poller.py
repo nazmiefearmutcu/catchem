@@ -479,3 +479,23 @@ def test_poll_now_runs_exactly_one_tick_without_double_polling() -> None:
 
     assert result == 7, "poll_now returns its own tick's ingested count"
     assert calls["n"] == 1, "exactly one tick per poll_now call — no double poll"
+
+
+def test_parse_ts_cache() -> None:
+    from catchem.news_poller import _parse_ts_cached
+
+    _parse_ts_cached.cache_clear()
+
+    val = "Wed, 15 May 2026 14:00:00 +0000"
+    dt1 = _parse_ts_cached(val)
+
+    info = _parse_ts_cached.cache_info()
+    assert info.hits == 0
+    assert info.misses == 1
+
+    dt2 = _parse_ts_cached(val)
+    assert dt1 == dt2
+
+    info2 = _parse_ts_cached.cache_info()
+    assert info2.hits == 1
+    assert info2.misses == 1

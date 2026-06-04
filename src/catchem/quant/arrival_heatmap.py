@@ -21,6 +21,7 @@ Design notes
 
 from __future__ import annotations
 
+import functools
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,14 +38,12 @@ class HeatmapCell:
     """One cell of the 24x7 grid."""
 
     weekday: int  # 0 = Monday, 6 = Sunday
-    hour: int     # 0..23 (local hour in the requested timezone)
+    hour: int  # 0..23 (local hour in the requested timezone)
     count: int
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse a record timestamp string; return ``None`` on any error."""
-    if not isinstance(value, str) or not value:
-        return None
+@functools.lru_cache(maxsize=8192)
+def _parse_ts_cached(value: str) -> datetime | None:
     try:
         ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, TypeError):
@@ -52,6 +51,28 @@ def _parse_ts(value: Any) -> datetime | None:
     if ts.tzinfo is None:
         return None
     return ts
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse a record timestamp string; return ``None`` on any error."""
+    if not isinstance(value, str) or not value:
+        return None
+    return _parse_ts_cached(value)
+
+
+@functools.lru_cache(maxsize=8192)
+def _get_weekday_hour(ts: datetime, tz: ZoneInfo) -> tuple[int, int]:
+    local_ts = ts.astimezone(tz)
+    return local_ts.weekday(), local_ts.hour
+
+
+@functools.lru_cache(maxsize=64)
+def _get_zone_info(timezone_name: str) -> tuple[ZoneInfo, str]:
+    try:
+        tz = ZoneInfo(timezone_name)
+        return tz, timezone_name
+    except Exception:
+        return ET, "America/New_York"
 
 
 def compute_heatmap(
@@ -81,43 +102,41 @@ def compute_heatmap(
         ``timezone``      — the resolved tz name actually used.
         ``weekday_labels``— ``["Mon", ..., "Sun"]`` for UI Y-axis.
     """
-    try:
-        tz = ZoneInfo(timezone)
-        resolved_tz = timezone
-    except Exception:
-        tz = ET
-        resolved_tz = "America/New_York"
+    if not isinstance(timezone, str):
+        timezone_str = "America/New_York"
+    else:
+        timezone_str = timezone
+
+    tz, resolved_tz = _get_zone_info(timezone_str)
 
     grid: dict[tuple[int, int], int] = defaultdict(int)
 
     for r in records:
-        ts = _parse_ts(r.get("published_ts")) or _parse_ts(r.get("created_at"))
+        ts = _parse_ts(r.get("published_ts"))
+        if ts is None:
+            ts = _parse_ts(r.get("created_at"))
         if ts is None:
             continue
-        local_ts = ts.astimezone(tz)
-        grid[(local_ts.weekday(), local_ts.hour)] += 1
+        w, h = _get_weekday_hour(ts, tz)
+        grid[(w, h)] += 1
 
-    cells: list[dict] = []
-    for weekday in range(7):
-        for hour in range(24):
-            cells.append(
-                {
-                    "weekday": weekday,
-                    "hour": hour,
-                    "count": grid.get((weekday, hour), 0),
-                }
-            )
+    cells = [
+        {
+            "weekday": weekday,
+            "hour": hour,
+            "count": grid.get((weekday, hour), 0),
+        }
+        for weekday in range(7)
+        for hour in range(24)
+    ]
 
-    max_count = max((c["count"] for c in cells), default=0)
-    if max_count > 0:
-        peak_cells = [c for c in cells if c["count"] == max_count]
-    else:
-        peak_cells = []
+    max_count = max(grid.values(), default=0)
+    peak_cells = [c for c in cells if c["count"] == max_count] if max_count > 0 else []
 
     return {
         "cells": cells,
         "max_count": max_count,
-        "total_samples": sum(c["count"] for c in cells),
+        "total_samples": sum(grid.values()),
         "peak_cells": peak_cells[:5],
         "timezone": resolved_tz,
         "weekday_labels": list(WEEKDAY_LABELS),

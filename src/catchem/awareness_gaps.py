@@ -37,11 +37,19 @@ Output shape (stable contract)::
 
 from __future__ import annotations
 
+import functools
 import re
 from datetime import UTC, datetime
 from typing import Any
 
 __all__ = ["find_coverage_gaps"]
+
+
+@functools.lru_cache(maxsize=4096)
+def _get_word_boundary_pattern(term: str) -> re.Pattern[str]:
+    """Compile and cache regex word boundary pattern for a term."""
+    return re.compile(rf"\b{re.escape(term)}\b")
+
 
 # Record fields scanned for free-text term matches (substring, case-insensitive).
 _TEXT_FIELDS: tuple[str, ...] = ("title", "text", "text_excerpt", "summary", "body")
@@ -194,9 +202,7 @@ def find_coverage_gaps(
     # restores the module's documented exact-symbol contract for the free-text
     # branch while still catching multi-word keyword terms. The exact
     # set-membership test against the symbol fields is kept unchanged.
-    text_pat: dict[str, re.Pattern[str]] = {
-        lc: re.compile(rf"\b{re.escape(lc)}\b") for lc in term_lc
-    }
+    text_pat: dict[str, re.Pattern[str]] = {lc: _get_word_boundary_pattern(lc) for lc in term_lc}
 
     for record in records or []:
         if not isinstance(record, dict):

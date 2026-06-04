@@ -78,7 +78,7 @@ def test_window_boundary_inclusive_and_exclusive() -> None:
     window = 3600.0
     records = [
         _rec("AAPL exactly on edge", age_seconds=3600.0),  # == window → in
-        _rec("MSFT just outside", age_seconds=3600.1),      # > window → out
+        _rec("MSFT just outside", age_seconds=3600.1),  # > window → out
     ]
     out = find_coverage_gaps(records, ["AAPL", "MSFT"], window_seconds=window, now=NOW)
     assert [c["term"] for c in out["covered"]] == ["AAPL"]
@@ -165,10 +165,10 @@ def test_empty_records_all_terms_are_gaps() -> None:
 
 def test_malformed_records_do_not_raise() -> None:
     records = [
-        None,                                   # not a dict
-        {"title": None, "symbols": None},       # null fields
-        {"symbols": [None, 123, "AAPL"]},       # mixed junk list, no ts → ignored
-        _rec("AAPL real", age_seconds=5.0),     # the one real hit
+        None,  # not a dict
+        {"title": None, "symbols": None},  # null fields
+        {"symbols": [None, 123, "AAPL"]},  # mixed junk list, no ts → ignored
+        _rec("AAPL real", age_seconds=5.0),  # the one real hit
         {"title": "MSFT", "published_ts": "not-a-date"},  # junk ts → ignored
     ]
     out = find_coverage_gaps(records, ["AAPL", "MSFT"], window_seconds=86400.0, now=NOW)
@@ -231,7 +231,11 @@ def test_symbols_field_matching_edge_cases() -> None:
     assert out_empty["covered"] == []
 
     # 2. list/tuple/set with non-string and empty string items
-    rec_junk = {"title": "Nothing", "published_ts": NOW.isoformat(), "symbols": [123, None, "", "   ", "AAPL"]}
+    rec_junk = {
+        "title": "Nothing",
+        "published_ts": NOW.isoformat(),
+        "symbols": [123, None, "", "   ", "AAPL"],
+    }
     out = find_coverage_gaps([rec_junk], ["AAPL"], now=NOW)
     assert len(out["covered"]) == 1
 
@@ -252,7 +256,9 @@ def test_now_parameter_omitted_defaults_to_utcnow() -> None:
 
 def test_window_seconds_invalid_coercion() -> None:
     # window_seconds is a value that cannot be coerced to float
-    out = find_coverage_gaps([_rec("AAPL", age_seconds=50.0)], ["AAPL"], window_seconds="not-a-float", now=NOW)
+    out = find_coverage_gaps(
+        [_rec("AAPL", age_seconds=50.0)], ["AAPL"], window_seconds="not-a-float", now=NOW
+    )
     assert len(out["covered"]) == 1
 
 
@@ -271,3 +277,14 @@ def test_record_with_no_searchable_content() -> None:
     assert out["covered"] == []
     assert out["gaps"] == ["AAPL"]
 
+
+def test_regex_cache() -> None:
+    from catchem.awareness_gaps import _get_word_boundary_pattern
+
+    _get_word_boundary_pattern.cache_clear()
+    pat1 = _get_word_boundary_pattern("cachetest")
+    pat2 = _get_word_boundary_pattern("cachetest")
+    assert pat1 is pat2
+    stats = _get_word_boundary_pattern.cache_info()
+    assert stats.hits == 1
+    assert stats.misses == 1

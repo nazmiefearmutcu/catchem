@@ -643,3 +643,43 @@ def test_cluster_records_last_in_cluster_none() -> None:
     assert frozenset(["r_no_ts"]) in cluster_caps
     assert frozenset(["r_with_ts"]) in cluster_caps
     assert frozenset(["r_no_ts_unrelated"]) in cluster_caps
+
+
+def test_parse_ts_caching_and_fast_paths() -> None:
+    from catchem.quant.event_clustering import _parse_ts, _parse_ts_cached
+
+    # 1. Test invalid / edge inputs
+    assert _parse_ts(None) is None
+    assert _parse_ts(123) is None
+    assert _parse_ts("") is None
+    assert _parse_ts("   ") is None
+
+    # 2. Test datetime inputs
+    dt_naive = datetime(2026, 5, 27, 12, 0)
+    dt_utc = _parse_ts(dt_naive)
+    assert dt_utc.tzinfo == UTC
+
+    dt_tz = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    assert _parse_ts(dt_tz) == dt_tz
+
+    # 3. Test ISO string formats
+    iso_str_z = "2026-05-27T12:00:00Z"
+    dt_parsed = _parse_ts(iso_str_z)
+    assert dt_parsed.tzinfo == UTC
+    assert dt_parsed.hour == 12
+
+    # 4. Test naive ISO string
+    iso_str_naive = "2026-05-27T12:00:00"
+    dt_parsed_naive = _parse_ts(iso_str_naive)
+    assert dt_parsed_naive.tzinfo == UTC
+
+    # 5. Test invalid ISO string
+    assert _parse_ts("invalid-date") is None
+
+    # 6. Test cache hit
+    _parse_ts_cached.cache_clear()
+    assert _parse_ts_cached.cache_info().hits == 0
+    _parse_ts("2026-05-27T12:00:00Z")
+    assert _parse_ts_cached.cache_info().misses == 1
+    _parse_ts("2026-05-27T12:00:00Z")
+    assert _parse_ts_cached.cache_info().hits == 1

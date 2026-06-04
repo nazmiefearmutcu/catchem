@@ -24,6 +24,7 @@ cluster, so two runs on the same data yield identical IDs).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import re
 from collections import Counter
@@ -135,6 +136,21 @@ def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
     return inter / union
 
 
+@functools.lru_cache(maxsize=8192)
+def _parse_ts_cached(s: str) -> datetime | None:
+    """Cached fast-path parser for ISO-8601 strings."""
+    # Python 3.11+ handles `Z` natively only since 3.11; be defensive.
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
+
 def _parse_ts(value: Any) -> datetime | None:
     """Parse an ISO-8601 string; returns None on failure / missing."""
     if value is None:
@@ -147,16 +163,7 @@ def _parse_ts(value: Any) -> datetime | None:
     s = value.strip()
     if not s:
         return None
-    # Python 3.11+ handles `Z` natively only since 3.11; be defensive.
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(s)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt
+    return _parse_ts_cached(s)
 
 
 def _record_ts(record: dict) -> datetime | None:

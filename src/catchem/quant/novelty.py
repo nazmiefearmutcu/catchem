@@ -96,9 +96,7 @@ def _tokenize(title: str | None, text_excerpt: str | None) -> frozenset[str]:
         return frozenset()
     blob = " ".join(parts).lower()
     raw = _TOKEN_SPLIT_RE.split(blob)
-    return frozenset(
-        tok for tok in raw if len(tok) >= _MIN_TOKEN_LEN and tok not in _STOPWORDS
-    )
+    return frozenset(tok for tok in raw if len(tok) >= _MIN_TOKEN_LEN and tok not in _STOPWORDS)
 
 
 def _to_string_set(values: object) -> frozenset[str]:
@@ -121,8 +119,10 @@ def _to_string_set(values: object) -> frozenset[str]:
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
     if not a and not b:
         return 0.0
+    a_len = len(a)
+    b_len = len(b)
     inter = len(a & b)
-    union = len(a | b)
+    union = a_len + b_len - inter
     if union == 0:
         return 0.0
     return inter / union
@@ -138,26 +138,49 @@ class _Features:
     symbols: frozenset[str]
     reasons: frozenset[str]
     classes: frozenset[str]
+    tokens_len: int
+    symbols_len: int
+    reasons_len: int
+    classes_len: int
 
 
 def _features(record: dict) -> _Features:
+    tokens = _tokenize(record.get("title"), record.get("text_excerpt"))
+    symbols = _to_string_set(record.get("candidate_symbols"))
+    reasons = _to_string_set(record.get("impact_reason_codes"))
+    classes = _to_string_set(record.get("asset_classes"))
     return _Features(
         capture_id=str(record.get("capture_id") or ""),
         title=record.get("title"),
-        tokens=_tokenize(record.get("title"), record.get("text_excerpt")),
-        symbols=_to_string_set(record.get("candidate_symbols")),
-        reasons=_to_string_set(record.get("impact_reason_codes")),
-        classes=_to_string_set(record.get("asset_classes")),
+        tokens=tokens,
+        symbols=symbols,
+        reasons=reasons,
+        classes=classes,
+        tokens_len=len(tokens),
+        symbols_len=len(symbols),
+        reasons_len=len(reasons),
+        classes_len=len(classes),
     )
 
 
 def _similarity(a: _Features, b: _Features) -> float:
-    return (
-        _W_TOKENS * _jaccard(a.tokens, b.tokens)
-        + _W_SYMBOLS * _jaccard(a.symbols, b.symbols)
-        + _W_REASONS * _jaccard(a.reasons, b.reasons)
-        + _W_CLASSES * _jaccard(a.classes, b.classes)
-    )
+    t_inter = len(a.tokens & b.tokens)
+    t_union = a.tokens_len + b.tokens_len - t_inter
+    t_jac = t_inter / t_union if t_union > 0 else 0.0
+
+    s_inter = len(a.symbols & b.symbols)
+    s_union = a.symbols_len + b.symbols_len - s_inter
+    s_jac = s_inter / s_union if s_union > 0 else 0.0
+
+    r_inter = len(a.reasons & b.reasons)
+    r_union = a.reasons_len + b.reasons_len - r_inter
+    r_jac = r_inter / r_union if r_union > 0 else 0.0
+
+    c_inter = len(a.classes & b.classes)
+    c_union = a.classes_len + b.classes_len - c_inter
+    c_jac = c_inter / c_union if c_union > 0 else 0.0
+
+    return _W_TOKENS * t_jac + _W_SYMBOLS * s_jac + _W_REASONS * r_jac + _W_CLASSES * c_jac
 
 
 def _explain(max_sim: float, nearest_title: str | None, corpus_empty: bool) -> str:
@@ -231,8 +254,7 @@ def compute_novelty(record: dict, corpus: list[dict]) -> NoveltyResult:
     self_dropped = False
     for r in corpus:
         if not self_dropped and (
-            r is record
-            or (target.capture_id and str(r.get("capture_id") or "") == target.capture_id)
+            r is record or (target.capture_id and str(r.get("capture_id") or "") == target.capture_id)
         ):
             self_dropped = True
             continue
@@ -248,10 +270,46 @@ def score_corpus(corpus: list[dict]) -> list[NoveltyResult]:
     """
 
     feats = [_features(r) for r in corpus]
+    n = len(feats)
     results: list[NoveltyResult] = []
-    for i, target in enumerate(feats):
-        others = [f for j, f in enumerate(feats) if j != i]
-        results.append(_result_from(target, others))
+    for i in range(n):
+        target = feats[i]
+        best_sim = -1.0
+        best: _Features | None = None
+        for j in range(n):
+            if j == i:
+                continue
+            cand = feats[j]
+            sim = _similarity(target, cand)
+            if sim > best_sim:
+                best_sim = sim
+                best = cand
+
+        if best is None:
+            results.append(
+                NoveltyResult(
+                    capture_id=target.capture_id,
+                    novelty_score=1.0,
+                    max_similarity_to_corpus=0.0,
+                    nearest_capture_id=None,
+                    nearest_title=None,
+                    matched_symbols=(),
+                    explanation=_explain(0.0, None, corpus_empty=True),
+                )
+            )
+        else:
+            matched = tuple(sorted(target.symbols & best.symbols))
+            results.append(
+                NoveltyResult(
+                    capture_id=target.capture_id,
+                    novelty_score=1.0 - best_sim,
+                    max_similarity_to_corpus=best_sim,
+                    nearest_capture_id=best.capture_id or None,
+                    nearest_title=best.title,
+                    matched_symbols=matched,
+                    explanation=_explain(best_sim, best.title, corpus_empty=False),
+                )
+            )
     return results
 
 

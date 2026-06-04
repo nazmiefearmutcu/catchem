@@ -312,9 +312,7 @@ def test_to_string_set_skips_none_lowers_and_strips() -> None:
 
     from catchem.quant.novelty import _to_string_set  # type: ignore[attr-defined]
 
-    assert _to_string_set(["AAPL", None, "  msft ", ""]) == frozenset(
-        {"aapl", "msft"}
-    )
+    assert _to_string_set(["AAPL", None, "  msft ", ""]) == frozenset({"aapl", "msft"})
 
 
 def test_jaccard_empty_sets_is_zero() -> None:
@@ -330,9 +328,7 @@ def test_jaccard_identical_and_disjoint() -> None:
 
     assert _jaccard(frozenset({"a", "b"}), frozenset({"a", "b"})) == 1.0
     assert _jaccard(frozenset({"a"}), frozenset({"b"})) == 0.0
-    assert _jaccard(frozenset({"a", "b"}), frozenset({"b", "c"})) == pytest.approx(
-        1 / 3
-    )
+    assert _jaccard(frozenset({"a", "b"}), frozenset({"b", "c"})) == pytest.approx(1 / 3)
 
 
 def test_explain_low_overlap_band() -> None:
@@ -340,10 +336,7 @@ def test_explain_low_overlap_band() -> None:
 
     from catchem.quant.novelty import _explain  # type: ignore[attr-defined]
 
-    assert (
-        _explain(0.30, "Some Title", corpus_empty=False)
-        == "low overlap with prior coverage"
-    )
+    assert _explain(0.30, "Some Title", corpus_empty=False) == "low overlap with prior coverage"
 
 
 def test_explain_buckets_full_ladder() -> None:
@@ -354,9 +347,7 @@ def test_explain_buckets_full_ladder() -> None:
     assert _explain(0.0, None, corpus_empty=True) == "first of kind in corpus"
     assert _explain(0.05, "T", corpus_empty=False) == "first of kind in corpus"
     assert _explain(0.90, "T", corpus_empty=False) == "near-duplicate of T"
-    assert (
-        _explain(0.60, "T", corpus_empty=False) == "shares symbols + theme with T"
-    )
+    assert _explain(0.60, "T", corpus_empty=False) == "shares symbols + theme with T"
     # Untitled nearest record falls back to a stable label.
     assert _explain(0.90, None, corpus_empty=False) == "near-duplicate of untitled record"
 
@@ -398,14 +389,32 @@ def test_jaccard_union_zero_coverage() -> None:
     class FakeSet:
         def __init__(self, is_empty: bool) -> None:
             self.is_empty = is_empty
+
         def __bool__(self) -> bool:
             return not self.is_empty
+
         def __and__(self, other: FakeSet) -> FakeSet:
             return FakeSet(True)
+
         def __or__(self, other: FakeSet) -> FakeSet:
             return FakeSet(True)
+
         def __len__(self) -> int:
             return 0
 
     assert _jaccard(FakeSet(False), FakeSet(False)) == 0.0
 
+
+def test_score_corpus_single_element() -> None:
+    corpus = [_rec("only-one", title="Unique Title", text="Unique content")]
+    results = score_corpus(corpus)
+    assert len(results) == 1
+    assert results[0].capture_id == "only-one"
+    assert results[0].novelty_score == 1.0
+    assert results[0].max_similarity_to_corpus == 0.0
+    assert results[0].nearest_capture_id is None
+    assert results[0].explanation == "first of kind in corpus"
+
+
+def test_score_corpus_empty() -> None:
+    assert score_corpus([]) == []

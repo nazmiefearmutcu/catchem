@@ -45,6 +45,7 @@ and extended with::
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from datetime import UTC, datetime
@@ -62,7 +63,17 @@ __all__ = ["enrich_holdings"]
 # blind-spot detector: free-text substring fields + exact-token symbol fields.
 
 
-def _symbol_matches(symbol_lc: str, text_blob: str, symbols: set[str]) -> bool:
+@functools.lru_cache(maxsize=1024)
+def _get_symbol_pattern(symbol_lc: str) -> re.Pattern:
+    return re.compile(rf"\b{re.escape(symbol_lc)}\b")
+
+
+def _symbol_matches(
+    symbol_lc: str,
+    text_blob: str,
+    symbols: set[str],
+    symbol_pattern: re.Pattern | None = None,
+) -> bool:
     """True when the (lower-cased) symbol appears in the record's surface.
 
     Word-boundary match against the free-text blob OR exact token match against
@@ -75,7 +86,8 @@ def _symbol_matches(symbol_lc: str, text_blob: str, symbols: set[str]) -> bool:
         return False
     if symbol_lc in symbols:
         return True
-    return bool(re.search(rf"\b{re.escape(symbol_lc)}\b", text_blob))
+    pattern = symbol_pattern or _get_symbol_pattern(symbol_lc)
+    return bool(pattern.search(text_blob))
 
 
 def _quote_payload(raw: Any) -> dict[str, Any] | None:
@@ -129,9 +141,7 @@ def _record_score(record: dict[str, Any]) -> float:
 
 # The four labels the sentiment model emits (mirrors schemas.SentimentLabel),
 # which is also exactly what the frontend's `sentiment_label` union accepts.
-_SENTIMENT_LABELS: frozenset[str] = frozenset(
-    {"positive", "negative", "neutral", "unknown"}
-)
+_SENTIMENT_LABELS: frozenset[str] = frozenset({"positive", "negative", "neutral", "unknown"})
 
 
 def _record_sentiment(record: dict[str, Any]) -> str | None:
@@ -214,9 +224,7 @@ def enrich_holdings(
         seen_terms.add(lc)
         watch_terms.append(sym)
 
-    coverage_report = find_coverage_gaps(
-        safe_records, watch_terms, window_seconds=window, now=now
-    )
+    coverage_report = find_coverage_gaps(safe_records, watch_terms, window_seconds=window, now=now)
     coverage_by_term: dict[str, dict[str, Any]] = {
         str(c["term"]).lower(): c for c in coverage_report.get("covered", [])
     }
@@ -233,6 +241,7 @@ def enrich_holdings(
         news_count = 0
         matches: list[dict[str, Any]] = []
         if sym_lc:
+            pattern = _get_symbol_pattern(sym_lc)
             for record in safe_records:
                 event_dt = _record_event_dt(record)
                 if event_dt is None:
@@ -243,7 +252,7 @@ def enrich_holdings(
                 text_blob, symbols = _record_haystack(record)
                 if not text_blob and not symbols:
                     continue
-                if not _symbol_matches(sym_lc, text_blob, symbols):
+                if not _symbol_matches(sym_lc, text_blob, symbols, pattern):
                     continue
                 news_count += 1
                 matches.append(record)

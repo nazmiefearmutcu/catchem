@@ -70,9 +70,7 @@ def test_recent_top_sorted_by_score_desc_and_capped_at_three() -> None:
         _rec(title="mid", symbols=["TSLA"], score=0.5, url="u3"),
         _rec(title="mid2", symbols=["TSLA"], score=0.4, url="u4"),
     ]
-    out = enrich_holdings(
-        [{"symbol": "TSLA"}], records=records, quote_fn=lambda s: None, now=NOW
-    )
+    out = enrich_holdings([{"symbol": "TSLA"}], records=records, quote_fn=lambda s: None, now=NOW)
     top = out[0]["recent_top"]
     assert len(top) == 3  # capped
     assert [t["score"] for t in top] == [0.9, 0.5, 0.4]  # desc
@@ -216,6 +214,7 @@ def test_coerce_float_rejects_non_finite() -> None:
 
 def test_symbol_matches_empty() -> None:
     from catchem.portfolio import _symbol_matches
+
     assert _symbol_matches("", "some text", set()) is False
 
 
@@ -272,3 +271,9 @@ def test_enrich_holdings_empty_record() -> None:
     assert len(out) == 1
     assert out[0]["recent_news_count"] == 0
 
+
+def test_symbol_matches_fallback_pattern() -> None:
+    from catchem.portfolio import _symbol_matches
+
+    assert _symbol_matches("aapl", "apple corp aapl text", {"AAPL"}, None) is True
+    assert _symbol_matches("aapl", "apple corp text", set(), None) is False

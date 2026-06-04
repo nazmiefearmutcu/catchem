@@ -83,14 +83,8 @@ class ZeroShotStub:
         # in the title do not double-count (title weight already covers it).
         from collections import Counter
 
-        title_words = Counter(
-            w for w in _WORD_RE.findall(title_l)
-            if w not in _STOP
-        )
-        body_words = Counter(
-            w for w in _WORD_RE.findall(body_l)
-            if w not in _STOP
-        )
+        title_words = Counter(w for w in _WORD_RE.findall(title_l) if w not in _STOP)
+        body_words = Counter(w for w in _WORD_RE.findall(body_l) if w not in _STOP)
         # Exclude title unigram overlap from body
         for w in title_words:
             if w in body_words:
@@ -154,9 +148,7 @@ class ZeroShotModel:
         out = self._pipe(text, candidate_labels=hyps, multi_label=True)
         # HF zero-shot pipeline contract: out["labels"] and out["scores"]
         # are guaranteed same length; strict=True surfaces a contract break.
-        scores_by_hyp = {
-            lbl: float(s) for lbl, s in zip(out["labels"], out["scores"], strict=True)
-        }
+        scores_by_hyp = {lbl: float(s) for lbl, s in zip(out["labels"], out["scores"], strict=True)}
         scores: dict[str, float] = {}
         for lid, hyp in self._candidate_hypotheses:
             scores[lid] = scores_by_hyp.get(hyp, 0.0)
@@ -174,18 +166,62 @@ def make_zero_shot(taxonomy: Taxonomy, model_name: str, use_stub: bool) -> ZeroS
 
 _STOP = frozenset(
     {
-        "this", "that", "the", "and", "for", "with", "about", "into", "from", "over",
-        "under", "between", "among", "what", "which", "who", "whom", "are", "was",
-        "were", "been", "being", "have", "has", "had", "they", "them", "their",
-        "there", "here", "when", "where", "while", "though", "than", "then", "such",
-        "some", "many", "much", "most", "more", "less", "few", "any", "all",
-        "primarily", "text", "report", "covers",
+        "this",
+        "that",
+        "the",
+        "and",
+        "for",
+        "with",
+        "about",
+        "into",
+        "from",
+        "over",
+        "under",
+        "between",
+        "among",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "are",
+        "was",
+        "were",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "they",
+        "them",
+        "their",
+        "there",
+        "here",
+        "when",
+        "where",
+        "while",
+        "though",
+        "than",
+        "then",
+        "such",
+        "some",
+        "many",
+        "much",
+        "most",
+        "more",
+        "less",
+        "few",
+        "any",
+        "all",
+        "primarily",
+        "text",
+        "report",
+        "covers",
     }
 )
 
 
 def _bigrams(text: str) -> list[str]:
-    tokens = [t.lower() for t in _WORD_RE.findall(text) if t.lower() not in _STOP]
+    tokens = [t for t in _WORD_RE.findall(text) if t not in _STOP]
     # itertools.pairwise yields (t0,t1), (t1,t2), ... so the last token has
     # no pair (intent: bigrams over consecutive token pairs).
     return [f"{a} {b}" for a, b in pairwise(tokens)]

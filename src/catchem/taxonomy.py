@@ -28,17 +28,22 @@ class Taxonomy:
     domain_priors: Mapping[str, float]
     source_type_priors: Mapping[str, float]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_asset_class_ids", tuple(d.id for d in self.asset_classes))
+        object.__setattr__(self, "_reason_code_ids", tuple(d.id for d in self.impact_reason_codes))
+        object.__setattr__(self, "_negative_class_ids", tuple(d.id for d in self.negative_class))
+
     @property
     def asset_class_ids(self) -> tuple[str, ...]:
-        return tuple(d.id for d in self.asset_classes)
+        return self._asset_class_ids
 
     @property
     def reason_code_ids(self) -> tuple[str, ...]:
-        return tuple(d.id for d in self.impact_reason_codes)
+        return self._reason_code_ids
 
     @property
     def negative_class_ids(self) -> tuple[str, ...]:
-        return tuple(d.id for d in self.negative_class)
+        return self._negative_class_ids
 
     def all_hypotheses(self) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -55,7 +60,9 @@ class Taxonomy:
     def source_type_prior(self, source_type: str | None) -> float:
         if not source_type:
             return float(self.source_type_priors.get("default", 0.4))
-        return float(self.source_type_priors.get(source_type.lower(), self.source_type_priors.get("default", 0.4)))
+        return float(
+            self.source_type_priors.get(source_type.lower(), self.source_type_priors.get("default", 0.4))
+        )
 
     def threshold(self, key: str, default: float = 0.30) -> float:
         return float(self.thresholds.get(key, default))

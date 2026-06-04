@@ -158,3 +158,16 @@ def test_aggregate_handles_missing_or_invalid_finance_relevance_score() -> None:
     assert by_session["open"].volume == 3
     assert by_session["open"].relevant_count == 1  # only the 0.9
     assert abs(by_session["open"].avg_score - (0.9 / 3)) < 1e-9
+
+
+def test_aggregate_relevance_score_types() -> None:
+    recs = [
+        {"published_ts": "2026-05-27T14:00:00Z", "finance_relevance_score": 1},
+        {"published_ts": "2026-05-27T14:05:00Z", "finance_relevance_score": "0.85"},
+        {"published_ts": "2026-05-27T14:10:00Z", "finance_relevance_score": []},
+    ]
+    out = aggregate_by_session(recs)
+    by_session = {b.session: b for b in out}
+    assert by_session["open"].volume == 3
+    assert by_session["open"].relevant_count == 2  # 1.0 and 0.85 are >= 0.5
+    assert abs(by_session["open"].avg_score - (1.85 / 3)) < 1e-9

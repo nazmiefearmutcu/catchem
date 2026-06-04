@@ -22,9 +22,9 @@ Design notes
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,7 @@ class SessionBucket:
     relevant_count: int
 
 
+@lru_cache(maxsize=1024)
 def classify_session(timestamp: datetime) -> str:
     """Classify a UTC-aware ``datetime`` into a market session label.
 
@@ -63,34 +64,28 @@ def classify_session(timestamp: datetime) -> str:
 
     # Weekend rules: full Saturday, Sunday before 18:00 ET (the futures
     # market is closed and news flow is non-market).
-    if weekday == 5:
-        return "weekend"
-    if weekday == 6 and et.hour < 18:
-        return "weekend"
+    if weekday >= 5:
+        if weekday == 5 or et.hour < 18:
+            return "weekend"
 
     minutes = et.hour * 60 + et.minute
-    if minutes < 4 * 60:
+    if minutes < 240:
         return "overnight"  # 00:00 - 04:00
-    if minutes < 9 * 60 + 30:
+    if minutes < 570:
         return "pre_open"  # 04:00 - 09:30
-    if minutes < 11 * 60:
+    if minutes < 660:
         return "open"  # 09:30 - 11:00
-    if minutes < 14 * 60:
+    if minutes < 840:
         return "lunch"  # 11:00 - 14:00
-    if minutes < 16 * 60 + 30:
+    if minutes < 990:
         return "close"  # 14:00 - 16:30
-    if minutes < 20 * 60:
+    if minutes < 1200:
         return "after_hours"  # 16:30 - 20:00
     return "overnight"  # 20:00 onwards
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse a record timestamp string; return ``None`` on any error.
-
-    Accepts both ``2026-05-27T12:34:56Z`` and ``+00:00`` forms.
-    """
-    if not isinstance(value, str) or not value:
-        return None
+@lru_cache(maxsize=1024)
+def _parse_ts_cached(value: str) -> datetime | None:
     try:
         ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, TypeError):
@@ -100,6 +95,16 @@ def _parse_ts(value: Any) -> datetime | None:
     return ts
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse a record timestamp string; return ``None`` on any error.
+
+    Accepts both ``2026-05-27T12:34:56Z`` and ``+00:00`` forms.
+    """
+    if type(value) is not str or not value:
+        return None
+    return _parse_ts_cached(value)
+
+
 def aggregate_by_session(records: list[dict]) -> list[SessionBucket]:
     """Group ``records`` by market session and compute volume / score stats.
 
@@ -107,41 +112,49 @@ def aggregate_by_session(records: list[dict]) -> list[SessionBucket]:
     the bucket is empty (volume=0, avg_score=0.0, relevant_count=0). The
     UI can rely on a stable ordering for the bar chart.
     """
-    buckets: dict[str, list[dict]] = defaultdict(list)
+    volumes = {s: 0 for s in SESSIONS}
+    total_scores = {s: 0.0 for s in SESSIONS}
+    relevant_counts = {s: 0 for s in SESSIONS}
 
     for r in records:
         ts = _parse_ts(r.get("published_ts")) or _parse_ts(r.get("created_at"))
         if ts is None:
             continue
         session = classify_session(ts)
-        buckets[session].append(r)
+
+        volumes[session] += 1
+
+        raw = r.get("finance_relevance_score")
+        if raw is not None:
+            t = type(raw)
+            if t is float:
+                val = raw
+            elif t is int:
+                val = float(raw)
+            elif isinstance(raw, str):
+                try:
+                    val = float(raw)
+                except ValueError:
+                    val = 0.0
+            else:
+                val = 0.0
+
+            total_scores[session] += val
+            if val >= 0.5:
+                relevant_counts[session] += 1
 
     result: list[SessionBucket] = []
     for session in SESSIONS:
-        items = buckets.get(session, [])
-        if not items:
+        vol = volumes[session]
+        if vol == 0:
+            result.append(SessionBucket(session=session, volume=0, avg_score=0.0, relevant_count=0))
+        else:
             result.append(
-                SessionBucket(session=session, volume=0, avg_score=0.0, relevant_count=0)
+                SessionBucket(
+                    session=session,
+                    volume=vol,
+                    avg_score=total_scores[session] / vol,
+                    relevant_count=relevant_counts[session],
+                )
             )
-            continue
-        scores: list[float] = []
-        for r in items:
-            raw = r.get("finance_relevance_score")
-            if raw is None:
-                scores.append(0.0)
-                continue
-            try:
-                scores.append(float(raw))
-            except (TypeError, ValueError):
-                scores.append(0.0)
-        relevant = sum(1 for s in scores if s >= 0.5)
-        avg = sum(scores) / len(scores) if scores else 0.0
-        result.append(
-            SessionBucket(
-                session=session,
-                volume=len(items),
-                avg_score=avg,
-                relevant_count=relevant,
-            )
-        )
     return result

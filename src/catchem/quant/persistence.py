@@ -21,11 +21,12 @@ Why useful:
 - Pairs naturally with sentiment_dispersion: persistent + high-dispersion
   scope = "ongoing debate", persistent + low-dispersion = "unanimous trend".
 """
+
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 UTC = ZoneInfo("UTC")
@@ -40,22 +41,22 @@ class PersistenceBucket:
     sample_titles: list[str]
 
 
-def _parse_day(ts_str: str | None) -> str | None:
-    """Return YYYY-MM-DD in UTC from an ISO timestamp; None if unparseable."""
-    if not ts_str:
-        return None
+@lru_cache(maxsize=1024)
+def _parse_day_cached(ts_str: str) -> str | None:
     try:
-        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00") if "Z" in ts_str else ts_str)
+    except (ValueError, TypeError):
         return None
-    # Treat a naive timestamp as UTC (matching the sibling quant modules
-    # news_velocity/topic_regime/source_reliability). Otherwise
-    # ``astimezone`` would interpret it as the deployment host's LOCAL tz,
-    # misattributing records to the wrong UTC day bucket and making output
-    # depend on where the process runs.
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=UTC)
     return ts.astimezone(UTC).strftime("%Y-%m-%d")
+
+
+def _parse_day(ts_str: str | None) -> str | None:
+    """Return YYYY-MM-DD in UTC from an ISO timestamp; None if unparseable."""
+    if type(ts_str) is not str:
+        return None
+    return _parse_day_cached(ts_str)
 
 
 def compute_persistence(
@@ -78,59 +79,71 @@ def compute_persistence(
     days: set[str] = set()
     parsed: list[tuple[str, dict]] = []
     for r in records:
-        day = _parse_day(r.get("published_ts") or r.get("created_at"))
-        if not day:
-            continue
-        days.add(day)
-        parsed.append((day, r))
+        ts_str = r.get("published_ts") or r.get("created_at")
+        day = _parse_day(ts_str)
+        if day:
+            days.add(day)
+            parsed.append((day, r))
 
     if not days:
         return []
 
     latest_day = max(days)
-    latest_ts = datetime.strptime(latest_day, "%Y-%m-%d").replace(tzinfo=UTC)
+    latest_ts = datetime.fromisoformat(latest_day).replace(tzinfo=UTC)
     cutoff_ts = latest_ts.timestamp() - (window_days - 1) * 86400
-    in_window = [
-        (day, r) for day, r in parsed
-        if datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC).timestamp() >= cutoff_ts
-    ]
+    cutoff_day = datetime.fromtimestamp(cutoff_ts, tz=UTC).strftime("%Y-%m-%d")
 
     # Group by scope = "asset_class/top_symbol"
-    scope_days: dict[str, set[str]] = defaultdict(set)
-    scope_records: dict[str, list[dict]] = defaultdict(list)
-    scope_total: dict[str, int] = defaultdict(int)
-    for day, r in in_window:
-        asset_classes = r.get("asset_classes") or []
-        symbols = r.get("candidate_symbols") or []
-        if not isinstance(asset_classes, list):
-            asset_classes = [str(asset_classes)] if asset_classes else []
-        if not isinstance(symbols, list):
-            symbols = [str(symbols)] if symbols else []
-        top_sym = symbols[0] if symbols else "—"
-        if not asset_classes:
-            asset_classes = ["—"]
-        for ac in asset_classes:
-            scope = f"{ac}/{top_sym}"
-            scope_days[scope].add(day)
-            scope_total[scope] += 1
-            if len(scope_records[scope]) < 3:
-                title = r.get("title") or ""
-                if title:
-                    scope_records[scope].append(title[:100])
+    # scope -> [days_set, total_count, sample_titles_list]
+    scopes: dict[str, list] = {}
+    for day, r in parsed:
+        if day >= cutoff_day:
+            asset_classes = r.get("asset_classes")
+            if type(asset_classes) is list:
+                if not asset_classes:
+                    asset_classes = ["—"]
+            elif asset_classes:
+                asset_classes = [str(asset_classes)]
+            else:
+                asset_classes = ["—"]
+
+            symbols = r.get("candidate_symbols")
+            if type(symbols) is list:
+                top_sym = symbols[0] if symbols else "—"
+            elif symbols:
+                top_sym = str(symbols)
+            else:
+                top_sym = "—"
+
+            for ac in asset_classes:
+                scope = f"{ac}/{top_sym}"
+                state = scopes.get(scope)
+                if state is None:
+                    state = [set(), 0, []]
+                    scopes[scope] = state
+                state[0].add(day)
+                state[1] += 1
+                if len(state[2]) < 3:
+                    title = r.get("title")
+                    if title:
+                        state[2].append(title[:100] if type(title) is str else str(title)[:100])
 
     results: list[PersistenceBucket] = []
-    for scope, days_set in scope_days.items():
-        total = scope_total[scope]
+    for scope, state in scopes.items():
+        total = state[1]
         if total < min_records:
             continue
+        days_set = state[0]
         ratio = len(days_set) / window_days
-        results.append(PersistenceBucket(
-            scope=scope,
-            days_covered=len(days_set),
-            total_records=total,
-            persistence_ratio=ratio,
-            sample_titles=scope_records[scope],
-        ))
+        results.append(
+            PersistenceBucket(
+                scope=scope,
+                days_covered=len(days_set),
+                total_records=total,
+                persistence_ratio=ratio,
+                sample_titles=state[2],
+            )
+        )
 
     results.sort(key=lambda b: (b.persistence_ratio, b.total_records), reverse=True)
     return results[:top_n]

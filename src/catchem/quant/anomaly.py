@@ -120,17 +120,13 @@ class AnomalyReport:
 
 @functools.lru_cache(maxsize=4096)
 def _parse_ts_cached(raw: str) -> datetime | None:
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
     try:
-        parsed = datetime.fromisoformat(raw)
+        from catchem.storage import _parse_iso_ts_cached
+
+        parsed = _parse_iso_ts_cached(raw)
+        return parsed.astimezone(UTC)
     except ValueError:
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    else:
-        parsed = parsed.astimezone(UTC)
-    return parsed
 
 
 def _parse_ts(value: Any) -> datetime | None:

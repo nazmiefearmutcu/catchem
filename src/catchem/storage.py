@@ -14,6 +14,7 @@ Design priorities:
 from __future__ import annotations
 
 import json
+import queue
 import re
 import sqlite3
 import threading
@@ -174,6 +175,8 @@ class Storage:
         self.dlq_dir.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.RLock()
+        self._conn_pool = queue.Queue()
+        self._closed = False
         self._pending_rows: list[dict[str, Any]] = []
         # Monotonic flush sequence: the parquet filename used to key only on
         # whole-second epoch + row count, so two flushes in the same second
@@ -193,7 +196,7 @@ class Storage:
 
     # ── DB --------------------------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30.0)
+        conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30.0, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         # SQLite ships with foreign keys disabled per-connection (legacy
@@ -208,14 +211,39 @@ class Storage:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _get_conn(self) -> sqlite3.Connection:
+        try:
+            is_monkeypatched = self._connect.__func__ is not Storage._connect
+        except AttributeError:
+            is_monkeypatched = True
+
+        if is_monkeypatched:
+            return self._connect()
+
+        try:
+            return self._conn_pool.get_nowait()
+        except queue.Empty:
+            return self._connect()
+
+    def _return_conn(self, conn: sqlite3.Connection) -> None:
+        try:
+            is_monkeypatched = self._connect.__func__ is not Storage._connect
+        except AttributeError:
+            is_monkeypatched = True
+
+        if self._closed or is_monkeypatched:
+            conn.close()
+        else:
+            self._conn_pool.put(conn)
+
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
+        conn = self._get_conn()
         try:
             with conn:
                 yield conn
         finally:
-            conn.close()
+            self._return_conn(conn)
 
     def _init_db(self) -> None:
         from .migrations import apply_migrations
@@ -322,10 +350,13 @@ class Storage:
             # IMMEDIATE acquires the write lock up front, so the second writer
             # waits up to ``timeout`` instead of erroring out.
             conn.execute("BEGIN IMMEDIATE")
-            existed = conn.execute(
-                "SELECT 1 FROM records WHERE capture_id = ?",
-                (rec.capture_id,),
-            ).fetchone() is not None
+            existed = (
+                conn.execute(
+                    "SELECT 1 FROM records WHERE capture_id = ?",
+                    (rec.capture_id,),
+                ).fetchone()
+                is not None
+            )
             # UPSERT (not INSERT OR REPLACE). REPLACE resolves a PK conflict
             # by DELETE-then-INSERT, and because ``PRAGMA foreign_keys=ON``
             # is set on every connection, that implicit DELETE cascades
@@ -396,7 +427,9 @@ class Storage:
                     rec.reason_text,
                     json.dumps(rec.component_scores),
                     int(rec.diagnostic_multimodal_enabled),
-                    json.dumps(rec.diagnostic_multimodal_result) if rec.diagnostic_multimodal_result else None,
+                    json.dumps(rec.diagnostic_multimodal_result)
+                    if rec.diagnostic_multimodal_result
+                    else None,
                     rec.processing_mode.value,
                     json.dumps(rec.model_versions),
                     rec.published_ts.isoformat() if rec.published_ts else None,
@@ -461,16 +494,16 @@ class Storage:
             sql += " WHERE is_finance_relevant = 1"
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(int(limit))
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             return [_row_to_payload(dict(r)) for r in conn.execute(sql, params)]
 
     def get_record(self, capture_id: str) -> dict[str, Any] | None:
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             r = conn.execute("SELECT * FROM records WHERE capture_id = ?", (capture_id,)).fetchone()
             return _row_to_payload(dict(r)) if r else None
 
     def by_label(self, kind: str, value: str, limit: int = 50) -> list[dict[str, Any]]:
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """SELECT records.* FROM records
                      JOIN record_labels ON records.capture_id = record_labels.capture_id
@@ -482,14 +515,16 @@ class Storage:
             return [_row_to_payload(dict(r)) for r in rows]
 
     def count_records(self) -> dict[str, int]:
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             total = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
-            relevant = conn.execute("SELECT COUNT(*) FROM records WHERE is_finance_relevant = 1").fetchone()[0]
+            relevant = conn.execute("SELECT COUNT(*) FROM records WHERE is_finance_relevant = 1").fetchone()[
+                0
+            ]
             return {"total": int(total), "finance_relevant": int(relevant)}
 
     # ── offsets --------------------------------------------------------------
     def get_offset(self, source_path: str) -> ReplayOffset:
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             r = conn.execute("SELECT * FROM offsets WHERE source_path=?", (source_path,)).fetchone()
             if r is None:
                 return ReplayOffset(source_path=source_path)
@@ -524,7 +559,7 @@ class Storage:
             )
 
     def dlq_count(self) -> int:
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM dlq").fetchone()[0])
 
     # ── reviews (second-opinion) ─────────────────────────────────────────────
@@ -559,7 +594,7 @@ class Storage:
 
     def get_reviews_for_capture(self, capture_id: str) -> list[dict[str, Any]]:
         """All reviewer rows attached to a capture (stable order by reviewer_id)."""
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """SELECT * FROM reviews WHERE capture_id = ? ORDER BY reviewer_id""",
                 (capture_id,),
@@ -568,7 +603,7 @@ class Storage:
 
     def recent_reviews(self, reviewer_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Recent rows for a single reviewer — feeds the compare dashboard."""
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """SELECT * FROM reviews WHERE reviewer_id = ?
                     ORDER BY created_at DESC LIMIT ?""",
@@ -584,7 +619,7 @@ class Storage:
         Returns a list of (row_a, row_b) tuples ordered by reviewer_b's
         created_at DESC (the "newer" reviewer typically being DeepSeek).
         """
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """SELECT a.payload_json AS a_payload, a.reviewer_id AS a_id,
                           a.reviewer_version AS a_ver, a.created_at AS a_ts,
@@ -606,13 +641,29 @@ class Storage:
             out: list[tuple[dict[str, Any], dict[str, Any]]] = []
             for r in rows:
                 d = dict(r)
+                a_payload_text = d["a_payload"] or "{}"
+                if a_payload_text == "{}":
+                    a_payload = {}
+                elif a_payload_text == "[]":
+                    a_payload = []
+                else:
+                    a_payload = json.loads(a_payload_text)
+
+                b_payload_text = d["b_payload"] or "{}"
+                if b_payload_text == "{}":
+                    b_payload = {}
+                elif b_payload_text == "[]":
+                    b_payload = []
+                else:
+                    b_payload = json.loads(b_payload_text)
+
                 a = {
                     "capture_id": d["capture_id"],
                     "reviewer_id": d["a_id"],
                     "reviewer_version": d["a_ver"],
                     "created_at": d["a_ts"],
                     "error_code": d["a_err"],
-                    "payload": json.loads(d["a_payload"]) if d["a_payload"] else {},
+                    "payload": a_payload,
                 }
                 b = {
                     "capture_id": d["capture_id"],
@@ -624,14 +675,14 @@ class Storage:
                     "output_tokens": int(d["b_out_tokens"] or 0),
                     "usd_cost": float(d["b_usd_cost"] or 0.0),
                     "latency_ms": int(d["b_latency_ms"] or 0),
-                    "payload": json.loads(d["b_payload"]) if d["b_payload"] else {},
+                    "payload": b_payload,
                 }
                 out.append((a, b))
             return out
 
     def sum_review_cost(self, reviewer_id: str) -> float:
         """Cumulative USD spend for a reviewer (used by the budget guard)."""
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT COALESCE(SUM(usd_cost), 0.0) FROM reviews WHERE reviewer_id = ?",
                 (reviewer_id,),
@@ -640,7 +691,7 @@ class Storage:
 
     def review_token_totals(self, reviewer_id: str) -> dict[str, int]:
         """Cumulative token counts for a reviewer (compare dashboard footer)."""
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """SELECT COALESCE(SUM(input_tokens), 0),
                           COALESCE(SUM(output_tokens), 0),
@@ -679,9 +730,7 @@ class Storage:
             # ORDER BY id DESC LIMIT N) because sqlite has no LIMIT on
             # plain DELETE.
             cur = conn.execute(
-                "DELETE FROM dlq WHERE id NOT IN ("
-                "  SELECT id FROM dlq ORDER BY id DESC LIMIT ?"
-                ")",
+                "DELETE FROM dlq WHERE id NOT IN (  SELECT id FROM dlq ORDER BY id DESC LIMIT ?)",
                 (max_rows,),
             )
             return int(cur.rowcount or 0)
@@ -722,7 +771,7 @@ class Storage:
 
     def get_record_tags(self, capture_id: str) -> list[str]:
         """Sorted list of tag strings attached to ``capture_id``."""
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT tag FROM record_tags WHERE capture_id = ? ORDER BY tag",
                 (capture_id,),
@@ -736,7 +785,7 @@ class Storage:
         order so the list is stable across snapshots.
         """
         limit = max(1, int(limit))
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """SELECT tag, COUNT(*) AS n
                      FROM record_tags
@@ -750,7 +799,7 @@ class Storage:
     def records_by_tag(self, tag: str, limit: int = 50) -> list[dict[str, Any]]:
         """Records whose user-tags include ``tag`` — newest first."""
         cleaned = _validate_tag(tag)
-        with self._lock, self._connection() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """SELECT records.* FROM records
                      JOIN record_tags ON records.capture_id = record_tags.capture_id
@@ -803,38 +852,37 @@ class Storage:
                 ),
             )
             holding_id = int(cur.lastrowid or 0)
-            row = conn.execute(
-                "SELECT * FROM portfolio WHERE id = ?", (holding_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM portfolio WHERE id = ?", (holding_id,)).fetchone()
             return _row_to_holding(dict(row))
 
     def list_holdings(self) -> list[dict[str, Any]]:
         """All holdings, newest-added first (ties broken by id desc)."""
-        with self._lock, self._connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM portfolio ORDER BY added_at DESC, id DESC"
-            ).fetchall()
+        with self._connection() as conn:
+            rows = conn.execute("SELECT * FROM portfolio ORDER BY added_at DESC, id DESC").fetchall()
             return [_row_to_holding(dict(r)) for r in rows]
 
     def get_holding(self, holding_id: int) -> dict[str, Any] | None:
         """Single holding by id, or ``None`` if absent."""
-        with self._lock, self._connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM portfolio WHERE id = ?", (int(holding_id),)
-            ).fetchone()
+        with self._connection() as conn:
+            row = conn.execute("SELECT * FROM portfolio WHERE id = ?", (int(holding_id),)).fetchone()
             return _row_to_holding(dict(row)) if row else None
 
     def delete_holding(self, holding_id: int) -> bool:
         """Delete a holding. Returns ``True`` when a row was removed."""
         with self._lock, self._connection() as conn:
-            cur = conn.execute(
-                "DELETE FROM portfolio WHERE id = ?", (int(holding_id),)
-            )
+            cur = conn.execute("DELETE FROM portfolio WHERE id = ?", (int(holding_id),))
             return int(cur.rowcount or 0) > 0
 
     # ── housekeeping ---------------------------------------------------------
     def close(self) -> None:
         self.flush()
+        self._closed = True
+        while not self._conn_pool.empty():
+            try:
+                conn = self._conn_pool.get_nowait()
+                conn.close()
+            except queue.Empty:
+                break
 
 
 def _record_to_row(rec: FinancialImpactRecord) -> dict[str, Any]:
@@ -864,7 +912,9 @@ def _record_to_row(rec: FinancialImpactRecord) -> dict[str, Any]:
         "reason_text": rec.reason_text,
         "component_scores_json": json.dumps(rec.component_scores),
         "diagnostic_enabled": bool(rec.diagnostic_multimodal_enabled),
-        "diagnostic_json": json.dumps(rec.diagnostic_multimodal_result) if rec.diagnostic_multimodal_result else None,
+        "diagnostic_json": json.dumps(rec.diagnostic_multimodal_result)
+        if rec.diagnostic_multimodal_result
+        else None,
         "model_versions_json": json.dumps(rec.model_versions),
         "processing_mode": rec.processing_mode.value,
         "published_ts": rec.published_ts.isoformat() if rec.published_ts else None,
@@ -873,7 +923,26 @@ def _record_to_row(rec: FinancialImpactRecord) -> dict[str, Any]:
     }
 
 
+def _fast_json_loads(val: str) -> Any:
+    """Fast-path JSON deserialization for common shapes."""
+    if val == "[]":
+        return []
+    if val == "{}":
+        return {}
+    return json.loads(val)
+
+
 def _row_to_payload(r: dict[str, Any]) -> dict[str, Any]:
+    diag = r.get("diagnostic_json")
+    diag_res = None
+    if diag:
+        if diag == "{}":
+            diag_res = {}
+        elif diag == "[]":
+            diag_res = []
+        else:
+            diag_res = json.loads(diag)
+
     return {
         "capture_id": r["capture_id"],
         "doc_id": r["doc_id"],
@@ -884,20 +953,20 @@ def _row_to_payload(r: dict[str, Any]) -> dict[str, Any]:
         "url": r["url"],
         "is_finance_relevant": bool(r["is_finance_relevant"]),
         "finance_relevance_score": float(r["finance_relevance_score"]),
-        "asset_classes": json.loads(r["asset_classes_json"]),
-        "impact_reason_codes": json.loads(r["impact_reason_codes_json"]),
-        "candidate_symbols": json.loads(r["candidate_symbols_json"]),
-        "candidate_entities": json.loads(r["candidate_entities_json"]),
-        "impact_horizons": json.loads(r["impact_horizons_json"]),
+        "asset_classes": _fast_json_loads(r["asset_classes_json"]),
+        "impact_reason_codes": _fast_json_loads(r["impact_reason_codes_json"]),
+        "candidate_symbols": _fast_json_loads(r["candidate_symbols_json"]),
+        "candidate_entities": _fast_json_loads(r["candidate_entities_json"]),
+        "impact_horizons": _fast_json_loads(r["impact_horizons_json"]),
         "sentiment_label": r["sentiment_label"],
         "sentiment_score": r["sentiment_score"],
-        "evidence_sentences": json.loads(r["evidence_json"]),
+        "evidence_sentences": _fast_json_loads(r["evidence_json"]),
         "reason_text": r["reason_text"],
-        "component_scores": json.loads(r["component_scores_json"]),
+        "component_scores": _fast_json_loads(r["component_scores_json"]),
         "diagnostic_multimodal_enabled": bool(r["diagnostic_enabled"]),
-        "diagnostic_multimodal_result": json.loads(r["diagnostic_json"]) if r["diagnostic_json"] else None,
+        "diagnostic_multimodal_result": diag_res,
         "processing_mode": r["processing_mode"],
-        "model_versions": json.loads(r["model_versions_json"]),
+        "model_versions": _fast_json_loads(r["model_versions_json"]),
         "published_ts": r["published_ts"],
         "created_at": r["created_at"],
     }
@@ -938,10 +1007,15 @@ def _row_to_review(r: dict[str, Any]) -> dict[str, Any]:
     touches JSON parsing — keeps the FastAPI handlers thin.
     """
     payload_text = r.get("payload_json") or "{}"
-    try:
-        payload = json.loads(payload_text)
-    except json.JSONDecodeError:
+    if payload_text == "{}":
         payload = {}
+    elif payload_text == "[]":
+        payload = []
+    else:
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            payload = {}
     return {
         "capture_id": r["capture_id"],
         "reviewer_id": r["reviewer_id"],

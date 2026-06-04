@@ -1006,6 +1006,68 @@ def test_db_import_exceeds_max_bytes():
         assert r.json()["detail"] == "upload exceeds 200 MB cap"
 
 
+def test_db_import_exceeds_custom_configured_max_bytes():
+    from unittest.mock import patch
+
+    import catchem.api
+    from catchem.api import _rate_limit_db_import, create_app
+    from catchem.settings import Settings
+
+    # Test custom limit of 500 bytes (does not divide cleanly by MB)
+    s = Settings()
+    s.api.max_import_size_bytes = 500
+    app = create_app(s)
+    app.dependency_overrides[_rate_limit_db_import] = lambda: None
+    client = TestClient(app)
+
+    class FakeChunk:
+        def startswith(self, prefix):
+            return True
+
+        def __len__(self):
+            return 501
+
+    async def mock_read(*args, **kwargs):
+        return FakeChunk()
+
+    old_settings = catchem.api._SETTINGS
+    catchem.api._SETTINGS = s
+    try:
+        with patch("starlette.datastructures.UploadFile.read", mock_read):
+            r = client.post("/api/db/import", files={"file": ("db.sqlite", b"SQLite format 3\x00")})
+            assert r.status_code == 413
+            assert r.json()["detail"] == "upload exceeds 500 bytes cap"
+    finally:
+        catchem.api._SETTINGS = old_settings
+
+    # Test custom limit of 2 MB (divides cleanly by MB)
+    s2 = Settings()
+    s2.api.max_import_size_bytes = 2 * 1024 * 1024
+    app2 = create_app(s2)
+    app2.dependency_overrides[_rate_limit_db_import] = lambda: None
+    client2 = TestClient(app2)
+
+    class FakeLargeChunk2:
+        def startswith(self, prefix):
+            return True
+
+        def __len__(self):
+            return 3 * 1024 * 1024
+
+    async def mock_read2(*args, **kwargs):
+        return FakeLargeChunk2()
+
+    old_settings = catchem.api._SETTINGS
+    catchem.api._SETTINGS = s2
+    try:
+        with patch("starlette.datastructures.UploadFile.read", mock_read2):
+            r = client2.post("/api/db/import", files={"file": ("db.sqlite", b"SQLite format 3\x00")})
+            assert r.status_code == 413
+            assert r.json()["detail"] == "upload exceeds 2 MB cap"
+    finally:
+        catchem.api._SETTINGS = old_settings
+
+
 def test_ui_archive_status_disabled():
     app = create_app(Settings())
     client = TestClient(app)

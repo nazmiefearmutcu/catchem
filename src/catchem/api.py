@@ -3771,12 +3771,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         After the file lands, the operator must reload the SPA — the
         live supervisor still holds the previous DB connection.
         """
-        # Cap at a reasonable size. The default working set is ~300 KB (see
-        # archive cap=150 rows); even a huge backup is comfortably under
-        # 200 MB. This is the same ceiling `text_extract.MAX_UPLOAD_BYTES`
-        # enforces on text uploads.
-        max_bytes = 200 * 1024 * 1024
         s = _SETTINGS or load_settings()
+        # Cap at a reasonable size (configurable via settings). The default working set is ~300 KB
+        # (see archive cap=150 rows); even a huge backup is comfortably under the default 200 MB cap.
+        max_bytes = s.api.max_import_size_bytes
         db_path = s.sqlite_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -3802,7 +3800,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         first = False
                     total_bytes += len(chunk)
                     if total_bytes > max_bytes:
-                        raise HTTPException(status_code=413, detail="upload exceeds 200 MB cap")
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"upload exceeds {max_bytes // (1024 * 1024)} MB cap"
+                            if max_bytes % (1024 * 1024) == 0
+                            else f"upload exceeds {max_bytes} bytes cap",
+                        )
                     out.write(chunk)
                 # The fsync is critical: buffered writes alone leave the data in
                 # the kernel page cache. A crash between the write and the

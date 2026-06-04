@@ -21,10 +21,11 @@ composite_score is the equal-weight mean, clamped to [0, 1].
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from math import log
 from typing import Any
 
@@ -72,18 +73,8 @@ class SourceLeaderboard:
 _UNKNOWN_DOMAIN = "(unknown)"
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse an ISO timestamp string into a tz-aware UTC datetime.
-
-    Returns ``None`` on any failure so the caller can fall back to another
-    field. Naive timestamps are interpreted as UTC.
-    """
-    if not isinstance(value, str) or not value:
-        return None
-    s = value.strip()
-    # `fromisoformat` (3.11+) accepts trailing "Z"; older parsers do not.
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
+@lru_cache(maxsize=1024)
+def _parse_ts_cached(s: str) -> datetime | None:
     try:
         dt = datetime.fromisoformat(s)
     except ValueError:
@@ -93,16 +84,35 @@ def _parse_ts(value: Any) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an ISO timestamp string into a tz-aware UTC datetime.
+
+    Returns ``None`` on any failure so the caller can fall back to another
+    field. Naive timestamps are interpreted as UTC.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    return _parse_ts_cached(s)
+
+
 def _record_ts(rec: dict[str, Any]) -> datetime | None:
     """Pick the best available timestamp: published_ts, else created_at."""
     return _parse_ts(rec.get("published_ts")) or _parse_ts(rec.get("created_at"))
 
 
+@lru_cache(maxsize=256)
+def _normalize_domain_cached(s: str) -> str:
+    stripped = s.strip().lower()
+    return stripped or _UNKNOWN_DOMAIN
+
+
 def _normalize_domain(value: Any) -> str:
     if not isinstance(value, str):
         return _UNKNOWN_DOMAIN
-    stripped = value.strip().lower()
-    return stripped or _UNKNOWN_DOMAIN
+    return _normalize_domain_cached(value)
 
 
 def _normalized_entropy(items: Iterable[str]) -> float:
@@ -111,10 +121,13 @@ def _normalized_entropy(items: Iterable[str]) -> float:
     Missing / non-string items are skipped. A singleton (or empty) input
     returns 0 — there is no diversity to measure.
     """
-    counts = Counter(x for x in items if isinstance(x, str) and x)
+    valid_items = [x for x in items if isinstance(x, str) and x]
+    if len(valid_items) < 2:
+        return 0.0
+    counts = Counter(valid_items)
     if len(counts) < 2:
         return 0.0
-    total = sum(counts.values())
+    total = len(valid_items)
     entropy = -sum((c / total) * log(c / total) for c in counts.values())
     max_entropy = log(len(counts))
     if max_entropy == 0.0:
@@ -164,15 +177,14 @@ def compute_source_scores(
     # ── window filter ──
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=window_days)
+    future_cutoff = now + timedelta(days=1)
 
     in_window: list[dict] = []
     for rec in records:
         ts = _record_ts(rec)
         if ts is None:
             continue
-        if ts < cutoff or ts > now + timedelta(days=1):
-            # Reject far-future timestamps too; clock skew, but a record
-            # dated next year should not pollute "last N days" analytics.
+        if ts < cutoff or ts > future_cutoff:
             continue
         in_window.append(rec)
 
@@ -185,20 +197,25 @@ def compute_source_scores(
         )
 
     # ── group by domain ──
-    by_domain: dict[str, list[dict]] = {}
+    by_domain = defaultdict(list)
     for rec in in_window:
         d = _normalize_domain(rec.get("domain"))
-        by_domain.setdefault(d, []).append(rec)
+        by_domain[d].append(rec)
 
     # Build the universe of "other-domain symbols" per domain on the fly.
     domain_symbol_sets: dict[str, set[str]] = {}
+    symbol_domain_counts: dict[str, int] = {}
     for domain, rows in by_domain.items():
         symbols: set[str] = set()
         for rec in rows:
-            for sym in rec.get("candidate_symbols") or []:
-                if isinstance(sym, str) and sym:
-                    symbols.add(sym)
+            candidate = rec.get("candidate_symbols")
+            if candidate:
+                for sym in candidate:
+                    if isinstance(sym, str) and sym:
+                        symbols.add(sym)
         domain_symbol_sets[domain] = symbols
+        for sym in symbols:
+            symbol_domain_counts[sym] = symbol_domain_counts.get(sym, 0) + 1
 
     scores: list[SourceScore] = []
     for domain, rows in by_domain.items():
@@ -206,55 +223,54 @@ def compute_source_scores(
             continue
 
         record_count = len(rows)
-        relevant_rows = [r for r in rows if bool(r.get("is_finance_relevant"))]
-        relevant_count = len(relevant_rows)
-        relevant_rate = relevant_count / record_count
-
-        if relevant_rows:
-            mean_relevance = sum(
-                float(r.get("finance_relevance_score") or 0.0) for r in relevant_rows
-            ) / len(relevant_rows)
-        else:
-            mean_relevance = 0.0
-
-        # signal_density uses ALL rows (high-relevance content vs total volume).
-        signal_density = sum(
-            1 for r in rows
-            if float(r.get("finance_relevance_score") or 0.0) >= 0.7
-        ) / record_count
-
-        # sentiment_skew over rows with a labeled sentiment.
-        sent_counts = Counter(
-            r.get("sentiment_label")
-            for r in rows
-            if r.get("sentiment_label") in ("positive", "neutral", "negative")
-        )
-        sent_total = sum(sent_counts.values())
-        if sent_total > 0:
-            sentiment_skew = (
-                sent_counts.get("positive", 0) - sent_counts.get("negative", 0)
-            ) / sent_total
-        else:
-            sentiment_skew = 0.0
-
-        # diversity: flatten the list-valued fields across rows.
+        relevant_count = 0
+        sum_relevance = 0.0
+        high_signal_count = 0
+        pos_count = 0
+        neg_count = 0
+        neu_count = 0
         all_assets: list[str] = []
         all_reasons: list[str] = []
+
         for r in rows:
-            all_assets.extend(r.get("asset_classes") or [])
-            all_reasons.extend(r.get("impact_reason_codes") or [])
+            rev_val = r.get("finance_relevance_score")
+            rev_score = float(rev_val) if rev_val else 0.0
+            if rev_score >= 0.7:
+                high_signal_count += 1
+            if r.get("is_finance_relevant"):
+                relevant_count += 1
+                sum_relevance += rev_score
+
+            sent = r.get("sentiment_label")
+            if sent == "positive":
+                pos_count += 1
+            elif sent == "negative":
+                neg_count += 1
+            elif sent == "neutral":
+                neu_count += 1
+
+            assets = r.get("asset_classes")
+            if assets:
+                all_assets.extend(assets)
+            reasons = r.get("impact_reason_codes")
+            if reasons:
+                all_reasons.extend(reasons)
+
+        relevant_rate = relevant_count / record_count
+        mean_relevance = sum_relevance / relevant_count if relevant_count > 0 else 0.0
+        signal_density = high_signal_count / record_count
+
+        sent_total = pos_count + neg_count + neu_count
+        sentiment_skew = (pos_count - neg_count) / sent_total if sent_total > 0 else 0.0
+
         asset_diversity = _normalized_entropy(all_assets)
         reason_diversity = _normalized_entropy(all_reasons)
 
         # symbol_uniqueness: this domain's symbols not seen elsewhere.
         my_symbols = domain_symbol_sets[domain]
         if my_symbols:
-            others: set[str] = set()
-            for other_d, other_syms in domain_symbol_sets.items():
-                if other_d != domain:
-                    others |= other_syms
-            unique = my_symbols - others
-            symbol_uniqueness = len(unique) / len(my_symbols)
+            unique_count = sum(1 for sym in my_symbols if symbol_domain_counts[sym] == 1)
+            symbol_uniqueness = unique_count / len(my_symbols)
         else:
             symbol_uniqueness = 0.0
 

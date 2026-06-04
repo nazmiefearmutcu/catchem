@@ -329,3 +329,37 @@ def test_compute_scope_buckets_empty_item_continue(monkeypatch) -> None:
     assert "asset_class:equities" in scopes
 
 
+def test_additional_coverage_for_optimization() -> None:
+    from catchem.quant.intensity import _coerce_float, _finite_or_none, compute_by_scope, compute_overall
+
+    # Coerce float with int
+    assert _coerce_float(42) == 42.0
+    assert _coerce_float("inf") == 0.0
+    assert _coerce_float("nan") == 0.0
+    assert _coerce_float("0.8") == 0.8
+
+    # Finite or none with int
+    assert _finite_or_none(42) == 42.0
+    assert _finite_or_none("inf") is None
+    assert _finite_or_none("nan") is None
+    assert _finite_or_none("0.8") == 0.8
+
+    # Compute by scope where subsequent item has higher intensity
+    records = [
+        {"asset_classes": ["equities"], "finance_relevance_score": 0.2, "sentiment_score": 0.2}, # intensity = 0.04
+        {"asset_classes": ["equities"], "finance_relevance_score": 0.8, "sentiment_score": 0.8}, # intensity = 0.64
+    ]
+    buckets = compute_by_scope(records, "asset_classes")
+    assert len(buckets) == 1
+    assert buckets[0].max_intensity == pytest.approx(0.64)
+
+    # compute_overall where subsequent item has higher intensity
+    overall_records = [
+        {"finance_relevance_score": 0.2, "sentiment_score": 0.2}, # 0.04
+        {"finance_relevance_score": 0.8, "sentiment_score": 0.8}, # 0.64
+    ]
+    out = compute_overall(overall_records)
+    assert out.max_intensity == pytest.approx(0.64)
+
+
+

@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html
+import inspect
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -145,14 +146,10 @@ def assemble_feeds() -> tuple[FeedSpec, ...]:
 
     def _admit(spec: FeedSpec, *, origin: str) -> None:
         if spec.name in seen_names:
-            logger.warning(
-                "feed_dropped_duplicate_name", name=spec.name, url=spec.url, origin=origin
-            )
+            logger.warning("feed_dropped_duplicate_name", name=spec.name, url=spec.url, origin=origin)
             return
         if spec.url in seen_urls:
-            logger.warning(
-                "feed_dropped_duplicate_url", name=spec.name, url=spec.url, origin=origin
-            )
+            logger.warning("feed_dropped_duplicate_url", name=spec.name, url=spec.url, origin=origin)
             return
         seen_names.add(spec.name)
         seen_urls.add(spec.url)
@@ -165,7 +162,9 @@ def assemble_feeds() -> tuple[FeedSpec, ...]:
             for spec in provider():
                 _admit(spec, origin=getattr(provider, "__name__", "?"))
         except Exception as exc:  # one bad pack never breaks the rest
-            logger.warning("feed_provider_failed", provider=getattr(provider, "__name__", "?"), error=str(exc))
+            logger.warning(
+                "feed_provider_failed", provider=getattr(provider, "__name__", "?"), error=str(exc)
+            )
     return tuple(out)
 
 
@@ -194,10 +193,24 @@ DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
     FeedSpec("cnbc-economy", "https://www.cnbc.com/id/20910258/device/rss/rss.html", "cnbc.com"),
     FeedSpec("cnbc-finance", "https://www.cnbc.com/id/15839069/device/rss/rss.html", "cnbc.com"),
     FeedSpec("cnbc-markets", "https://www.cnbc.com/id/15839135/device/rss/rss.html", "cnbc.com"),
-    FeedSpec("marketwatch-top", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "marketwatch.com"),
-    FeedSpec("marketwatch-marketpulse", "https://feeds.content.dowjones.io/public/rss/mw_marketpulse", "marketwatch.com"),
-    FeedSpec("marketwatch-bulletins", "https://feeds.content.dowjones.io/public/rss/mw_bulletins", "marketwatch.com"),
-    FeedSpec("marketwatch-realtime", "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines", "marketwatch.com"),
+    FeedSpec(
+        "marketwatch-top", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "marketwatch.com"
+    ),
+    FeedSpec(
+        "marketwatch-marketpulse",
+        "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",
+        "marketwatch.com",
+    ),
+    FeedSpec(
+        "marketwatch-bulletins",
+        "https://feeds.content.dowjones.io/public/rss/mw_bulletins",
+        "marketwatch.com",
+    ),
+    FeedSpec(
+        "marketwatch-realtime",
+        "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
+        "marketwatch.com",
+    ),
     FeedSpec("yahoo-finance", "https://finance.yahoo.com/news/rssindex", "finance.yahoo.com"),
     FeedSpec("seekingalpha", "https://seekingalpha.com/feed.xml", "seekingalpha.com"),
     FeedSpec("benzinga-news", "https://www.benzinga.com/news/feed", "benzinga.com"),
@@ -205,7 +218,11 @@ DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
     FeedSpec("zerohedge", "https://feeds.feedburner.com/zerohedge/feed", "zerohedge.com"),
     # ── Press wires (high volume — many per hour)
     FeedSpec("prnewswire-all", "https://www.prnewswire.com/rss/all-news-releases-list.rss", "prnewswire.com"),
-    FeedSpec("prnewswire-financial", "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss", "prnewswire.com"),
+    FeedSpec(
+        "prnewswire-financial",
+        "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+        "prnewswire.com",
+    ),
     FeedSpec("ap-business", "https://feedx.net/rss/ap.xml", "apnews.com"),
     # ── Bloomberg
     FeedSpec("bloomberg-markets", "https://feeds.bloomberg.com/markets/news.rss", "bloomberg.com"),
@@ -219,12 +236,24 @@ DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
     FeedSpec("aljazeera", "https://www.aljazeera.com/xml/rss/all.xml", "aljazeera.com"),
     # ── Regulators / central banks
     FeedSpec("fed-press-all", "https://www.federalreserve.gov/feeds/press_all.xml", "federalreserve.gov"),
-    FeedSpec("sec-edgar-current", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&output=atom", "sec.gov"),
-    FeedSpec("sec-8k", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom", "sec.gov"),
-    FeedSpec("sec-10q", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=10-Q&output=atom", "sec.gov"),
+    FeedSpec(
+        "sec-edgar-current",
+        "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&output=atom",
+        "sec.gov",
+    ),
+    FeedSpec(
+        "sec-8k", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom", "sec.gov"
+    ),
+    FeedSpec(
+        "sec-10q",
+        "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=10-Q&output=atom",
+        "sec.gov",
+    ),
     FeedSpec("ecb-press", "https://www.ecb.europa.eu/rss/press.html", "ecb.europa.eu"),
     # ── Crypto
-    FeedSpec("coindesk-business", "https://www.coindesk.com/arc/outboundfeeds/rss?outputType=xml", "coindesk.com"),
+    FeedSpec(
+        "coindesk-business", "https://www.coindesk.com/arc/outboundfeeds/rss?outputType=xml", "coindesk.com"
+    ),
     FeedSpec("decrypt-crypto", "https://decrypt.co/feed", "decrypt.co"),
     FeedSpec("theblock", "https://www.theblock.co/rss.xml", "theblockcrypto.com"),
     FeedSpec("cointelegraph", "https://cointelegraph.com/rss", "cointelegraph.com"),
@@ -238,15 +267,51 @@ DEFAULT_FEEDS: tuple[FeedSpec, ...] = (
     # within minutes of publication, which sidesteps the RSS publisher lag
     # (Yahoo/Forbes/etc. refresh their RSS every 10-15 min; their articles
     # appear in Google News within seconds).
-    FeedSpec("gnews-finance", "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-stocks", "https://news.google.com/rss/search?q=stocks+earnings&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-bitcoin", "https://news.google.com/rss/search?q=bitcoin+OR+ethereum&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-fed", "https://news.google.com/rss/search?q=federal+reserve+OR+FOMC&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-inflation", "https://news.google.com/rss/search?q=inflation+OR+CPI+OR+PPI&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-recession", "https://news.google.com/rss/search?q=recession+OR+unemployment&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-mna", "https://news.google.com/rss/search?q=merger+OR+acquisition+OR+IPO&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-energy", "https://news.google.com/rss/search?q=oil+OR+OPEC+OR+gas+prices&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
-    FeedSpec("gnews-geo", "https://news.google.com/rss/search?q=sanctions+OR+geopolitics+OR+trade+war&hl=en-US&gl=US&ceid=US:en", "news.google.com"),
+    FeedSpec(
+        "gnews-finance",
+        "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-stocks",
+        "https://news.google.com/rss/search?q=stocks+earnings&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-bitcoin",
+        "https://news.google.com/rss/search?q=bitcoin+OR+ethereum&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-fed",
+        "https://news.google.com/rss/search?q=federal+reserve+OR+FOMC&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-inflation",
+        "https://news.google.com/rss/search?q=inflation+OR+CPI+OR+PPI&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-recession",
+        "https://news.google.com/rss/search?q=recession+OR+unemployment&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-mna",
+        "https://news.google.com/rss/search?q=merger+OR+acquisition+OR+IPO&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-energy",
+        "https://news.google.com/rss/search?q=oil+OR+OPEC+OR+gas+prices&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
+    FeedSpec(
+        "gnews-geo",
+        "https://news.google.com/rss/search?q=sanctions+OR+geopolitics+OR+trade+war&hl=en-US&gl=US&ceid=US:en",
+        "news.google.com",
+    ),
 )
 
 
@@ -272,9 +337,7 @@ CIRCUIT_BREAKER_THRESHOLD: int = 5
 BACKOFF_LADDER_SECONDS: tuple[int, ...] = (60, 300, 900, 1800, 3600)
 
 
-def _compute_cooldown_until(
-    consecutive_errors: int, now: datetime
-) -> datetime | None:
+def _compute_cooldown_until(consecutive_errors: int, now: datetime) -> datetime | None:
     """Compute the next probe time given a feed's consecutive-error count.
 
     Below CIRCUIT_BREAKER_THRESHOLD: returns None (no backoff). At the
@@ -306,8 +369,8 @@ def _compute_cooldown_until(
 # feed straight back to every-cycle. Errors do NOT count as emptiness; the
 # circuit breaker owns those and an errored fetch never advances this ladder.
 ADAPTIVE_CADENCE_LADDER: tuple[tuple[int, int], ...] = (
-    (2, 1),   # <=2 empties → every cycle
-    (5, 3),   # <=5 empties → every 3rd cycle
+    (2, 1),  # <=2 empties → every cycle
+    (5, 3),  # <=5 empties → every 3rd cycle
     (10, 6),  # <=10 empties → every 6th cycle
 )
 ADAPTIVE_CADENCE_MAX: int = 12  # >10 empties → every 12th cycle (cap)
@@ -357,7 +420,8 @@ def _canonical_url(url: str) -> str:
         path = parts.path.rstrip("/")
         # Filter tracking params while preserving order of survivors.
         kept = [
-            (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            (k, v)
+            for k, v in parse_qsl(parts.query, keep_blank_values=True)
             if not any(k.lower().startswith(p) for p in _TRACKING_PREFIXES)
         ]
         query = urlencode(kept)
@@ -592,13 +656,15 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
         source_domain = _resolve_domain(source_url, "") if source_url else ""
         if domain == "news.google.com" and source_domain:
             domain = source_domain
-        items.append(ParsedItem(
-            title=title,
-            text=text,
-            url=link,
-            domain=domain,
-            published_ts=_parse_ts(pub),
-        ))
+        items.append(
+            ParsedItem(
+                title=title,
+                text=text,
+                url=link,
+                domain=domain,
+                published_ts=_parse_ts(pub),
+            )
+        )
 
     # Atom: <feed><entry>...</entry></feed>
     for entry in root.iter(f"{{{_NS['atom']}}}entry"):
@@ -619,19 +685,22 @@ def parse_feed(body: bytes, fallback_domain: str = "") -> list[ParsedItem]:
             link = (link_el.attrib.get("href") or link_el.text or "").strip()
         summary = entry.findtext("atom:summary", default="", namespaces=_NS)
         content = entry.findtext("atom:content", default="", namespaces=_NS)
-        pub = entry.findtext("atom:updated", default=None, namespaces=_NS) or \
-              entry.findtext("atom:published", default=None, namespaces=_NS)
+        pub = entry.findtext("atom:updated", default=None, namespaces=_NS) or entry.findtext(
+            "atom:published", default=None, namespaces=_NS
+        )
         title = (title_el.text if title_el is not None else "").strip()
         body_text = _strip_html(content or summary) or title
         if not title or not link or not body_text:
             continue
-        items.append(ParsedItem(
-            title=title,
-            text=body_text,
-            url=link,
-            domain=_resolve_domain(link, fallback_domain),
-            published_ts=_parse_ts(pub),
-        ))
+        items.append(
+            ParsedItem(
+                title=title,
+                text=body_text,
+                url=link,
+                domain=_resolve_domain(link, fallback_domain),
+                published_ts=_parse_ts(pub),
+            )
+        )
 
     return items
 
@@ -644,7 +713,21 @@ register_parser(
 )
 
 
-async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFetchResult:
+def _has_max_size_param(func) -> bool:
+    try:
+        sig = inspect.signature(func)
+        return "max_response_size_bytes" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+    except Exception:
+        return False
+
+
+async def fetch_feed_result(
+    client: httpx.AsyncClient,
+    spec: FeedSpec,
+    max_response_size_bytes: int = 10 * 1024 * 1024,
+) -> FeedFetchResult:
     """Fetch + parse one feed and return a structured health result.
 
     The body parser is selected by `spec.parser` (default "rss"), so JSON
@@ -659,7 +742,8 @@ async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFe
             if spec.parser != "rss"
             else "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5"
         )
-        resp = await client.get(
+        async with client.stream(
+            "GET",
             spec.url,
             headers={"User-Agent": _USER_AGENT, "Accept": accept},
             # Pass the pinned client timeout explicitly: httpx applies any
@@ -669,21 +753,48 @@ async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFe
             # _HTTPX_TIMEOUT to keep connect=3/read=5 in force per fetch.
             timeout=_HTTPX_TIMEOUT,
             follow_redirects=True,
-        )
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
-        if resp.status_code != 200:
-            logger.info("rss_non200", feed=spec.name, status=resp.status_code)
-            return FeedFetchResult(
-                spec=spec,
-                status_code=resp.status_code,
-                error=f"http_{resp.status_code}",
-                elapsed_ms=elapsed_ms,
-            )
+        ) as resp:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            if resp.status_code != 200:
+                logger.info("rss_non200", feed=spec.name, status=resp.status_code)
+                return FeedFetchResult(
+                    spec=spec,
+                    status_code=resp.status_code,
+                    error=f"http_{resp.status_code}",
+                    elapsed_ms=elapsed_ms,
+                )
+
+            # Check content-length header if present to fast-fail
+            content_length = resp.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    if int(content_length) > max_response_size_bytes:
+                        raise ValueError(f"Response size exceeds limit of {max_response_size_bytes} bytes")
+                except ValueError as e:
+                    if "exceeds limit" in str(e):
+                        raise
+
+            chunks = []
+            bytes_read = 0
+            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                bytes_read += len(chunk)
+                if bytes_read > max_response_size_bytes:
+                    raise ValueError(f"Response size exceeds limit of {max_response_size_bytes} bytes")
+                chunks.append(chunk)
+            body = b"".join(chunks)
+
         return FeedFetchResult(
             spec=spec,
-            items=tuple(get_parser(spec.parser)(resp.content, spec.fallback_domain)),
+            items=tuple(get_parser(spec.parser)(body, spec.fallback_domain)),
             status_code=resp.status_code,
             elapsed_ms=elapsed_ms,
+        )
+    except ValueError as exc:
+        logger.info("rss_size_exceeded", feed=spec.name, error=str(exc))
+        return FeedFetchResult(
+            spec=spec,
+            error="ValueError",
+            elapsed_ms=(time.perf_counter() - started) * 1000.0,
         )
     except httpx.HTTPError as exc:
         logger.info("rss_fetch_error", feed=spec.name, error=str(exc))
@@ -701,9 +812,13 @@ async def fetch_feed_result(client: httpx.AsyncClient, spec: FeedSpec) -> FeedFe
         )
 
 
-async def fetch_feed(client: httpx.AsyncClient, spec: FeedSpec) -> list[ParsedItem]:
+async def fetch_feed(
+    client: httpx.AsyncClient,
+    spec: FeedSpec,
+    max_response_size_bytes: int = 10 * 1024 * 1024,
+) -> list[ParsedItem]:
     """Fetch + parse one feed. Returns [] on any error so callers can keep going."""
-    result = await fetch_feed_result(client, spec)
+    result = await fetch_feed_result(client, spec, max_response_size_bytes=max_response_size_bytes)
     return list(result.items)
 
 
@@ -760,6 +875,13 @@ class NewsPoller:
                 True,
             )
         )
+        self._max_response_size_bytes = int(
+            getattr(
+                getattr(settings, "news", None),
+                "max_response_size_bytes",
+                10 * 1024 * 1024,
+            )
+        )
         # Monotonic count of completed poll cycles — the modulo base the
         # adaptive cadence uses to decide whether a backed-off feed is "due".
         self._cycle_index: int = 0
@@ -769,7 +891,7 @@ class NewsPoller:
         self._feed_next_due_cycle: dict[str, int] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
-        self._lock = asyncio.Lock()       # serializes concurrent poll_now calls
+        self._lock = asyncio.Lock()  # serializes concurrent poll_now calls
         self._client: httpx.AsyncClient | None = None
         # Persistent diagnostics for /ui/news-status.
         self.last_run_at: datetime | None = None
@@ -923,10 +1045,20 @@ class NewsPoller:
             # Use the shared client when the poller's running loop owns one;
             # otherwise spin up an ephemeral one (mirrors poll_now's pattern).
             if self._client is not None:
-                result = await fetch_feed_result(self._client, spec)
+                if _has_max_size_param(fetch_feed_result):
+                    result = await fetch_feed_result(
+                        self._client, spec, max_response_size_bytes=self._max_response_size_bytes
+                    )
+                else:
+                    result = await fetch_feed_result(self._client, spec)
             else:
                 async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
-                    result = await fetch_feed_result(client, spec)
+                    if _has_max_size_param(fetch_feed_result):
+                        result = await fetch_feed_result(
+                            client, spec, max_response_size_bytes=self._max_response_size_bytes
+                        )
+                    else:
+                        result = await fetch_feed_result(client, spec)
 
             self._record_feed_result(result)
 
@@ -1024,6 +1156,7 @@ class NewsPoller:
                     # Compute the next-scheduled time so the UI can show
                     # a "next poll in Xs" countdown.
                     from datetime import timedelta
+
                     self.next_run_at = datetime.now(UTC) + timedelta(seconds=self._interval)
                     # Sleep for the interval, but wake early on stop(). A
                     # manual `poll_now()` no longer interrupts this sleep — it
@@ -1093,9 +1226,13 @@ class NewsPoller:
                 except ValueError:
                     cooldown_dt = None
                 if cooldown_dt is not None and now_for_cooldown < cooldown_dt:
-                    backed_off_results.append(FeedFetchResult(
-                        spec=spec, skipped=True, fetched_at=now_for_cooldown,
-                    ))
+                    backed_off_results.append(
+                        FeedFetchResult(
+                            spec=spec,
+                            skipped=True,
+                            fetched_at=now_for_cooldown,
+                        )
+                    )
                     continue
                 # Cooldown expired — null it out before the fetch so a
                 # second failure climbs the next ladder step rather than
@@ -1112,16 +1249,19 @@ class NewsPoller:
             # skip it entirely (no synthetic result — it neither succeeded nor
             # failed, so polls/errors/health stay frozen, exactly like it was
             # never scheduled). Disabled → every feed is always due.
-            if (
-                self._adaptive_polling_enabled
-                and this_cycle < self._feed_next_due_cycle.get(spec.name, 0)
-            ):
+            if self._adaptive_polling_enabled and this_cycle < self._feed_next_due_cycle.get(spec.name, 0):
                 continue
             feeds_to_fetch.append(spec)
 
-        fetched_results = await asyncio.gather(
-            *[fetch_feed_result(client, s) for s in feeds_to_fetch]
-        )
+        if _has_max_size_param(fetch_feed_result):
+            fetched_results = await asyncio.gather(
+                *[
+                    fetch_feed_result(client, s, max_response_size_bytes=self._max_response_size_bytes)
+                    for s in feeds_to_fetch
+                ]
+            )
+        else:
+            fetched_results = await asyncio.gather(*[fetch_feed_result(client, s) for s in feeds_to_fetch])
         # Combine real fetches + synthetic skipped results so downstream
         # health/ingest code sees one entry per configured feed.
         results: list[FeedFetchResult] = list(fetched_results) + backed_off_results
@@ -1189,18 +1329,16 @@ class NewsPoller:
                 except Exception as exc:
                     logger.info(
                         "news_ingest_failed feed=%s url=%s error=%s",
-                        spec.name, item.url, exc,
+                        spec.name,
+                        item.url,
+                        exc,
                     )
                     return False
             if item.published_ts is not None:
-                publisher_lags_s.append(
-                    (datetime.now(UTC) - item.published_ts).total_seconds()
-                )
+                publisher_lags_s.append((datetime.now(UTC) - item.published_ts).total_seconds())
             return True
 
-        gathered = await asyncio.gather(*(
-            _ingest_one_async(spec, item) for spec, item in new_items
-        ))
+        gathered = await asyncio.gather(*(_ingest_one_async(spec, item) for spec, item in new_items))
         ingested = sum(1 for ok in gathered if ok)
         # Roll back BOTH dedup records for any item whose ingest FAILED, so a
         # later sighting (another outlet this cycle, or the next tick) gets a
@@ -1390,33 +1528,35 @@ class NewsPoller:
             # this feed N seconds ago". `backed_off` carries through to
             # /api/news/sources for the dedicated UI badge.
             snapshot: dict[str, object] = dict(prev)
-            snapshot.update({
-                "name": result.spec.name,
-                "url": result.spec.url,
-                "fallback_domain": result.spec.fallback_domain,
-                "ok": False,
-                "backed_off": True,
-                "item_count": 0,
-                # items_total and consecutive_errors are intentionally
-                # preserved from `prev` so the stat persists across the
-                # cooldown window.
-                "items_total": int(prev.get("items_total", 0)),
-                "total_fetches": int(prev.get("total_fetches", 0)),
-                "total_errors": int(prev.get("total_errors", 0)),
-                "consecutive_errors": int(prev.get("consecutive_errors", 0)),
-                "cooldown_until": prev.get("cooldown_until"),
-                "status_code": prev.get("status_code"),
-                "error": prev.get("error"),
-                "last_success_at": prev.get("last_success_at"),
-                "last_failure_at": prev.get("last_failure_at"),
-                "elapsed_ms": None,
-                # Preserve adaptive-polling telemetry across a circuit-breaker
-                # cooldown so the emptiness stats don't reset when failures
-                # (a different axis) pause the feed.
-                "consecutive_empty": int(prev.get("consecutive_empty", 0)),
-                "adaptive_cadence": int(prev.get("adaptive_cadence", 1)),
-                "total_new_items": int(prev.get("total_new_items", 0)),
-            })
+            snapshot.update(
+                {
+                    "name": result.spec.name,
+                    "url": result.spec.url,
+                    "fallback_domain": result.spec.fallback_domain,
+                    "ok": False,
+                    "backed_off": True,
+                    "item_count": 0,
+                    # items_total and consecutive_errors are intentionally
+                    # preserved from `prev` so the stat persists across the
+                    # cooldown window.
+                    "items_total": int(prev.get("items_total", 0)),
+                    "total_fetches": int(prev.get("total_fetches", 0)),
+                    "total_errors": int(prev.get("total_errors", 0)),
+                    "consecutive_errors": int(prev.get("consecutive_errors", 0)),
+                    "cooldown_until": prev.get("cooldown_until"),
+                    "status_code": prev.get("status_code"),
+                    "error": prev.get("error"),
+                    "last_success_at": prev.get("last_success_at"),
+                    "last_failure_at": prev.get("last_failure_at"),
+                    "elapsed_ms": None,
+                    # Preserve adaptive-polling telemetry across a circuit-breaker
+                    # cooldown so the emptiness stats don't reset when failures
+                    # (a different axis) pause the feed.
+                    "consecutive_empty": int(prev.get("consecutive_empty", 0)),
+                    "adaptive_cadence": int(prev.get("adaptive_cadence", 1)),
+                    "total_new_items": int(prev.get("total_new_items", 0)),
+                }
+            )
             self.feed_health[result.spec.name] = snapshot
             return
         ok = result.ok

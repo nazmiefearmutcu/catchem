@@ -113,45 +113,133 @@ def test_parse_feed_atom_missing_or_empty_links():
 # 8. fetch_feed_result code paths
 @pytest.mark.asyncio
 async def test_fetch_feed_result_errors():
+    import contextlib
+
     spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
-    
+
     # 8a. Response code != 200 (676-677)
     mock_resp = MagicMock()
     mock_resp.status_code = 404
     mock_resp.content = b""
+    mock_resp.headers = {}
+
+    async def mock_aiter_bytes(*args, **kwargs):
+        yield b""
+
+    mock_resp.aiter_bytes = mock_aiter_bytes
+
     mock_client = MagicMock()
-    
-    async def mock_get(*args, **kwargs):
-        return mock_resp
-        
-    mock_client.get = mock_get
+
+    @contextlib.asynccontextmanager
+    async def mock_stream(*args, **kwargs):
+        yield mock_resp
+
+    mock_client.stream = mock_stream
     res = await fetch_feed_result(mock_client, spec)
     assert res.status_code == 404
     assert res.error == "http_404"
 
     # 8b. httpx.HTTPError (689-695)
-    async def mock_get_http_error(*args, **kwargs):
+    @contextlib.asynccontextmanager
+    async def mock_stream_http_error(*args, **kwargs):
         raise httpx.HTTPError("mocked HTTP error")
-    mock_client.get = mock_get_http_error
+        yield
+
+    mock_client.stream = mock_stream_http_error
     res = await fetch_feed_result(mock_client, spec)
     assert res.error == "HTTPError"
 
     # 8c. Generic Exception (696-702)
-    async def mock_get_exception(*args, **kwargs):
+    @contextlib.asynccontextmanager
+    async def mock_stream_exception(*args, **kwargs):
         raise RuntimeError("mocked generic exception")
-    mock_client.get = mock_get_exception
+        yield
+
+    mock_client.stream = mock_stream_exception
     res = await fetch_feed_result(mock_client, spec)
     assert res.error == "RuntimeError"
 
     # 8d. fetch_feed wrapper (707-708)
+    mock_resp_200 = MagicMock()
+    mock_resp_200.status_code = 200
+    mock_resp_200.headers = {}
+
+    async def mock_aiter_bytes_200(*args, **kwargs):
+        yield b"<rss><channel></channel></rss>"
+
+    mock_resp_200.aiter_bytes = mock_aiter_bytes_200
+
+    @contextlib.asynccontextmanager
+    async def mock_stream_200(*args, **kwargs):
+        yield mock_resp_200
+
+    mock_client.stream = mock_stream_200
     items = await fetch_feed(mock_client, spec)
     assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_feed_result_size_limit():
+    import contextlib
+
+    spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
+    mock_client = MagicMock()
+
+    # Case 1: content-length header exceeds the limit
+    mock_resp_1 = MagicMock()
+    mock_resp_1.status_code = 200
+    mock_resp_1.headers = {"content-length": "100"}
+
+    @contextlib.asynccontextmanager
+    async def mock_stream_1(*args, **kwargs):
+        yield mock_resp_1
+
+    mock_client.stream = mock_stream_1
+    res = await fetch_feed_result(mock_client, spec, max_response_size_bytes=50)
+    assert res.error == "ValueError"
+
+    # Case 2: chunk reading exceeds the limit
+    mock_resp_2 = MagicMock()
+    mock_resp_2.status_code = 200
+    mock_resp_2.headers = {}
+
+    async def mock_aiter_bytes_2(*args, **kwargs):
+        yield b"a" * 60
+
+    mock_resp_2.aiter_bytes = mock_aiter_bytes_2
+
+    @contextlib.asynccontextmanager
+    async def mock_stream_2(*args, **kwargs):
+        yield mock_resp_2
+
+    mock_client.stream = mock_stream_2
+    res = await fetch_feed_result(mock_client, spec, max_response_size_bytes=50)
+    assert res.error == "ValueError"
+
+    # Case 3: content-length header is invalid/non-numeric but chunks are fine
+    mock_resp_3 = MagicMock()
+    mock_resp_3.status_code = 200
+    mock_resp_3.headers = {"content-length": "invalid"}
+
+    async def mock_aiter_bytes_3(*args, **kwargs):
+        yield b"a" * 40
+
+    mock_resp_3.aiter_bytes = mock_aiter_bytes_3
+
+    @contextlib.asynccontextmanager
+    async def mock_stream_3(*args, **kwargs):
+        yield mock_resp_3
+
+    mock_client.stream = mock_stream_3
+    res = await fetch_feed_result(mock_client, spec, max_response_size_bytes=50)
+    assert res.error is None
 
 
 # Helper stub for NewsPoller tests
 class _StubStorage:
     def __init__(self):
         self.records = {}
+
     def get_record(self, cap_id):
         return self.records.get(cap_id)
 
@@ -160,6 +248,7 @@ class _StubSupervisor:
     def __init__(self):
         self.storage = _StubStorage()
         self.processed = []
+
     def process_capture(self, cap):
         self.processed.append(cap)
 
@@ -167,20 +256,22 @@ class _StubSupervisor:
 def _make_poller(tmp_path, feeds=None, interval_seconds=10.0, max_item_age_seconds=14 * 24 * 3600):
     class _Paths:
         catchem_output_dir = tmp_path
+
     class _News:
         dedup_title_window_seconds = 3600
         adaptive_polling_enabled = True
+
     class _Settings:
         paths = _Paths()
         news = _News()
-    
+
     sup = _StubSupervisor()
     poller = NewsPoller(
         supervisor=sup,
         settings=_Settings(),
         feeds=feeds or [],
         interval_seconds=interval_seconds,
-        max_item_age_seconds=max_item_age_seconds
+        max_item_age_seconds=max_item_age_seconds,
     )
     return poller, sup
 
@@ -189,26 +280,26 @@ def _make_poller(tmp_path, feeds=None, interval_seconds=10.0, max_item_age_secon
 @pytest.mark.asyncio
 async def test_newspoller_start_stop_lifecycle(tmp_path):
     poller, _ = _make_poller(tmp_path)
-    
+
     mock_loop = MagicMock()
     mock_task = asyncio.Future()
     mock_loop.create_task.return_value = mock_task
-    
+
     with patch("asyncio.get_running_loop", return_value=mock_loop):
         # Initial start
         poller.start()
         assert poller._task is mock_task
-        
+
         # Start again when task exists and is not done (826-827)
         poller.start()
         assert poller._task is mock_task
         mock_loop.create_task.assert_called_once()
-        
+
         # Stop
         await poller.stop()
         assert mock_task.cancelled() is True
         assert poller._task is None
-        
+
         # Stop when task is None (839-840)
         await poller.stop()
 
@@ -218,17 +309,17 @@ async def test_newspoller_start_stop_lifecycle(tmp_path):
 async def test_newspoller_probe_feed(tmp_path):
     spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
     poller, sup = _make_poller(tmp_path, feeds=[spec])
-    
+
     # 10a. KeyError when feed is not configured (907)
     with pytest.raises(KeyError):
         await poller.probe_feed_async("https://not-configured.com/rss")
-        
+
     # Set up some feed health that should be cleared by manual probe (918-922)
     poller.feed_health[spec.name] = {
         "cooldown_until": (datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
         "backed_off": True,
     }
-    
+
     # Mock the fetch result
     item1 = ParsedItem(
         title="Duplicate Title",
@@ -237,41 +328,41 @@ async def test_newspoller_probe_feed(tmp_path):
         domain="example.com",
         published_ts=datetime.now(UTC),
     )
-    
+
     # 10b. fetch_feed_result with self._client is not None (927)
     poller._client = MagicMock()
     mock_result = FeedFetchResult(spec=spec, items=(item1,), status_code=200, elapsed_ms=5.0)
-    
+
     with patch("catchem.news_poller.fetch_feed_result", return_value=mock_result):
         # Run probe_feed_async
         health_dict = await poller.probe_feed_async(spec.url)
         assert isinstance(health_dict, dict)
-        
+
         # Verify cooldown was cleared
         health = poller.feed_health[spec.name]
         assert health["cooldown_until"] is None
         assert health["backed_off"] is False
-        
+
         # 10c. Seen URL skip (946)
         ingested2 = await poller.probe_feed_async(spec.url)
         assert ingested2.get("total_new_items", 0) == 0
-        
+
         # 10d. Already in storage skip (950)
         poller._seen = _SeenCache()
         with patch.object(sup.storage, "get_record", return_value=object()):
             ingested_storage = await poller.probe_feed_async(spec.url)
             assert ingested_storage.get("total_new_items", 0) == 0
-            
+
         # 10e. Duplicate title skip (955-956)
         poller._seen = _SeenCache()
         with patch.object(sup.storage, "get_record", return_value=None):
             now = datetime.now(UTC)
             poller._seen_titles["duplicate title"] = now
             poller._seen_titles.move_to_end("duplicate title")
-            
+
             ingested_title = await poller.probe_feed_async(spec.url)
             assert ingested_title.get("total_new_items", 0) == 0
-            
+
         # 10f. Stale published ts skip (942-943)
         poller._seen = _SeenCache()
         poller._seen_titles.clear()
@@ -293,45 +384,47 @@ async def test_newspoller_probe_feed(tmp_path):
 async def test_newspoller_run_and_tick(tmp_path):
     spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
     poller, _ = _make_poller(tmp_path, feeds=[spec])
-    
+
     # 11a. self.empty_ticks += 1 (999)
     with patch.object(poller, "_poll_once", return_value=0):
         mock_client = MagicMock()
         n = await poller._run_one_tick(mock_client)
         assert n == 0
         assert poller.empty_ticks == 1
-        
+
     # 11b. Exception in _run_one_tick (1002-1005)
     with patch.object(poller, "_poll_once", side_effect=Exception("mocked tick failure")):
         n = await poller._run_one_tick(mock_client)
         assert n == 0
         assert "mocked tick failure" in poller.last_error
-        
+
     # 11c. _run background loop execution (1011-1043)
     poller._stop.set()
     poller._grace = 0.01
     await poller._run()
-    
+
     poller._stop.clear()
-    
+
     async def fake_stop_soon():
         await asyncio.sleep(0.02)
         poller._stop.set()
-        
+
     stop_task = asyncio.create_task(fake_stop_soon())
-    
+
     with patch.object(poller, "_run_one_tick") as mock_tick:
         poller._grace = 0.001
         poller._interval = 0.01
         await poller._run()
         mock_tick.assert_called()
-        
+
     await stop_task
 
     # 11d. Stop during tick to trigger break (1024)
     poller._stop.clear()
+
     async def set_stop_during_tick(client):
         poller._stop.set()
+
     with patch.object(poller, "_run_one_tick", side_effect=set_stop_during_tick):
         poller._grace = 0.001
         await poller._run()
@@ -342,7 +435,7 @@ async def test_newspoller_run_and_tick(tmp_path):
 async def test_newspoller_poll_once_edge_cases(tmp_path):
     spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
     poller, sup = _make_poller(tmp_path, feeds=[spec])
-    
+
     # 12a. Cooldown validation with ValueError (1094-1095) and (1104->1116)
     poller.feed_health[spec.name] = {
         "cooldown_until": "invalid-iso-date-string",
@@ -358,7 +451,7 @@ async def test_newspoller_poll_once_edge_cases(tmp_path):
         "cooldown_until": (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),
         "backed_off": True,
     }
-    
+
     item = ParsedItem(
         title="Fresh story",
         text="Some fresh story body text",
@@ -366,7 +459,7 @@ async def test_newspoller_poll_once_edge_cases(tmp_path):
         domain="example.com",
         published_ts=datetime.now(UTC),
     )
-    
+
     mock_result = FeedFetchResult(spec=spec, items=(item,), status_code=200, elapsed_ms=5.0)
     with patch("catchem.news_poller.fetch_feed_result", return_value=mock_result):
         n = await poller._poll_once(None)
@@ -410,7 +503,7 @@ async def test_newspoller_poll_once_edge_cases(tmp_path):
 async def test_newspoller_ingest_edge_cases(tmp_path):
     spec = FeedSpec("test-feed", "https://example.com/rss", "example.com")
     poller, _ = _make_poller(tmp_path, feeds=[spec], max_item_age_seconds=0)
-    
+
     # 13a. item.published_ts is None in ingest (1196->1200)
     item_no_ts = ParsedItem(
         title="No TS Title",

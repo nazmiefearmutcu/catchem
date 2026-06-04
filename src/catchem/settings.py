@@ -58,9 +58,7 @@ class ModelConfig(BaseModel):
 class GuardConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     newsimpact_diagnostic_enabled: bool = False
-    allow_research_diagnostic_in_modes: list[str] = Field(
-        default_factory=lambda: ["research_diagnostic"]
-    )
+    allow_research_diagnostic_in_modes: list[str] = Field(default_factory=lambda: ["research_diagnostic"])
     abort_if_governance_state_changed: bool = True
 
 
@@ -94,7 +92,7 @@ class ReplayConfig(BaseModel):
         marker = "jsonl/"
         idx = raw.find(marker)
         if idx != -1:
-            tail = raw[idx + len(marker):]
+            tail = raw[idx + len(marker) :]
             return tail or "**/*.jsonl"
         return raw
 
@@ -177,6 +175,8 @@ class NewsConfig(BaseModel):
     # high-yield feeds keep polling every cycle. Separate from the error
     # circuit breaker (failures). False = poll every feed every cycle.
     adaptive_polling_enabled: bool = True
+    # Maximum response body size in bytes to prevent OOM on excessively large feeds.
+    max_response_size_bytes: int = 10 * 1024 * 1024
     # Real-time WebSocket PUSH channel (ws_push.WebSocketNewsChannel) —
     # complements the HTTP poller for genuine push firehoses (squawk/news WS)
     # so the freshest sources arrive with near-zero latency. OFF by default;
@@ -276,7 +276,9 @@ class PathConfig(BaseModel):
     awareness_data_dir: Path = Field(default_factory=lambda: Path("/tmp/awareness-missing/data"))
     catchem_output_dir: Path = Field(default_factory=lambda: project_root() / "data")
 
-    @field_validator("awareness_repo", "newsimpact_repo", "awareness_data_dir", "catchem_output_dir", mode="before")
+    @field_validator(
+        "awareness_repo", "newsimpact_repo", "awareness_data_dir", "catchem_output_dir", mode="before"
+    )
     @classmethod
     def _coerce_path(cls, v: Any) -> Path:
         return Path(v).expanduser() if v is not None else v
@@ -367,7 +369,11 @@ class Settings(BaseSettings):
             rel = url.removeprefix("sqlite:///")
             p = Path(rel)
             if not p.is_absolute():
-                p = self.paths.catchem_output_dir / Path(rel).relative_to("data") if rel.startswith("data/") else self.paths.catchem_output_dir.parent / p
+                p = (
+                    self.paths.catchem_output_dir / Path(rel).relative_to("data")
+                    if rel.startswith("data/")
+                    else self.paths.catchem_output_dir.parent / p
+                )
             p.parent.mkdir(parents=True, exist_ok=True)
             return p
         raise ValueError(f"unsupported sqlite_url: {url}")

@@ -289,6 +289,9 @@ async def test_newspoller_start_stop_lifecycle(tmp_path):
         # Initial start
         poller.start()
         assert poller._task is mock_task
+        # Close the unawaited coroutine of self._run to prevent RuntimeWarning
+        if mock_loop.create_task.call_args:
+            mock_loop.create_task.call_args[0][0].close()
 
         # Start again when task exists and is not done (826-827)
         poller.start()

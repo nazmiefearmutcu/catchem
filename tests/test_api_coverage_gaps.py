@@ -341,7 +341,8 @@ def test_lifespan_startup_failure():
             patch("catchem.api._build_ws_channel") as mock_ws_build,
             patch("catchem.api._build_archiver") as mock_arc_build,
         ):
-            mock_ws = AsyncMock()
+            mock_ws = MagicMock()
+            mock_ws.stop = AsyncMock()
             mock_ws_build.return_value = mock_ws
 
             mock_arc = MagicMock()

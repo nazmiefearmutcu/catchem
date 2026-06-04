@@ -542,6 +542,7 @@ def test_archiver_run_loop_exceptions(archiver_with_records, monkeypatch) -> Non
     original_wait_for = asyncio.wait_for
     async def fake_wait_for(aw, timeout, **kwargs):
         if timeout == 5.0:
+            aw.close()
             raise TimeoutError()
         return await original_wait_for(aw, timeout, **kwargs)
     monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
@@ -715,6 +716,7 @@ def test_archiver_run_loop_comprehensive(archiver_with_records, monkeypatch) -> 
     async def mock_wait_for_false_loop(aw, timeout, **kwargs):
         if timeout == 5.0:
             archiver._stop.set()
+            aw.close()
             raise TimeoutError()
         return await original_wait_for(aw, timeout, **kwargs)
         
@@ -734,12 +736,15 @@ def test_archiver_run_loop_comprehensive(archiver_with_records, monkeypatch) -> 
     async def mock_wait_for_success(aw, timeout, **kwargs):
         nonlocal interval_calls
         if timeout == 5.0:
+            aw.close()
             raise TimeoutError()
         elif timeout == archiver._interval:
             interval_calls += 1
             if interval_calls == 1:
+                aw.close()
                 raise TimeoutError()
             else:
+                aw.close()
                 return None
         return await original_wait_for(aw, timeout, **kwargs)
         
@@ -770,6 +775,7 @@ def test_archiver_run_loop_comprehensive(archiver_with_records, monkeypatch) -> 
     
     async def mock_wait_for_cancel(aw, timeout, **kwargs):
         if timeout == 5.0:
+            aw.close()
             raise TimeoutError()
         return await original_wait_for(aw, timeout, **kwargs)
         

@@ -24,7 +24,7 @@ from io import StringIO
 from pathlib import Path
 
 # Cap upload bytes to keep DoS / accidental huge files contained.
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024     # 5 MB
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 ALLOWED_SUFFIXES = (".txt", ".md", ".markdown", ".html", ".htm", ".jsonl", ".json")
 
 
@@ -108,7 +108,7 @@ def _first_sentence(text: str, max_chars: int = 200) -> str | None:
     return text[:max_chars].strip()
 
 
-def extract_text(filename: str, body: bytes) -> tuple[str | None, str]:
+def extract_text(filename: str, body: bytes, max_bytes: int | None = None) -> tuple[str | None, str]:
     """Extract `(title_hint, body_text)` from an uploaded file payload.
 
     Raises ``ValueError`` on unsupported suffixes, oversized payloads, and
@@ -116,14 +116,13 @@ def extract_text(filename: str, body: bytes) -> tuple[str | None, str]:
     """
     if not body:
         raise ValueError("upload body is empty")
-    if len(body) > MAX_UPLOAD_BYTES:
-        raise ValueError(f"upload too large: {len(body)} > {MAX_UPLOAD_BYTES} bytes")
+    limit = max_bytes if max_bytes is not None else MAX_UPLOAD_BYTES
+    if len(body) > limit:
+        raise ValueError(f"upload too large: {len(body)} > {limit} bytes")
 
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
-        raise ValueError(
-            f"unsupported file type: {suffix!r}. allowed: {ALLOWED_SUFFIXES}"
-        )
+        raise ValueError(f"unsupported file type: {suffix!r}. allowed: {ALLOWED_SUFFIXES}")
 
     text = body.decode("utf-8", errors="replace")
 

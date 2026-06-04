@@ -1751,9 +1751,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         url: str | None = Form(None),
     ) -> DemoRunResponse:
         """Upload .txt/.md/.html/.jsonl/.json => safe text extract => demo pipeline."""
-        body = await file.read()
+        s = _SETTINGS or load_settings()
+        limit = s.api.max_upload_size_bytes
+        if MAX_UPLOAD_BYTES != 5 * 1024 * 1024:
+            limit = MAX_UPLOAD_BYTES
+
+        body_chunks = []
+        total_bytes = 0
+        chunk_size = 256 * 1024
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > limit:
+                raise HTTPException(
+                    status_code=413, detail=f"upload too large: {total_bytes} > {limit} bytes"
+                )
+            body_chunks.append(chunk)
+
+        body = b"".join(body_chunks)
         try:
-            title_hint, body_text = extract_text(file.filename or "upload", body)
+            title_hint, body_text = extract_text(file.filename or "upload", body, max_bytes=limit)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         effective_title = (title or title_hint or "(untitled upload)").strip()

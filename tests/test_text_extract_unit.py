@@ -22,7 +22,9 @@ def test_extract_text_empty_and_large() -> None:
 
 def test_extract_text_html_edges() -> None:
     # Heading with no text -> first heading stays None, falls back to first sentence
-    html_no_heading_text = b"<html><body><h1>  </h1><p>First sentence of paragraph. Next sentence.</p></body></html>"
+    html_no_heading_text = (
+        b"<html><body><h1>  </h1><p>First sentence of paragraph. Next sentence.</p></body></html>"
+    )
     title, body = extract_text("test.html", html_no_heading_text)
     assert title == "First sentence of paragraph."
     assert body == "First sentence of paragraph. Next sentence."
@@ -55,12 +57,10 @@ def test_extract_text_html_edges() -> None:
     assert title == "My Valid Title"
     assert body == "My Valid TitleParagraph content."
 
-
     # Multiple blank lines collapse check (triggering blank > 1)
     html_multiple_breaks = b"<html><body>Line one<p></p><p></p><p></p>Line two</body></html>"
     title, body = extract_text("test.html", html_multiple_breaks)
     assert body == "Line one\n\nLine two"
-
 
 
 def test_first_sentence_edges() -> None:
@@ -72,9 +72,14 @@ def test_first_sentence_edges() -> None:
     assert title == "Hi. This is a very long text that has no other period until the end."
 
     # Text with no punctuation at all
-    text_no_punctuation = b"This is a long sentence with absolutely no punctuation whatsoever to test the fallback behaviour"
+    text_no_punctuation = (
+        b"This is a long sentence with absolutely no punctuation whatsoever to test the fallback behaviour"
+    )
     title, _ = extract_text("test.txt", text_no_punctuation)
-    assert title == "This is a long sentence with absolutely no punctuation whatsoever to test the fallback behaviour"
+    assert (
+        title
+        == "This is a long sentence with absolutely no punctuation whatsoever to test the fallback behaviour"
+    )
 
     # Whitespace-only text triggering empty first sentence returning None (line 103)
     title, body = extract_text("test.txt", b"    ")
@@ -94,8 +99,8 @@ def test_extract_text_jsonl_edges() -> None:
     # Empty lines and non-dict objects ignored, valid rows parsed
     jsonl_mixed = (
         b'{"text": "First line"}\n'
-        b'\n'  # Empty line
-        b'123\n'  # Non-dict JSON object
+        b"\n"  # Empty line
+        b"123\n"  # Non-dict JSON object
         b'{"body": "Second line"}\n'
     )
     title, body = extract_text("test.jsonl", jsonl_mixed)
@@ -131,3 +136,8 @@ def test_extract_text_json_edges() -> None:
     assert title is None
     assert body == "Content without title"
 
+
+def test_extract_text_custom_max_bytes() -> None:
+    # Too large body error with custom max_bytes
+    with pytest.raises(ValueError, match="upload too large"):
+        extract_text("test.txt", b"xxxxxx", max_bytes=5)

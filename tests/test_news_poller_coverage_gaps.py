@@ -569,3 +569,40 @@ async def test_newspoller_ingest_edge_cases(tmp_path):
 
     # 13g. prev is None in _record_adaptive_yield (1371)
     poller._record_adaptive_yield("not-exists-feed", 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_news_poller_client_none_and_has_max_size_param():
+    # Test for _has_max_size_param exception branch:
+    from catchem.news_poller import _has_max_size_param
+
+    assert _has_max_size_param(1) is False
+
+    # Test for NewsPoller poll_now_async when client is None:
+    sup = MagicMock()
+    settings = MagicMock()
+    settings.api.max_upload_size_bytes = 5 * 1024 * 1024
+
+    spec = FeedSpec(name="test_feed", url="http://test.com/rss", fallback_domain="test.com", parser="rss")
+
+    poller = NewsPoller(supervisor=sup, settings=settings, feeds=[spec])
+    poller._max_response_size_bytes = 1000
+
+    # default path where _has_max_size_param returns True
+    mock_res = FeedFetchResult(spec=spec, items=(), status_code=200, elapsed_ms=1.0)
+    with patch("catchem.news_poller.fetch_feed_result", return_value=mock_res) as mock_fetch:
+        await poller.probe_feed_async(spec.url)
+        mock_fetch.assert_called_once()
+        assert mock_fetch.call_args[1].get("max_response_size_bytes") == 1000
+
+    # path where _has_max_size_param returns False
+    with patch("catchem.news_poller.fetch_feed_result", return_value=mock_res) as mock_fetch:
+        with patch("catchem.news_poller._has_max_size_param", return_value=False):
+            await poller.probe_feed_async(spec.url)
+            mock_fetch.assert_called_once()
+            assert "max_response_size_bytes" not in mock_fetch.call_args[1]
+
+    # poll_now with client None
+    with patch("catchem.news_poller.fetch_feed_result", return_value=mock_res) as mock_fetch:
+        await poller.poll_now()
+        mock_fetch.assert_called_once()

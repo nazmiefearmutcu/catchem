@@ -166,7 +166,7 @@ def test_demo_upload_rejects_oversized(client: TestClient) -> None:
         files={"file": ("big.txt", io.BytesIO(big), "text/plain")},
         data={"domain": "x.com"},
     )
-    assert r.status_code == 422
+    assert r.status_code == 413
     assert "too large" in r.text
 
 
@@ -347,5 +347,57 @@ def test_demo_paste_custom_max_upload_size_limit() -> None:
                 "title": "Short",
                 "text": "1234567890",
             },
+        )
+        assert r2.status_code != 413
+
+
+def test_demo_upload_custom_max_upload_size_limit() -> None:
+    from catchem.api import create_app
+    from catchem.settings import load_settings, reload_settings
+
+    reload_settings()
+    s = load_settings()
+    s.api.max_upload_size_bytes = 10
+    app = create_app(s)
+    with TestClient(app) as c:
+        r = c.post(
+            "/ui/demo/upload",
+            files={"file": ("short.txt", io.BytesIO(b"12345678901"), "text/plain")},
+            data={"domain": "demo.local"},
+        )
+        assert r.status_code == 413
+        assert "too large" in r.text
+
+        r2 = c.post(
+            "/ui/demo/upload",
+            files={"file": ("short.txt", io.BytesIO(b"1234567890"), "text/plain")},
+            data={"domain": "demo.local"},
+        )
+        assert r2.status_code != 413
+
+
+def test_demo_upload_legacy_monkeypatched_limit(monkeypatch) -> None:
+    from catchem import api as _api
+
+    monkeypatch.setattr(_api, "MAX_UPLOAD_BYTES", 10)
+    from catchem.api import create_app
+    from catchem.settings import load_settings, reload_settings
+
+    reload_settings()
+    s = load_settings()
+    app = create_app(s)
+    with TestClient(app) as c:
+        r = c.post(
+            "/ui/demo/upload",
+            files={"file": ("short.txt", io.BytesIO(b"12345678901"), "text/plain")},
+            data={"domain": "demo.local"},
+        )
+        assert r.status_code == 413
+        assert "too large" in r.text
+
+        r2 = c.post(
+            "/ui/demo/upload",
+            files={"file": ("short.txt", io.BytesIO(b"1234567890"), "text/plain")},
+            data={"domain": "demo.local"},
         )
         assert r2.status_code != 413

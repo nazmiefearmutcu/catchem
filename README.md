@@ -1,5 +1,11 @@
 # catchem
 
+[![License: MIT](https://img.shields.io/github/license/nazmiefearmutcu/catchem?color=blue)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/nazmiefearmutcu/catchem?style=flat&logo=github)](https://github.com/nazmiefearmutcu/catchem/stargazers)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://python.org)
+[![Tauri](https://img.shields.io/badge/shell-Tauri%202-24c8db?logo=tauri&logoColor=white)](https://tauri.app/)
+[![Tests](https://img.shields.io/badge/pytest-500%2B-success?logo=pytest&logoColor=white)](#tests)
+
 A local-first news-to-finance impact engine. Catchem consumes public-text
 captures from the **Awareness** ingestion engine, runs them through a guarded
 finance-relevance pipeline, scores each with 23 quantitative signals, and
@@ -12,6 +18,43 @@ read-only / quarantined and never trained from this workspace.
 > Catchem does not include a live quote or market-price subsystem. Symbol
 > pages summarize finance-related news mentions and classifier outputs, not
 > current prices or market movement.
+
+## Data flow (at a glance)
+
+```mermaid
+flowchart LR
+    aw[(Awareness JSONL<br/>captures<br/>upstream of record)]
+    aw -->|tail post-commit| reader["awareness_reader<br/>skips .tmp"]
+    reader --> stages
+
+    subgraph stages["Pipeline stages"]
+      a["A — finance_filter"]
+      b["B — zero_shot<br/>stub or bart-large-mnli"]
+      c["C — sentiment<br/>stub or FinBERT"]
+      d["D — embeddings<br/>stub or MiniLM"]
+      e["E — reranker<br/>stub or ms-marco"]
+      fa["F.a — entity_linker"]
+      fb["F.b — symbol_mapper"]
+      g["G — chart_context (read-only)"]
+      ev["Evidence + reason_text"]
+      h["H — scoring"]
+    end
+
+    h --> rec[("FinancialImpactRecord<br/>multi-label class<br/>+ component scores")]
+    rec --> sqlite[(SQLite live view<br/>capped at 150 rows)]
+    rec --> csv["Drive archiver<br/>cloud-sync folder<br/>30 s tick"]
+
+    sqlite --> ui["Tauri 2 + React<br/>analyst UI"]
+
+    ni{{NewsImpact diagnostic<br/>guarded · read-only}} -.opt-in.-> h
+
+    classDef upstreamNode fill:#d4a57420,stroke:#d4a574,color:#d4a574
+    classDef stageNode fill:#1f6bff15,stroke:#1f6bff,color:#1f6bff
+    classDef storeNode fill:#dc572115,stroke:#dc5721,color:#dc5721
+    class aw,ni upstreamNode
+    class a,b,c,d,e,fa,fb,g,ev,h stageNode
+    class rec,sqlite,csv,ui storeNode
+```
 
 ## Screenshots
 

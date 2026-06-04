@@ -11,6 +11,7 @@ and continues — it never fails the run.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from collections.abc import Mapping
@@ -185,6 +186,7 @@ _INTERNAL_REGISTRY: Mapping[str, str] = {
 }
 
 
+@functools.lru_cache(maxsize=4096)
 def _alias_pattern(alias: str) -> re.Pattern[str]:
     # Company names and instruments must match as tokens, not as substrings of
     # unrelated words such as "unaffordable" -> "Ford".

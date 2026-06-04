@@ -93,6 +93,7 @@ def test_timezone_shifts_which_cell_record_lands_in() -> None:
     assert utc["timezone"] == "UTC"
     assert et["timezone"] == "America/New_York"
     assert tk["timezone"] == "Asia/Tokyo"
+
     def by_key(out: dict) -> set[tuple[int, int]]:
         return {(c["weekday"], c["hour"]) for c in out["cells"] if c["count"]}
 
@@ -133,3 +134,11 @@ def test_fallback_to_created_at_when_published_ts_missing() -> None:
     out = compute_heatmap(records)
     by_key = {(c["weekday"], c["hour"]): c["count"] for c in out["cells"]}
     assert by_key[(2, 10)] == 2
+
+
+def test_non_string_timezone_fallback() -> None:
+    # Pass None as timezone, should fallback to America/New_York
+    out = compute_heatmap([_rec("2026-05-27T14:00:00Z")], timezone=None)
+    assert out["timezone"] == "America/New_York"
+    by_key = {(c["weekday"], c["hour"]) for c in out["cells"] if c["count"]}
+    assert by_key == {(2, 10)}

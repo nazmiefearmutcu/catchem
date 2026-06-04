@@ -126,16 +126,12 @@ def test_parse_ws_message_unwraps_data_envelope() -> None:
 def test_parse_ws_message_synthesizes_url_for_squawk_without_link() -> None:
     # URL-less squawk frame: a deterministic pseudo-URL is synthesized from the
     # fallback domain + headline so the capture_id stays unique + stable.
-    item = parse_ws_message(
-        '{"text": "BREAKING: oil spikes"}', fallback_domain="squawk.example.com"
-    )
+    item = parse_ws_message('{"text": "BREAKING: oil spikes"}', fallback_domain="squawk.example.com")
     assert item is not None
     assert item.domain == "squawk.example.com"
     assert item.url.startswith("https://squawk.example.com/ws/")
     # Same headline → same synthesized URL (idempotent dedup key).
-    again = parse_ws_message(
-        '{"text": "BREAKING: oil spikes"}', fallback_domain="squawk.example.com"
-    )
+    again = parse_ws_message('{"text": "BREAKING: oil spikes"}', fallback_domain="squawk.example.com")
     assert again is not None
     assert again.url == item.url
 
@@ -144,9 +140,9 @@ def test_parse_ws_message_synthesizes_url_for_squawk_without_link() -> None:
     "raw",
     [
         "not json at all",
-        "[1, 2, 3]",            # JSON list, not an object
-        '{"foo": "bar"}',        # object but no title/body
-        '{"title": "   "}',      # whitespace-only title, no body
+        "[1, 2, 3]",  # JSON list, not an object
+        '{"foo": "bar"}',  # object but no title/body
+        '{"title": "   "}',  # whitespace-only title, no body
         "",
     ],
 )
@@ -323,8 +319,8 @@ def test_channel_builds_sources_from_settings() -> None:
         class news:
             websocket_sources: ClassVar[list[dict[str, str]]] = [
                 {"name": "wire", "url": "wss://a/ws", "fallback_domain": "a.com"},
-                {"url": "wss://b/ws"},          # name defaults to url
-                {"name": "no-url"},              # dropped (no url)
+                {"url": "wss://b/ws"},  # name defaults to url
+                {"name": "no-url"},  # dropped (no url)
             ]
 
     chan = WebSocketNewsChannel(
@@ -370,9 +366,7 @@ def test_ws_status_enabled_returns_stats_envelope(
     envelope shape the UI reads."""
     from catchem import api as api_module
 
-    chan = _make_channel(
-        sources=[WsSourceSpec("wire", "wss://wire.example.com/ws", "wire.example.com")]
-    )
+    chan = _make_channel(sources=[WsSourceSpec("wire", "wss://wire.example.com/ws", "wire.example.com")])
     monkeypatch.setattr(api_module, "_WS_CHANNEL", chan, raising=False)
 
     r = client.get("/api/news/ws-status")
@@ -408,7 +402,7 @@ async def test_graceful_close_with_frames_resets_failure_count(
 
     async def _graceful_with_frames(_spec, _st) -> None:
         _st.messages_received += 3  # session delivered frames…
-        await asyncio.sleep(0)      # …then the server closed (graceful return)
+        await asyncio.sleep(0)  # …then the server closed (graceful return)
 
     backoff_calls: list[int] = []
 
@@ -533,11 +527,13 @@ def test_sources_from_settings_attribute_error() -> None:
     class _S:
         class paths:
             catchem_output_dir = Path("/tmp")
+
         class news:
             websocket_sources: ClassVar[list] = [
                 "not-a-dict",  # will raise AttributeError
                 {"url": "wss://valid/ws"},
             ]
+
     chan = WebSocketNewsChannel(
         supervisor=_FakeSupervisor(),  # type: ignore[arg-type]
         settings=_S(),  # type: ignore[arg-type]
@@ -624,7 +620,9 @@ async def test_run_source_cancelled_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_run_source_exception_resets_failures_if_messages_received(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_source_exception_resets_failures_if_messages_received(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = WsSourceSpec("s", "wss://s/ws")
     chan = _make_channel(sources=[spec])
     st = chan._states[spec.name]
@@ -652,18 +650,22 @@ async def test_connect_and_read_websockets(monkeypatch: pytest.MonkeyPatch) -> N
     class MockWS:
         def __init__(self):
             self.msgs = ["msg1"]
+
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *args):
             pass
+
         def __aiter__(self):
             return self
+
         async def __anext__(self):
             if not self.msgs:
                 raise StopAsyncIteration
             return self.msgs.pop(0)
 
-    def mock_connect(url):
+    def mock_connect(*args, **kwargs):
         return MockWS()
 
     mock_websockets.connect = mock_connect
@@ -687,10 +689,13 @@ async def test_connect_and_read_httpx_ws(monkeypatch: pytest.MonkeyPatch) -> Non
         def __init__(self, channel):
             self.channel = channel
             self.msgs = ["msg1"]
+
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *args):
             pass
+
         async def receive_text(self):
             if not self.msgs:
                 raise ConnectionError("connection closed")
@@ -776,10 +781,13 @@ async def test_connect_and_read_httpx_ws_clean_stop(monkeypatch: pytest.MonkeyPa
         def __init__(self, channel):
             self.channel = channel
             self.msgs = ["msg1"]
+
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *args):
             pass
+
         async def receive_text(self):
             # Set stop so the next iteration exits cleanly
             self.channel._stop.set()
@@ -830,12 +838,16 @@ async def test_connect_and_read_websockets_stop_during_read(monkeypatch: pytest.
         def __init__(self, channel):
             self.channel = channel
             self.msgs = ["msg1", "msg2"]
+
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *args):
             pass
+
         def __aiter__(self):
             return self
+
         async def __anext__(self):
             if not self.msgs:
                 raise StopAsyncIteration
@@ -844,7 +856,7 @@ async def test_connect_and_read_websockets_stop_during_read(monkeypatch: pytest.
                 self.channel._stop.set()
             return self.msgs.pop(0)
 
-    def mock_connect(url):
+    def mock_connect(*args, **kwargs):
         return MockWS(chan)
 
     mock_websockets.connect = mock_connect
@@ -858,3 +870,73 @@ async def test_connect_and_read_websockets_stop_during_read(monkeypatch: pytest.
     chan._stop.clear()
     await chan._connect_and_read(spec, st)
     assert st.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_websockets_oversized_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_websockets = MagicMock()
+
+    class MockWS:
+        def __init__(self):
+            self.msgs = ["a" * (ws_push.MAX_WS_MESSAGE_BYTES + 1)]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.msgs:
+                raise StopAsyncIteration
+            return self.msgs.pop(0)
+
+    mock_websockets.connect = lambda *args, **kwargs: MockWS()
+    monkeypatch.setitem(sys.modules, "websockets", mock_websockets)
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    chan._lib = "websockets"
+    st = chan._states[spec.name]
+
+    with pytest.raises(ValueError, match="exceeds limit"):
+        await chan._connect_and_read(spec, st)
+
+
+@pytest.mark.asyncio
+async def test_connect_and_read_httpx_ws_oversized_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_httpx_ws = MagicMock()
+
+    class MockWS:
+        def __init__(self, channel):
+            self.channel = channel
+            self.msgs = ["a" * (ws_push.MAX_WS_MESSAGE_BYTES + 1)]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def receive_text(self):
+            if not self.msgs:
+                raise ConnectionError("connection closed")
+            return self.msgs.pop(0)
+
+    def mock_aconnect_ws(url, client):
+        return MockWS(chan)
+
+    mock_httpx_ws.aconnect_ws = mock_aconnect_ws
+    monkeypatch.setitem(sys.modules, "httpx_ws", mock_httpx_ws)
+
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    chan._lib = "httpx_ws"
+    st = chan._states[spec.name]
+
+    chan._stop.clear()
+    with pytest.raises(ValueError, match="exceeds limit"):
+        await chan._connect_and_read(spec, st)

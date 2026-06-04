@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from functools import lru_cache
 from urllib.parse import quote_plus, urlparse
 
 from ..news_poller import (
@@ -66,12 +67,74 @@ _QUERIES: tuple[tuple[str, str], ...] = (
 
 def _build_url(query: str) -> str:
     """Assemble a `search_by_date` URL with the query properly URL-encoded."""
-    return (
-        f"{_HN_ALGOLIA_API}"
-        f"?query={quote_plus(query)}"
-        "&tags=story"
-        "&hitsPerPage=50"
-    )
+    return f"{_HN_ALGOLIA_API}?query={quote_plus(query)}&tags=story&hitsPerPage=50"
+
+
+@lru_cache(maxsize=2048)
+def _parse_epoch_cached(epoch: int | float) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(epoch, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+@lru_cache(maxsize=2048)
+def _parse_iso_cached(raw: str) -> datetime | None:
+    val_len = len(raw)
+    if (
+        val_len == 20
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and raw[10] == "T"
+        and raw[13] == ":"
+        and raw[16] == ":"
+        and raw[19] == "Z"
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    if (
+        val_len == 24
+        and raw[4] == "-"
+        and raw[7] == "-"
+        and raw[10] == "T"
+        and raw[13] == ":"
+        and raw[16] == ":"
+        and raw[19] == "."
+        and raw[23] == "Z"
+    ):
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[5:7]),
+                int(raw[8:10]),
+                int(raw[11:13]),
+                int(raw[14:16]),
+                int(raw[17:19]),
+                int(raw[20:23]) * 1000,
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    normalized = raw
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(normalized)
+        return dt.astimezone(UTC) if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 def _parse_created(hit: dict[str, object]) -> datetime:
@@ -85,23 +148,17 @@ def _parse_created(hit: dict[str, object]) -> datetime:
     if isinstance(epoch, bool):
         epoch = None  # guard: bool is an int subclass
     if isinstance(epoch, (int, float)):
-        try:
-            return datetime.fromtimestamp(epoch, tz=UTC)
-        except (OverflowError, OSError, ValueError):
-            pass
+        dt = _parse_epoch_cached(epoch)
+        if dt is not None:
+            return dt
 
     iso = hit.get("created_at")
-    if isinstance(iso, str) and iso.strip():
+    if isinstance(iso, str):
         raw = iso.strip()
-        # Algolia uses a trailing "Z"; datetime.fromisoformat only learned to
-        # accept it in 3.11, so normalize to "+00:00" defensively.
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            dt = datetime.fromisoformat(raw)
-            return dt.astimezone(UTC) if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
-        except ValueError:
-            pass
+        if raw:
+            dt = _parse_iso_cached(raw)
+            if dt is not None:
+                return dt
 
     return datetime.now(UTC)
 
@@ -169,13 +226,15 @@ def _parse_hn(body: bytes, fallback_domain: str) -> list[ParsedItem]:
                 is_item_page = True
 
             domain = _resolve_domain(url, is_item_page=is_item_page) or fallback_domain
-            items.append(ParsedItem(
-                title=title,
-                text=title,  # HN search carries no body — reuse the headline.
-                url=url,
-                domain=domain,
-                published_ts=_parse_created(hit),
-            ))
+            items.append(
+                ParsedItem(
+                    title=title,
+                    text=title,  # HN search carries no body — reuse the headline.
+                    url=url,
+                    domain=domain,
+                    published_ts=_parse_created(hit),
+                )
+            )
         return items
     except Exception:
         return []

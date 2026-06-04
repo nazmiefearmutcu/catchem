@@ -449,6 +449,8 @@ _TITLE_DEDUP_MIN_CHARS: int = 5
 _SOURCE_SUFFIX_RE = re.compile(r"\s+[-|\u2013\u2014]\s+[^-|\u2013\u2014]{1,40}$")
 # Anything that isn't a word char or whitespace → dropped during normalization.
 _TITLE_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+_SPACES_RE = re.compile(r"\s+")
+_HTML_TAGS_RE = re.compile(r"<[^>]+>")
 
 
 def _normalize_title(title: str) -> str:
@@ -474,7 +476,7 @@ def _normalize_title(title: str) -> str:
         raw = _SOURCE_SUFFIX_RE.sub("", raw).strip()
         # Strip punctuation, then collapse whitespace.
         stripped = _TITLE_PUNCT_RE.sub(" ", raw)
-        normalized = re.sub(r"\s+", " ", stripped).strip()
+        normalized = _SPACES_RE.sub(" ", stripped).strip()
         # Too few meaningful chars (spaces don't count) → skip dedup.
         if len(normalized.replace(" ", "")) < _TITLE_DEDUP_MIN_CHARS:
             return ""
@@ -562,9 +564,9 @@ def _strip_html(html_text: str) -> str:
     if not html_text:
         return ""
     # Drop tags, collapse whitespace, unescape entities.
-    text = re.sub(r"<[^>]+>", " ", html_text)
+    text = _HTML_TAGS_RE.sub(" ", html_text)
     text = html.unescape(text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = _SPACES_RE.sub(" ", text).strip()
     return text
 
 

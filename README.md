@@ -1,26 +1,91 @@
-# fusion_stack
+# catchem
 
-A local-first sidecar workspace that fuses two existing systems:
+[![License: MIT](https://img.shields.io/github/license/nazmiefearmutcu/catchem?color=blue)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/nazmiefearmutcu/catchem?style=flat&logo=github)](https://github.com/nazmiefearmutcu/catchem/stargazers)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://python.org)
+[![Tauri](https://img.shields.io/badge/shell-Tauri%202-24c8db?logo=tauri&logoColor=white)](https://tauri.app/)
+[![Tests](https://img.shields.io/badge/pytest-220%2B-success?logo=pytest&logoColor=white)](#tests)
+
+**Reads news articles + RSS, then tags each one by what it would move** (equity / crypto / FX / commodity / rates), which direction (positive / negative / mixed / uncertain), and how soon (intraday / short / medium / long). Lives entirely on your laptop. Useful if you want a structured stream of finance signals from the open web.
+
+Under the hood, catchem is a local-first sidecar workspace that fuses two existing systems:
 
 - **Awareness** — public-text ingestion engine (stable upstream, system of record).
 - **NewsImpact** — multimodal candidate that is **currently quarantined** and
   permitted only as a read-only diagnostic.
 
-`fusion_stack` consumes Awareness JSONL captures **after** they are durably
+`catchem` consumes Awareness JSONL captures **after** they are durably
 committed and emits one `FinancialImpactRecord` per capture: a multi-label
 classification of asset class / impact reason / symbols / sentiment / evidence,
 together with the component scores that produced the decision.
 
-It ships with a premium analyst UI (React + TypeScript) served from the same
-FastAPI process — no separate frontend runtime.
-
 This repo never modifies Awareness or NewsImpact source. It is reversible:
 deleting it has zero effect on either upstream system.
+
+## Data flow (at a glance)
+
+```mermaid
+flowchart LR
+    aw[(Awareness JSONL<br/>captures<br/>upstream of record)]
+    aw -->|tail post-commit| reader["awareness_reader<br/>skips .tmp"]
+    reader --> stages
+
+    subgraph stages["Pipeline stages"]
+      a["A — finance_filter"]
+      b["B — zero_shot<br/>stub or bart-large-mnli"]
+      c["C — sentiment<br/>stub or FinBERT"]
+      d["D — embeddings<br/>stub or MiniLM"]
+      e["E — reranker<br/>stub or ms-marco"]
+      fa["F.a — entity_linker"]
+      fb["F.b — symbol_mapper"]
+      g["G — chart_context (read-only)"]
+      ev["Evidence + reason_text"]
+      h["H — scoring"]
+    end
+
+    h --> rec[("FinancialImpactRecord<br/>multi-label class<br/>+ component scores")]
+    rec --> sqlite[(SQLite live view<br/>capped at 150 rows)]
+    rec --> csv["Drive archiver<br/>cloud-sync folder<br/>30 s tick"]
+
+    sqlite --> ui["Tauri 2 + React<br/>analyst UI"]
+
+    ni{{NewsImpact diagnostic<br/>guarded · read-only}} -.opt-in.-> h
+
+    classDef upstreamNode fill:#d4a57420,stroke:#d4a574,color:#d4a574
+    classDef stageNode fill:#1f6bff15,stroke:#1f6bff,color:#1f6bff
+    classDef storeNode fill:#dc572115,stroke:#dc5721,color:#dc5721
+    class aw,ni upstreamNode
+    class a,b,c,d,e,fa,fb,g,ev,h stageNode
+    class rec,sqlite,csv,ui storeNode
+```
+
+## Preview
+
+> Native macOS `.app` (Tauri shell + Python FastAPI sidecar + React UI). Launch from `/Applications/Catchem.app`.
+
+#### Overview — Reading the tape
+![Catchem analyst workstation overview with mode / stubs / NewsImpact strip, "Reading the tape" status hero, KPI tiles for total records / finance-relevant / DLQ / distinct asset classes / benchmark F1, asset-class and reason-code distributions, trend chart per asset class, most recent relevant news feed with confidence scores](docs/screenshots/01-overview.png)
+
+#### Live Feed — News poller
+![Live feed view: news poller status "Polling 53 sources", ingested-this-session counters, last-fetch lag, filter sidebar for relevance / asset class / reason code / symbol / sentiment, scrolling table of news items with finance-impact tags and per-row confidence scores](docs/screenshots/02-live-feed.png)
+
+#### Symbols — Per-symbol news mentions
+![Symbols index view: searchable list of tickers with finance-related mention counts, latest mention timestamps, top contributing reason codes per symbol, paginated table](docs/screenshots/03-symbols.png)
+
+#### Backtest — Prediction calibration
+![Backtest view: 200-paired-reviews calibration chart comparing predicted vs ground truth across 5 score bins, items-evaluated and mean-abs-error metrics, signed-error and max-abs-error breakdown, predictions sample table with capture_id / predicted / ground truth / delta columns](docs/screenshots/04-backtest.png)
+
+#### Reviews — Analyst feedback workflow
+![Reviews queue view: analyst feedback workflow with per-capture predicted vs human-reviewed ground truth deltas, agreement strip, recent reviews stream](docs/screenshots/05-reviews.png)
+
+The Overview pane is the analyst's home: live KPIs, asset-class distribution,
+reason-code breakdown, and a relevance trend. Each panel — Live Feed, Symbols,
+Backtest, Reviews — is a dedicated workspace with the same dark-theme primitives.
 
 ## One-command bootstrap
 
 ```bash
-bash scripts/fusion_bootstrap_and_run.sh
+bash scripts/catchem_bootstrap_and_run.sh
 ```
 
 What it does (idempotent):
@@ -29,16 +94,13 @@ What it does (idempotent):
 2. installs `fusion_stack[dev]` editable
 3. installs `awareness` editable if available
 4. verifies both repo paths
-5. runs the NewsImpact guard verifier — **aborts** if the release gate flipped
+5. runs the NewsImpact guard verifier — aborts if the release gate has flipped
 6. (optional) warms HF model caches when `--with-ml` is set
 7. (optional) attempts Kaggle dataset downloads if credentials exist
-8. installs frontend `npm` deps + builds the SPA into `src/fusion_stack/static/app`
-9. initializes `data/{results,db,logs,cache,vector_index,...}`
-10. runs replay mode against Awareness JSONL (default `--max=50`)
-11. starts the local API on `127.0.0.1:8087` in the background
-12. prints a summary
-
-Open: <http://127.0.0.1:8087/>
+8. initializes `data/{results,db,logs,cache,vector_index,...}`
+9. runs replay mode against Awareness JSONL (default `--max=50`)
+10. starts the local API on `127.0.0.1:8087` in the background
+11. prints a summary
 
 Flags:
 - `--with-ml` — install + warm the HF model extras
@@ -46,23 +108,6 @@ Flags:
 - `--mode=...` — `production_safe` | `replay_existing` (default) | `live_tail` | `research_diagnostic`
 - `--max=N` — replay record cap
 - `--skip-run` — only do setup, don't run the pipeline
-- `--skip-frontend-build` — reuse the existing bundle (faster restarts)
-- `--dev-ui` — print the Vite dev-server command
-
-## The premium UI
-
-Routes:
-
-- `/` — Overview (cards, distributions, trend, recent flow, benchmark snapshot)
-- `/feed` — Live feed with URL-state filters, drawer-driven detail
-- `/map` — Asset-class × reason-code heatmap + stacked trend
-- `/symbols` and `/symbols/:sym` — Symbols explorer
-- `/benchmark` — Golden-set precision/recall/F1, per-item, history
-- `/ops` — System health, guard status, model versions, raw config
-- `/settings` — Theme, shortcuts, mode explanations
-- `/legacy` — The original vanilla dashboard (kept until full replacement is proven)
-
-Power-user keys: `⌘K` opens the command palette; `g o`/`g f`/`g m`/`g s`/`g b`/`g x`/`g ,` navigate; `Esc` closes drawers.
 
 ## Modes
 
@@ -83,28 +128,15 @@ Local-only, binds to `127.0.0.1:8087`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /` | premium SPA |
-| `GET /legacy` | vanilla dashboard fallback |
 | `GET /healthz` | liveness |
-| `GET /docs` | OpenAPI |
-| **Aggregation** ||
-| `GET /ui/summary` | one-shot landing payload |
-| `GET /ui/facets` | facet counts for filter chips |
-| `GET /ui/timeline` | time-bucketed counts |
-| `GET /ui/trends` | stacked trend per asset class |
-| `GET /ui/matrix` | asset_class × reason_code heatmap |
-| `GET /ui/top-symbols` / `/ui/top-reasons` | leaderboards |
-| `GET /ui/symbol/{sym}` | aggregated symbol view |
-| `GET /ui/guards` | NewsImpact governance snapshot |
-| `GET /ui/benchmark/latest` | run + return golden-set report |
-| `GET /ui/benchmark/history` | persisted history (jsonl) |
-| `GET /ui/stream` | SSE: `summary` + `tick` events |
-| **Records** (preserved from v1) ||
-| `GET /recent` | recent records |
+| `GET /config` | mode + diagnostic state |
+| `GET /metrics` | counts + DLQ |
+| `GET /dashboard` | pre-shaped overview |
+| `GET /recent` | recent FinancialImpactRecord rows |
 | `GET /record/{capture_id}` | one record |
-| `GET /records/by-symbol/{sym}` | label filter |
-| `GET /records/by-asset-class/{ac}` | label filter |
-| `GET /records/by-reason/{rc}` | label filter |
+| `GET /records/by-symbol/{symbol}` | reverse lookup |
+| `GET /records/by-asset-class/{ac}` | filter |
+| `GET /records/by-reason/{rc}` | filter |
 | `POST /replay` | run one replay pass |
 | `POST /process-one` | run one capture through the pipeline |
 
@@ -114,7 +146,7 @@ Local-only, binds to `127.0.0.1:8087`.
 fusion-stack run --mode replay_existing
 fusion-stack replay --path data/awareness/jsonl/captures/.../X.jsonl
 fusion-stack inspect --capture-id <id>
-fusion-stack benchmark --golden
+fusion-stack benchmark
 fusion-stack validate-guards
 fusion-stack status
 fusion-stack serve
@@ -123,38 +155,45 @@ fusion-stack serve
 ## Tests
 
 ```bash
-make test              # all Python tests (~7s, 86 tests)
-make test-fast         # skip ml/smoke/integration
-make test-guards       # guard suite only (must always be green)
-make test-smoke        # end-to-end + bootstrap shell
-(cd frontend && npm test)   # Vitest UI tests (7 tests)
+make test           # everything
+make test-fast      # skip ml/smoke/integration
+make test-guards    # guard suite only (must always be green)
+make test-smoke     # end-to-end + bootstrap shell
 ```
 
 ## Layout
 
 ```
 fusion_stack/
-├── configs/                  fusion.yaml, taxonomy.yaml, source_of_truth.yaml
-├── docs/                     SYSTEM_OVERVIEW, RUNBOOK, TEST_MATRIX, SOURCE_OF_TRUTH,
-│                             UI_OVERVIEW, FRONTEND_ARCHITECTURE, KEYBOARD_SHORTCUTS
-├── frontend/                 React + TypeScript + Vite source
-├── scripts/                  bootstrap + HF warm + Kaggle + guard verifier
+├── configs/                 fusion.yaml, taxonomy.yaml, source_of_truth.yaml
+├── docs/                    SYSTEM_OVERVIEW, RUNBOOK, TEST_MATRIX, SOURCE_OF_TRUTH
+├── scripts/                 bootstrap shell + HF warm + Kaggle (optional) + guard verifier
 ├── src/fusion_stack/
-│   ├── settings.py · schemas.py · taxonomy.py
-│   ├── storage.py · awareness_reader.py · awareness_replay.py
-│   ├── finance_filter.py · zero_shot_classifier.py · sentiment.py
-│   ├── embeddings.py · reranker.py · entity_linker.py
-│   ├── symbol_mapper.py · channel_mapper.py · chart_context.py
-│   ├── evidence.py · scoring.py
-│   ├── newsimpact_guarded_adapter.py    ← the safety boundary
-│   ├── golden.py                        ← synthetic benchmark
-│   ├── service.py · supervisor.py · dashboard_data.py · bootstrap.py
-│   ├── api.py                           ← FastAPI + /ui/* + SSE + bundle serving
-│   ├── cli.py                           ← Typer
-│   └── static/
-│       ├── dashboard.html               ← vanilla legacy dashboard
-│       └── app/                         ← built React bundle (generated)
-└── tests/                    pytest — guard + unit + integration + smoke + /ui
+│   ├── settings.py          pydantic-settings (yaml + env)
+│   ├── schemas.py           AwarenessCaptureView, FinancialImpactRecord
+│   ├── taxonomy.py          loader for configs/taxonomy.yaml
+│   ├── storage.py           SQLite + parquet + DLQ + offsets
+│   ├── awareness_reader.py  post-commit JSONL iterator (skips .tmp)
+│   ├── awareness_replay.py  resumable runner with offsets
+│   ├── finance_filter.py    Stage A
+│   ├── zero_shot_classifier.py  Stage B (stub + bart-large-mnli)
+│   ├── sentiment.py         Stage C (stub + FinBERT)
+│   ├── embeddings.py        Stage D (stub + MiniLM) + VectorIndex
+│   ├── reranker.py          Stage E (stub + ms-marco)
+│   ├── entity_linker.py     Stage F.a (regex + lexicons)
+│   ├── symbol_mapper.py     Stage F.b (internal registry + optional NewsImpact)
+│   ├── channel_mapper.py    asset×reason → market channel
+│   ├── chart_context.py     Stage G (read-only; metadata only)
+│   ├── evidence.py          extractive sentences + reason_text
+│   ├── scoring.py           Stage H final decision
+│   ├── newsimpact_guarded_adapter.py  guarded diagnostic adapter
+│   ├── service.py           FusionService (orchestrates stages)
+│   ├── supervisor.py        owns Settings → Storage → Service → Replay/Tail
+│   ├── api.py               FastAPI
+│   ├── cli.py               Typer
+│   ├── bootstrap.py         programmatic bootstrap
+│   └── dashboard_data.py    JSON shaping for /dashboard
+└── tests/                   guard + unit + integration + smoke
 ```
 
 ## Constraints (non-negotiable)

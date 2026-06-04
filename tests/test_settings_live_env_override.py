@@ -365,3 +365,13 @@ def test_settings_coverage_gaps(tmp_path) -> None:
     res = _deep_merge(base, over)
     assert res == {"a": 1, "b": {"c": 2, "d": 3}, "e": 4}
 
+
+def test_settings_validation_corrupt_yaml(tmp_path) -> None:
+    # Write a config with corrupt/invalid top-level keys
+    bad_yaml = tmp_path / "corrupt_config.yaml"
+    bad_yaml.write_text("storages:\n  sqlite_url: sqlite:///data/db/catchem.sqlite3", encoding="utf-8")
+    
+    with pytest.raises(ValueError, match=r"Invalid configuration keys in .*storages"):
+        load_settings(bad_yaml)
+
+

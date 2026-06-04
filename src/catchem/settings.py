@@ -42,6 +42,13 @@ def _yaml_overrides(path: Path | None = None) -> dict[str, Any]:
         data = yaml.safe_load(fh) or {}
     if not isinstance(data, dict):
         raise ValueError(f"catchem config at {path} did not parse to a mapping")
+    
+    # Defensive schema validation: check that all keys in the YAML file are valid fields of Settings
+    # This prevents misspelled or corrupt top-level keys from being silently ignored.
+    invalid_keys = [k for k in data if k not in Settings.model_fields]
+    if invalid_keys:
+        raise ValueError(f"Invalid configuration keys in {path}: {', '.join(invalid_keys)}")
+        
     return data
 
 

@@ -26,6 +26,7 @@ records and produces deterministic output for a given input.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -89,16 +90,9 @@ class RegimeReport:
 # ---------------------------------------------------------------------------
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
-
-    Naive strings are interpreted as UTC. Anything unparseable yields
-    ``None`` so callers can fall through to a secondary field.
-    """
-
-    if not isinstance(value, str) or not value:
-        return None
-    raw = value.strip()
+@functools.lru_cache(maxsize=1024)
+def _parse_ts_cached(raw_str: str) -> datetime | None:
+    raw = raw_str.strip()
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
     try:
@@ -112,14 +106,25 @@ def _parse_ts(value: Any) -> datetime | None:
     return parsed
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    """Parse an ISO timestamp, returning a tz-aware UTC ``datetime``.
+
+    Naive strings are interpreted as UTC. Anything unparseable yields
+    ``None`` so callers can fall through to a secondary field.
+    """
+
+    if not isinstance(value, str) or not value:
+        return None
+    return _parse_ts_cached(value)
+
+
 def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:
     """Prefer ``published_ts``; fall back to ``created_at``."""
 
-    return _parse_ts(record.get("published_ts")) or _parse_ts(
-        record.get("created_at")
-    )
+    return _parse_ts(record.get("published_ts")) or _parse_ts(record.get("created_at"))
 
 
+@functools.lru_cache(maxsize=1024)
 def _floor_bucket(ts: datetime, bucket_minutes: int) -> datetime:
     """Floor ``ts`` to the start of its ``bucket_minutes``-wide window.
 
@@ -127,41 +132,93 @@ def _floor_bucket(ts: datetime, bucket_minutes: int) -> datetime:
     two reports built from overlapping data will share boundaries.
     """
 
-    epoch = datetime(1970, 1, 1, tzinfo=UTC)
-    delta = ts - epoch
     bucket_seconds = bucket_minutes * 60
-    floor_seconds = (int(delta.total_seconds()) // bucket_seconds) * bucket_seconds
-    return epoch + timedelta(seconds=floor_seconds)
+    floor_seconds = (int(ts.timestamp()) // bucket_seconds) * bucket_seconds
+    return datetime.fromtimestamp(floor_seconds, UTC)
 
 
+@functools.lru_cache(maxsize=1024)
 def _iso(ts: datetime) -> str:
     """Canonical ISO output (always trailing ``+00:00``, no microseconds)."""
 
     return ts.replace(microsecond=0).isoformat()
 
 
-def _mass_spread(
-    records: Iterable[Mapping[str, Any]], field: str
-) -> dict[str, float]:
-    """Distribute mass ``1/len(values)`` across each record's list-field.
+def _process_bucket_records(
+    records: Iterable[Mapping[str, Any]],
+) -> tuple[
+    dict[str, float],
+    dict[str, float],
+    tuple[tuple[str, float], ...],
+    float,
+]:
+    asset_spread: dict[str, float] = {}
+    reason_spread: dict[str, float] = {}
+    pos_count = 0
+    neu_count = 0
+    neg_count = 0
+    labelled = 0
+    rel_scores: list[float] = []
 
-    Records with empty or missing values contribute nothing. The returned
-    mapping sums to the count of records that contributed (NOT 1.0) — the
-    caller normalizes.
-    """
-
-    spread: dict[str, float] = {}
     for record in records:
-        values = record.get(field) or []
-        if not isinstance(values, (list, tuple)):
-            continue
-        cleaned = [str(v) for v in values if isinstance(v, str) and v]
-        if not cleaned:
-            continue
-        share = 1.0 / len(cleaned)
-        for key in cleaned:
-            spread[key] = spread.get(key, 0.0) + share
-    return spread
+        # 1. Asset classes spread
+        asset_vals = record.get("asset_classes")
+        if isinstance(asset_vals, (list, tuple)):
+            cleaned = [v for v in asset_vals if isinstance(v, str) and v]
+            if cleaned:
+                share = 1.0 / len(cleaned)
+                for key in cleaned:
+                    if key in asset_spread:
+                        asset_spread[key] += share
+                    else:
+                        asset_spread[key] = share
+
+        # 2. Reason codes spread
+        reason_vals = record.get("impact_reason_codes")
+        if isinstance(reason_vals, (list, tuple)):
+            cleaned = [v for v in reason_vals if isinstance(v, str) and v]
+            if cleaned:
+                share = 1.0 / len(cleaned)
+                for key in cleaned:
+                    if key in reason_spread:
+                        reason_spread[key] += share
+                    else:
+                        reason_spread[key] = share
+
+        # 3. Sentiment distribution
+        label = record.get("sentiment_label")
+        if label == "positive":
+            pos_count += 1
+            labelled += 1
+        elif label == "neutral":
+            neu_count += 1
+            labelled += 1
+        elif label == "negative":
+            neg_count += 1
+            labelled += 1
+
+        # 4. Relevance mean
+        raw = record.get("finance_relevance_score")
+        t = type(raw)
+        if t is float:
+            rel_scores.append(raw)
+        elif t is int:
+            rel_scores.append(float(raw))
+
+    # Format sentiment
+    if labelled == 0:
+        sentiment_dist = (("positive", 0.0), ("neutral", 0.0), ("negative", 0.0))
+    else:
+        sentiment_dist = (
+            ("positive", pos_count / labelled),
+            ("neutral", neu_count / labelled),
+            ("negative", neg_count / labelled),
+        )
+
+    # Format relevance
+    mean_rel = sum(rel_scores) / len(rel_scores) if rel_scores else 0.0
+
+    return asset_spread, reason_spread, sentiment_dist, mean_rel
 
 
 def _normalize(raw: Mapping[str, float]) -> dict[str, float]:
@@ -173,54 +230,16 @@ def _normalize(raw: Mapping[str, float]) -> dict[str, float]:
     return {k: v / total for k, v in raw.items()}
 
 
-def _top_n_sorted(dist: Mapping[str, float], n: int = _TOP_N) -> tuple[
-    tuple[str, float], ...
-]:
+def _top_n_sorted(dist: Mapping[str, float], n: int = _TOP_N) -> tuple[tuple[str, float], ...]:
     """Top-N entries sorted DESC by probability, ties broken by key."""
 
     items = sorted(dist.items(), key=lambda kv: (-kv[1], kv[0]))
     return tuple(items[:n])
 
 
-def _sentiment_distribution(
-    records: Iterable[Mapping[str, Any]],
-) -> tuple[tuple[str, float], ...]:
-    """Count labelled records over the canonical 3-key sentiment vocab."""
-
-    counts: dict[str, int] = {k: 0 for k in _SENTIMENT_KEYS}
-    labelled = 0
-    for record in records:
-        label = record.get("sentiment_label")
-        if label not in counts:
-            continue
-        counts[label] += 1
-        labelled += 1
-    if labelled == 0:
-        return tuple((k, 0.0) for k in _SENTIMENT_KEYS)
-    return tuple((k, counts[k] / labelled) for k in _SENTIMENT_KEYS)
-
-
-def _mean_relevance(records: Iterable[Mapping[str, Any]]) -> float:
-    """Arithmetic mean of ``finance_relevance_score`` across the bucket.
-
-    Non-numeric or missing scores are skipped. Empty input returns 0.0.
-    """
-
-    scores: list[float] = []
-    for record in records:
-        raw = record.get("finance_relevance_score")
-        if isinstance(raw, bool):  # bool subclasses int — guard first
-            continue
-        if isinstance(raw, (int, float)):
-            scores.append(float(raw))
-    if not scores:
-        return 0.0
-    return sum(scores) / len(scores)
-
-
 def _combine_for_kl(
     asset_dist: Mapping[str, float], reason_dist: Mapping[str, float]
-) -> dict[str, float]:
+) -> dict[tuple[str, str], float]:
     """Concatenate asset + reason distributions into one keyspace.
 
     Both sub-distributions are full (un-truncated) probability mass
@@ -230,17 +249,15 @@ def _combine_for_kl(
     sides are renormalized.
     """
 
-    combined: dict[str, float] = {}
+    combined: dict[tuple[str, str], float] = {}
     for k, v in asset_dist.items():
-        combined[f"asset:{k}"] = v
+        combined[("asset", k)] = v
     for k, v in reason_dist.items():
-        combined[f"reason:{k}"] = v
+        combined[("reason", k)] = v
     return combined
 
 
-def _smooth_pair(
-    p: Mapping[str, float], q: Mapping[str, float]
-) -> tuple[dict[str, float], dict[str, float]]:
+def _smooth_pair(p: Mapping[Any, float], q: Mapping[Any, float]) -> tuple[dict[Any, float], dict[Any, float]]:
     """Epsilon-smooth two distributions over their union keyspace.
 
     Every key present in either side gets ``_EPSILON`` added on the side
@@ -250,10 +267,17 @@ def _smooth_pair(
     keys = set(p.keys()) | set(q.keys())
     if not keys:
         return {}, {}
-    smoothed_p = {k: p.get(k, 0.0) + (_EPSILON if k not in p else 0.0) for k in keys}
-    smoothed_q = {k: q.get(k, 0.0) + (_EPSILON if k not in q else 0.0) for k in keys}
-    total_p = sum(smoothed_p.values())
-    total_q = sum(smoothed_q.values())
+    smoothed_p = {}
+    smoothed_q = {}
+    total_p = 0.0
+    total_q = 0.0
+    for k in keys:
+        val_p = p[k] if k in p else _EPSILON
+        val_q = q[k] if k in q else _EPSILON
+        smoothed_p[k] = val_p
+        smoothed_q[k] = val_q
+        total_p += val_p
+        total_q += val_q
     if total_p <= 0.0 or total_q <= 0.0:
         return {}, {}
     return (
@@ -262,7 +286,7 @@ def _smooth_pair(
     )
 
 
-def _kl_divergence(p: Mapping[str, float], q: Mapping[str, float]) -> float:
+def _kl_divergence(p: Mapping[Any, float], q: Mapping[Any, float]) -> float:
     """``KL(p || q)`` with natural log.
 
     Contributions where ``p_i <= 0`` are clamped to zero (the standard
@@ -320,15 +344,15 @@ def detect_regime_shifts(
     if bucket_minutes <= 0:
         raise ValueError("bucket_minutes must be positive")
 
-    # Pair every record with its resolved timestamp; drop the unparseable.
-    timed: list[tuple[datetime, Mapping[str, Any]]] = []
+    # Group records by bucket-start ts (stable order via insertion).
+    grouped: dict[datetime, list[Mapping[str, Any]]] = {}
     for record in records or []:
         ts = _record_timestamp(record)
-        if ts is None:
-            continue
-        timed.append((ts, record))
+        if ts is not None:
+            bucket_start = _floor_bucket(ts, bucket_minutes)
+            grouped.setdefault(bucket_start, []).append(record)
 
-    if not timed:
+    if not grouped:
         return RegimeReport(
             bucket_minutes=bucket_minutes,
             shift_threshold=shift_threshold,
@@ -336,21 +360,8 @@ def detect_regime_shifts(
             detected_shifts=(),
         )
 
-    timed.sort(key=lambda pair: pair[0])
-    width = timedelta(minutes=bucket_minutes)
-    anchor = _floor_bucket(timed[0][0], bucket_minutes)
-
-    # Group records by bucket-start ts (stable order via insertion).
-    grouped: dict[datetime, list[Mapping[str, Any]]] = {}
-    for ts, record in timed:
-        bucket_start = anchor + timedelta(
-            seconds=((ts - anchor).total_seconds() // (bucket_minutes * 60))
-            * bucket_minutes
-            * 60
-        )
-        grouped.setdefault(bucket_start, []).append(record)
-
     ordered_starts = sorted(grouped.keys())
+    width = timedelta(minutes=bucket_minutes)
 
     buckets: list[RegimeBucket] = []
     prev_asset_full: dict[str, float] = {}
@@ -362,12 +373,9 @@ def detect_regime_shifts(
         bucket_records = grouped[bucket_start]
         bucket_end = bucket_start + width
 
-        asset_full = _normalize(_mass_spread(bucket_records, "asset_classes"))
-        reason_full = _normalize(
-            _mass_spread(bucket_records, "impact_reason_codes")
-        )
-        sentiment_dist = _sentiment_distribution(bucket_records)
-        mean_rel = _mean_relevance(bucket_records)
+        asset_spread, reason_spread, sentiment_dist, mean_rel = _process_bucket_records(bucket_records)
+        asset_full = _normalize(asset_spread)
+        reason_full = _normalize(reason_spread)
 
         if has_prev:
             p_combined = _combine_for_kl(asset_full, reason_full)
@@ -381,10 +389,7 @@ def detect_regime_shifts(
             # the divergence but don't fire a shift — false positives in
             # the sparse tail were the #1 noise source.
             prev_count = buckets[-1].record_count if buckets else 0
-            adequate = (
-                len(bucket_records) >= min_records_per_bucket
-                and prev_count >= min_records_per_bucket
-            )
+            adequate = len(bucket_records) >= min_records_per_bucket and prev_count >= min_records_per_bucket
             is_shift = kl is not None and kl > shift_threshold and adequate
         else:
             kl = None

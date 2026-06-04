@@ -338,9 +338,7 @@ def test_kl_is_natural_log_and_uses_combined_keyspace() -> None:
     p_high = 1.0 / (2.0 + 2.0 * eps)
     p_low = eps / (2.0 + 2.0 * eps)
     # q is the mirror image (swap which keys carry the heavy mass).
-    expected_kl = 2.0 * p_high * math.log(p_high / p_low) + 2.0 * p_low * math.log(
-        p_low / p_high
-    )
+    expected_kl = 2.0 * p_high * math.log(p_high / p_low) + 2.0 * p_low * math.log(p_low / p_high)
 
     records = [
         _record(
@@ -527,9 +525,7 @@ def test_consecutive_topicless_buckets_have_zero_kl_no_shift() -> None:
         _record("2024-01-01T10:15:00Z", asset_classes=[], impact_reason_codes=[]),
         _record("2024-01-01T10:25:00Z", asset_classes=[], impact_reason_codes=[]),
     ]
-    report = detect_regime_shifts(
-        records, bucket_minutes=60, shift_threshold=0.4, min_records_per_bucket=3
-    )
+    report = detect_regime_shifts(records, bucket_minutes=60, shift_threshold=0.4, min_records_per_bucket=3)
     assert len(report.buckets) == 2
     second = report.buckets[1]
     # Both distributions empty ⇒ KL computed over empty keyspace is 0.0.
@@ -559,9 +555,7 @@ def test_sparse_buckets_report_kl_but_do_not_fire_shift() -> None:
             impact_reason_codes=["central_bank"],
         ),
     ]
-    report = detect_regime_shifts(
-        records, bucket_minutes=60, shift_threshold=0.4, min_records_per_bucket=3
-    )
+    report = detect_regime_shifts(records, bucket_minutes=60, shift_threshold=0.4, min_records_per_bucket=3)
     second = report.buckets[1]
     # KL is large (disjoint vocab) yet the shift is gated off by sparsity.
     assert second.kl_divergence_from_prev is not None
@@ -584,3 +578,20 @@ def test_topic_regime_internal_helpers_coverage() -> None:
     # 3. _kl_divergence with q_i <= 0.0
     assert _kl_divergence({"a": 0.5}, {"a": -0.5}) == 0.0
 
+
+def test_topic_regime_additional_coverage() -> None:
+    records = [
+        {
+            "capture_id": "test1",
+            "published_ts": "2024-01-01T09:00:00Z",
+            "sentiment_label": "negative",
+            "finance_relevance_score": 1,  # int relevance score
+            "asset_classes": ["equities"],
+            "impact_reason_codes": ["earnings"],
+        }
+    ]
+    report = detect_regime_shifts(records, bucket_minutes=60)
+    assert len(report.buckets) == 1
+    assert report.buckets[0].mean_relevance == 1.0
+    sentiment = dict(report.buckets[0].sentiment_distribution)
+    assert sentiment["negative"] == 1.0

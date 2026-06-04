@@ -74,7 +74,7 @@ def _flood(
     for j in range(count):
         # Spread inside the bucket using second offsets so capture_ids
         # stay unique even within the same minute.
-        seconds = (j % (bucket_minutes * 60))
+        seconds = j % (bucket_minutes * 60)
         ts = base + timedelta(minutes=bucket_start_minutes, seconds=seconds)
         iso = ts.isoformat().replace("+00:00", "Z")
         out.append(
@@ -167,9 +167,7 @@ def test_short_history_returns_no_edges() -> None:
     # nothing can surge.
     records: list[dict] = []
     for bucket_idx in (0, 1):
-        records.extend(
-            _flood(_BASE, bucket_idx, "rates", count=5, bucket_minutes=30)
-        )
+        records.extend(_flood(_BASE, bucket_idx, "rates", count=5, bucket_minutes=30))
     report = compute_spillover(records, bucket_minutes=30, lag_buckets=1)
     # No cross-asset edges fire because there's nothing to spill over to.
     assert report.edges == ()
@@ -206,33 +204,19 @@ def test_rates_surge_then_equities_surge_at_lag_1() -> None:
     """
 
     bucket_minutes = 30
-    records: list[dict] = _baseline(
-        _BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes)
     # Four well-separated (rates @t -> equities @t+1) pairs.
     for src in (10, 14, 18, 22):
-        records.extend(
-            _flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(
-                _BASE, src + 1, "equities", count=25, bucket_minutes=bucket_minutes
-            )
-        )
+        records.extend(_flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, src + 1, "equities", count=25, bucket_minutes=bucket_minutes))
     # Filler so the gap buckets aren't empty (varied counts keep stdev
     # > 0 without themselves crossing the surge threshold).
     for bucket_idx in (11, 12, 13, 15, 16, 17, 19, 20, 21, 23, 24):
         # Bucket 11/15/19/23 are equities-spike buckets — skip those.
         if bucket_idx in (11, 15, 19, 23):
             continue
-        records.extend(
-            _flood(_BASE, bucket_idx, "rates", count=2, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(
-                _BASE, bucket_idx, "equities", count=2, bucket_minutes=bucket_minutes
-            )
-        )
+        records.extend(_flood(_BASE, bucket_idx, "rates", count=2, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, bucket_idx, "equities", count=2, bucket_minutes=bucket_minutes))
 
     report = compute_spillover(
         records,
@@ -258,22 +242,14 @@ def test_solo_surger_produces_no_positive_edges() -> None:
 
     bucket_minutes = 30
     # Varied baseline for 10 buckets of both assets.
-    records: list[dict] = _baseline(
-        _BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes)
     # Rates spikes at 10 and 12; equities never spikes.
     records.extend(_flood(_BASE, 10, "rates", count=30, bucket_minutes=bucket_minutes))
     records.extend(_flood(_BASE, 12, "rates", count=30, bucket_minutes=bucket_minutes))
     # Filler for buckets 11, 13, 14 — varied so stdev stays positive.
     for bucket_idx in (11, 13, 14):
-        records.extend(
-            _flood(_BASE, bucket_idx, "rates", count=1, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(
-                _BASE, bucket_idx, "equities", count=2, bucket_minutes=bucket_minutes
-            )
-        )
+        records.extend(_flood(_BASE, bucket_idx, "rates", count=1, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, bucket_idx, "equities", count=2, bucket_minutes=bucket_minutes))
 
     report = compute_spillover(
         records,
@@ -285,9 +261,7 @@ def test_solo_surger_produces_no_positive_edges() -> None:
     # No cross-asset edge should pass the filter — equities never surges
     # after rates, and a self loop would be excluded from edges anyway.
     for edge in report.edges:
-        assert (
-            edge.source_asset != edge.target_asset
-        ), "self_loops must not appear in edges"
+        assert edge.source_asset != edge.target_asset, "self_loops must not appear in edges"
 
 
 def test_self_loop_persistence_is_separated() -> None:
@@ -299,23 +273,13 @@ def test_self_loop_persistence_is_separated() -> None:
     """
 
     bucket_minutes = 30
-    records: list[dict] = _baseline(
-        _BASE, 10, ("equities",), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("equities",), bucket_minutes=bucket_minutes)
     # Consecutive equities spikes — persistence.
-    records.extend(
-        _flood(_BASE, 10, "equities", count=25, bucket_minutes=bucket_minutes)
-    )
-    records.extend(
-        _flood(_BASE, 11, "equities", count=25, bucket_minutes=bucket_minutes)
-    )
+    records.extend(_flood(_BASE, 10, "equities", count=25, bucket_minutes=bucket_minutes))
+    records.extend(_flood(_BASE, 11, "equities", count=25, bucket_minutes=bucket_minutes))
     # And one more pair so we get 2+ co-movements.
-    records.extend(
-        _flood(_BASE, 13, "equities", count=25, bucket_minutes=bucket_minutes)
-    )
-    records.extend(
-        _flood(_BASE, 14, "equities", count=25, bucket_minutes=bucket_minutes)
-    )
+    records.extend(_flood(_BASE, 13, "equities", count=25, bucket_minutes=bucket_minutes))
+    records.extend(_flood(_BASE, 14, "equities", count=25, bucket_minutes=bucket_minutes))
 
     report = compute_spillover(
         records,
@@ -345,9 +309,7 @@ def test_sample_pivots_capped_at_three() -> None:
     """An edge with many co-movements only echoes the first 3 pivots."""
 
     bucket_minutes = 30
-    records: list[dict] = _baseline(
-        _BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes)
     # 5 consecutive (rates -> equities) pairs at lag 1.
     for source_bucket, target_bucket in [
         (10, 11),
@@ -403,29 +365,15 @@ def test_lag_buckets_2_fires_at_two_buckets_ahead() -> None:
     """
 
     bucket_minutes = 30
-    records: list[dict] = _baseline(
-        _BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes)
     # Three (rates @t -> equities @t+2) pairs, well separated.
     for src in (10, 15, 20):
-        records.extend(
-            _flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(
-                _BASE, src + 2, "equities", count=25, bucket_minutes=bucket_minutes
-            )
-        )
+        records.extend(_flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, src + 2, "equities", count=25, bucket_minutes=bucket_minutes))
     # Filler buckets — varied counts but well below surge level.
     for bucket_idx in (11, 13, 14, 16, 18, 19, 21, 23):
-        records.extend(
-            _flood(_BASE, bucket_idx, "rates", count=2, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(
-                _BASE, bucket_idx, "equities", count=2, bucket_minutes=bucket_minutes
-            )
-        )
+        records.extend(_flood(_BASE, bucket_idx, "rates", count=2, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, bucket_idx, "equities", count=2, bucket_minutes=bucket_minutes))
 
     # lag=2 should find the relationship.
     report_lag2 = compute_spillover(
@@ -462,23 +410,15 @@ def test_edges_sorted_by_score_desc_and_filtered() -> None:
 
     bucket_minutes = 30
     # Three assets with varied baseline.
-    records: list[dict] = _baseline(
-        _BASE, 10, ("rates", "equities", "fx"), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("rates", "equities", "fx"), bucket_minutes=bucket_minutes)
 
     # Strong rates -> equities relationship (3 co-movements).
     for src, tgt in [(10, 11), (12, 13), (14, 15)]:
-        records.extend(
-            _flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(_BASE, tgt, "equities", count=25, bucket_minutes=bucket_minutes)
-        )
+        records.extend(_flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, tgt, "equities", count=25, bucket_minutes=bucket_minutes))
     # Weak fx -> equities relationship (only 1 co-movement — should be filtered out).
     records.extend(_flood(_BASE, 16, "fx", count=25, bucket_minutes=bucket_minutes))
-    records.extend(
-        _flood(_BASE, 17, "equities", count=25, bucket_minutes=bucket_minutes)
-    )
+    records.extend(_flood(_BASE, 17, "equities", count=25, bucket_minutes=bucket_minutes))
 
     report = compute_spillover(
         records,
@@ -506,16 +446,10 @@ def test_returns_spillover_edge_instances() -> None:
     """All entries in ``edges`` and ``self_loops`` are SpilloverEdge dataclasses."""
 
     bucket_minutes = 30
-    records: list[dict] = _baseline(
-        _BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes
-    )
+    records: list[dict] = _baseline(_BASE, 10, ("rates", "equities"), bucket_minutes=bucket_minutes)
     for src, tgt in [(10, 11), (12, 13)]:
-        records.extend(
-            _flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes)
-        )
-        records.extend(
-            _flood(_BASE, tgt, "equities", count=25, bucket_minutes=bucket_minutes)
-        )
+        records.extend(_flood(_BASE, src, "rates", count=25, bucket_minutes=bucket_minutes))
+        records.extend(_flood(_BASE, tgt, "equities", count=25, bucket_minutes=bucket_minutes))
 
     report = compute_spillover(
         records,
@@ -587,6 +521,8 @@ def test_created_at_fallback_and_naive_timestamps_bucket_together() -> None:
         },
         # Z-suffixed string in the same bucket.
         _record("2024-01-01T09:06:00Z", asset_classes=["rates"]),
+        # Non-UTC timezone-aware string (parsed and converted to UTC).
+        _record("2024-01-01T11:07:00+02:00", asset_classes=["rates"]),
     ]
     report = compute_spillover(records, bucket_minutes=30, lag_buckets=1)
     # Both records share one bucket ⇒ exactly one bucket materializes.
@@ -661,20 +597,24 @@ def test_duplicate_asset_in_record_counts_once_per_bucket() -> None:
 def test_spillover_edge_cases(monkeypatch) -> None:
     # 1. _clamp_score (returns -1.0 for values < -1.0)
     from catchem.quant.spillover import _clamp_score
+
     assert _clamp_score(-2.0) == -1.0
     assert _clamp_score(-0.5) == -0.5
     assert _clamp_score(0.5) == 0.5
 
     # 2. len(history) < _MIN_HISTORY (line 237-238)
     import catchem.quant.spillover as sp
+
     monkeypatch.setattr(sp, "_MIN_HISTORY", 5)
     res = sp._rolling_z_score([1, 2, 3, 4, 5, 6, 7], window=2)
     assert res[5] is None
 
     # 3. StatisticsError in statistics.stdev (line 244-245)
     import statistics
+
     def mock_stdev_raise(history):
         raise statistics.StatisticsError("mocked stdev error")
+
     monkeypatch.setattr(statistics, "stdev", mock_stdev_raise)
     monkeypatch.setattr(sp, "_MIN_HISTORY", 3)
     res_err = sp._rolling_z_score([1, 2, 3, 4, 5], window=4)
@@ -688,6 +628,7 @@ def test_spillover_edge_cases(monkeypatch) -> None:
     # 5. total_buckets == 0 or empty asset_counts in compute_spillover (line 372)
     def mock_build_grid(*args, **kwargs):
         return [datetime.now(UTC)], {}
+
     monkeypatch.setattr(sp, "_build_bucket_grid", mock_build_grid)
     records = [_record("2024-01-01T09:05:00Z", asset_classes=["rates"])]
     report = compute_spillover(records, bucket_minutes=30, lag_buckets=1)
@@ -695,3 +636,6 @@ def test_spillover_edge_cases(monkeypatch) -> None:
     assert report.edges == ()
     assert report.self_loops == ()
 
+    # 6. _parse_ts invalid inputs directly
+    assert sp._parse_ts(None) is None
+    assert sp._parse_ts("") is None

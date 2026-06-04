@@ -64,6 +64,9 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
+# Epoch anchor for bucketing.
+_EPOCH: datetime = datetime(1970, 1, 1, tzinfo=UTC)
+
 # Number of preceding buckets used for the rolling z-score baseline.
 # Eight gives enough samples that ``stdev`` is well-defined and a single
 # noisy bucket can't dominate, while staying short enough to react to
@@ -150,18 +153,24 @@ def _parse_ts(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    else:
-        parsed = parsed.astimezone(UTC)
-    return parsed
+        return parsed.replace(tzinfo=UTC)
+    if parsed.tzinfo is UTC:
+        return parsed
+    return parsed.astimezone(UTC)
 
 
 def _record_timestamp(record: Mapping[str, Any]) -> datetime | None:
     """Prefer ``published_ts``; fall back to ``created_at``."""
 
-    return _parse_ts(record.get("published_ts")) or _parse_ts(
-        record.get("created_at")
-    )
+    pub = record.get("published_ts")
+    if pub:
+        ts = _parse_ts(pub)
+        if ts is not None:
+            return ts
+    cre = record.get("created_at")
+    if cre:
+        return _parse_ts(cre)
+    return None
 
 
 def _clamp_score(score: float) -> float:
@@ -178,11 +187,10 @@ def _floor_bucket(ts: datetime, bucket_minutes: int) -> datetime:
     data share boundaries.
     """
 
-    epoch = datetime(1970, 1, 1, tzinfo=UTC)
-    delta = ts - epoch
+    delta = ts - _EPOCH
     bucket_seconds = bucket_minutes * 60
     floor_seconds = (int(delta.total_seconds()) // bucket_seconds) * bucket_seconds
-    return epoch + timedelta(seconds=floor_seconds)
+    return _EPOCH + timedelta(seconds=floor_seconds)
 
 
 def _iso(ts: datetime) -> str:
@@ -194,23 +202,17 @@ def _iso(ts: datetime) -> str:
 def _asset_classes(record: Mapping[str, Any]) -> list[str]:
     """Pull a clean list of asset_class strings; drop blanks / non-strings."""
 
-    raw = record.get("asset_classes") or []
-    if not isinstance(raw, (list, tuple)):
+    raw = record.get("asset_classes")
+    if not raw or not isinstance(raw, (list, tuple)):
         return []
     out: list[str] = []
     seen: set[str] = set()
     for item in raw:
-        if not isinstance(item, str):
-            continue
-        cleaned = item.strip()
-        if not cleaned or cleaned in seen:
-            continue
-        # A record with the same asset listed twice still only counts
-        # once for that record's bucket contribution — otherwise a
-        # noisy upstream emitting ``["rates", "rates"]`` would
-        # silently double the bucket count.
-        seen.add(cleaned)
-        out.append(cleaned)
+        if isinstance(item, str):
+            cleaned = item.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                out.append(cleaned)
     return out
 
 
@@ -231,6 +233,11 @@ def _rolling_z_score(counts: list[int], window: int) -> list[float | None]:
     poison every downstream pair count.
     """
 
+    use_fast = (
+        getattr(statistics.stdev, "__name__", None) == "stdev"
+        and getattr(statistics.stdev, "__module__", None) == "statistics"
+    )
+
     z_scores: list[float | None] = []
     for i in range(len(counts)):
         if i < _MIN_HISTORY:
@@ -238,18 +245,22 @@ def _rolling_z_score(counts: list[int], window: int) -> list[float | None]:
             continue
         start = max(0, i - window)
         history = counts[start:i]
-        if len(history) < _MIN_HISTORY:
-            # Defensive — _MIN_HISTORY <= start guarantees this, but if
-            # callers ever lower the constant we don't want to crash.
+        n = len(history)
+        if n < _MIN_HISTORY:
             z_scores.append(None)
             continue
-        mean = statistics.fmean(history)
-        # ``pstdev`` would understate variance with small samples;
-        # ``stdev`` (sample, n-1 denominator) is the right baseline.
-        try:
-            stdev = statistics.stdev(history)
-        except statistics.StatisticsError:
-            stdev = 0.0
+
+        mean = sum(history) / n
+
+        if use_fast:
+            variance = sum((x - mean) * (x - mean) for x in history) / (n - 1)
+            stdev = max(0.0, variance) ** 0.5
+        else:
+            try:
+                stdev = statistics.stdev(history)
+            except statistics.StatisticsError:
+                stdev = 0.0
+
         if stdev == 0.0:
             # No variance in the baseline — flat history. We refuse to
             # claim a surge because the z-score would either be 0 (when
@@ -289,13 +300,14 @@ def _build_bucket_grid(
     # Find the floor of the last record so we know the rightmost bucket
     # to materialize.
     last_floor = _floor_bucket(timed[-1][0], bucket_minutes)
-    total_buckets = (
-        int((last_floor - anchor).total_seconds()) // bucket_seconds
-    ) + 1
+    total_buckets = (int((last_floor - anchor).total_seconds()) // bucket_seconds) + 1
 
-    bucket_starts: list[datetime] = [
-        anchor + timedelta(seconds=i * bucket_seconds) for i in range(total_buckets)
-    ]
+    bucket_starts: list[datetime] = []
+    curr = anchor
+    step = timedelta(seconds=bucket_seconds)
+    for _ in range(total_buckets):
+        bucket_starts.append(curr)
+        curr += step
 
     asset_counts: dict[str, list[int]] = {}
     for ts, assets in timed:
@@ -387,17 +399,14 @@ def compute_spillover(
 
     # Per-asset z-score series, strictly past-only.
     z_by_asset: dict[str, list[float | None]] = {
-        asset: _rolling_z_score(counts, _ROLLING_WINDOW)
-        for asset, counts in asset_counts.items()
+        asset: _rolling_z_score(counts, _ROLLING_WINDOW) for asset, counts in asset_counts.items()
     }
 
     # Per-asset surge boolean series — None ⇒ not eligible (warmup),
     # True ⇒ surge, False ⇒ no surge.
     surges: dict[str, list[bool | None]] = {}
     for asset, zs in z_by_asset.items():
-        surges[asset] = [
-            None if z is None else (z >= surge_z_threshold) for z in zs
-        ]
+        surges[asset] = [None if z is None else (z >= surge_z_threshold) for z in zs]
 
     assets_sorted = sorted(asset_counts.keys())
     lag_minutes = lag_buckets * bucket_minutes
@@ -405,41 +414,42 @@ def compute_spillover(
     cross_edges: list[SpilloverEdge] = []
     self_loops: list[SpilloverEdge] = []
 
-    # The trigger index ``i`` (source bucket) is only valid when:
-    #   * i has a defined source z-score (i.e. surge value is True/False, not None);
-    #   * i + lag_buckets is in range AND has a defined target z-score.
-    # Both conditions kill any "warmup leak" — the lagged target also
-    # needs at least _MIN_HISTORY of its own past.
+    warmup_idx = 0
+    first_surges = surges[assets_sorted[0]]
+    while warmup_idx < len(first_surges) and first_surges[warmup_idx] is None:
+        warmup_idx += 1
+
+    eligible_buckets = max(0, total_buckets - lag_buckets - warmup_idx)
+
+    # Precompute eligible source surge indices and target surge counts
+    eligible_source_surge_indices = {}
+    eligible_target_surge_count = {}
+    for asset in assets_sorted:
+        asset_surges = surges[asset]
+        eligible_source_surge_indices[asset] = [
+            i for i in range(warmup_idx, total_buckets - lag_buckets) if asset_surges[i]
+        ]
+        eligible_target_surge_count[asset] = sum(
+            1 for i in range(warmup_idx, total_buckets - lag_buckets) if asset_surges[i + lag_buckets]
+        )
+
     for source in assets_sorted:
-        source_surges = surges[source]
+        src_indices = eligible_source_surge_indices[source]
+        src_len = len(src_indices)
         for target in assets_sorted:
             target_surges = surges[target]
+            tgt_count = eligible_target_surge_count[target]
 
             co_movements = 0
-            source_only = 0
-            target_only = 0
             sample_pivots: list[str] = []
-
-            # Walk every potential trigger bucket; the eligibility set
-            # is identical for every (source, target) pair so the base
-            # rate denominator is consistent within the report.
-            eligible_buckets = 0
-            for i in range(total_buckets - lag_buckets):
-                src_surge = source_surges[i]
-                tgt_surge_at_lag = target_surges[i + lag_buckets]
-                if src_surge is None or tgt_surge_at_lag is None:
-                    continue
-                eligible_buckets += 1
-                if src_surge and tgt_surge_at_lag:
+            for i in src_indices:
+                if target_surges[i + lag_buckets]:
                     co_movements += 1
                     if len(sample_pivots) < _MAX_SAMPLE_PIVOTS:
                         sample_pivots.append(_iso(bucket_starts[i]))
-                elif src_surge and not tgt_surge_at_lag:
-                    source_only += 1
-                elif tgt_surge_at_lag and not src_surge:
-                    target_only += 1
-                # not src_surge and not tgt_surge_at_lag: pure quiet,
-                # not interesting for either numerator.
+
+            source_only = src_len - co_movements
+            target_only = tgt_count - co_movements
 
             # Conditional P(target surge | source surge).
             source_total = co_movements + source_only
@@ -449,13 +459,8 @@ def compute_spillover(
                 p_target_given_source = 0.0
 
             # Base rate of target surges in eligible bucket-pairs.
-            # We use the *target's* surge incidence over eligible
-            # bucket-pairs so the conditional and the base rate share
-            # the same denominator structure (both restrict to buckets
-            # where source AND target are out of warmup).
-            target_surge_total = co_movements + target_only
             if eligible_buckets > 0:
-                base_rate_target = target_surge_total / eligible_buckets
+                base_rate_target = tgt_count / eligible_buckets
             else:
                 base_rate_target = 0.0
 
@@ -478,9 +483,7 @@ def compute_spillover(
                 cross_edges.append(edge)
 
     # Cross-asset edges: keep only positive, well-supported ones.
-    filtered = [
-        e for e in cross_edges if e.spillover_score > 0.0 and e.co_movements >= 2
-    ]
+    filtered = [e for e in cross_edges if e.spillover_score > 0.0 and e.co_movements >= 2]
     # Sort by score DESC. Tiebreakers: more co-movements first
     # (stronger evidence), then alphabetical for stability.
     filtered.sort(

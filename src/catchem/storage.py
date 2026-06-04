@@ -602,27 +602,46 @@ class Storage:
                 )
 
             self._pending_rows.append(_record_to_row(rec))
+
+        # Perform the parquet flush outside the SQLite transaction and lock if threshold met
+        rows_to_flush = []
+        parquet_seq = 0
+        with self._lock:
             if len(self._pending_rows) >= self.rotate_parquet_records:
-                self._flush_parquet_locked()
-            return not existed
+                rows_to_flush = list(self._pending_rows)
+                self._pending_rows.clear()
+                self._parquet_seq += 1
+                parquet_seq = self._parquet_seq
+
+        if rows_to_flush:
+            self._write_parquet(rows_to_flush, parquet_seq)
+
+        return not existed
 
     def flush(self) -> None:
+        rows_to_flush = []
+        parquet_seq = 0
         with self._lock:
-            self._flush_parquet_locked()
+            if self._pending_rows:
+                rows_to_flush = list(self._pending_rows)
+                self._pending_rows.clear()
+                self._parquet_seq += 1
+                parquet_seq = self._parquet_seq
 
-    def _flush_parquet_locked(self) -> None:
-        if not self._pending_rows:
+        if rows_to_flush:
+            self._write_parquet(rows_to_flush, parquet_seq)
+
+    def _write_parquet(self, rows: list[dict[str, Any]], seq: int) -> None:
+        if not rows:
             return
-        table = pa.Table.from_pylist(self._pending_rows)
+        table = pa.Table.from_pylist(rows)
         now = datetime.now(UTC)
-        self._parquet_seq += 1
         path = (
             self.parquet_dir
-            / f"records-{int(now.timestamp())}-{self._instance_id}-{self._parquet_seq:06d}-{len(self._pending_rows):05d}.parquet"
+            / f"records-{int(now.timestamp())}-{self._instance_id}-{seq:06d}-{len(rows):05d}.parquet"
         )
         pq.write_table(table, path)
-        logger.info("parquet_flushed", path=str(path), rows=len(self._pending_rows))
-        self._pending_rows.clear()
+        logger.info("parquet_flushed", path=str(path), rows=len(rows))
 
     # ── queries --------------------------------------------------------------
     def recent_records(self, limit: int = 50, relevant_only: bool = True) -> list[dict[str, Any]]:

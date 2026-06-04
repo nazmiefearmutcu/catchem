@@ -544,3 +544,10 @@ def test_storage_timestamp_parsing_caching() -> None:
     # 8f. Z ending, sub_len == 19 but mismatched characters
     with pytest.raises(ValueError):
         _parse_iso_ts_cached("202/6-06-04T10:24:34Z")
+
+
+def test_storage_write_parquet_empty(tmp_path: Path) -> None:
+    s = Storage(db_path=tmp_path / "catchem.sqlite3", parquet_dir=tmp_path / "parq", dlq_dir=tmp_path / "dlq")
+    s._write_parquet([], 1)
+    assert len(list((tmp_path / "parq").glob("*.parquet"))) == 0
+    s.close()

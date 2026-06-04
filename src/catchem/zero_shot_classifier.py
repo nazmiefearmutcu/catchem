@@ -77,42 +77,54 @@ class ZeroShotStub:
         title_l = (cap.title or "").lower()
         body_l = (cap.text or "")[:3000].lower()
 
-        # Multi-set frequency-based scoring via Counter: repeated mentions
+        # Multi-set frequency-based scoring: repeated mentions
         # of a label-aliased token increase the score. Title-overlap is
         # completely excluded from the body count so body mentions of a word
         # in the title do not double-count (title weight already covers it).
-        from collections import Counter
+        title_tokens = [w for w in _WORD_RE.findall(title_l) if w not in _STOP]
+        body_tokens = [w for w in _WORD_RE.findall(body_l) if w not in _STOP]
 
-        title_words = Counter(w for w in _WORD_RE.findall(title_l) if w not in _STOP)
-        body_words = Counter(w for w in _WORD_RE.findall(body_l) if w not in _STOP)
-        # Exclude title unigram overlap from body
-        for w in title_words:
-            if w in body_words:
-                del body_words[w]
+        title_words: dict[str, int] = {}
+        for w in title_tokens:
+            title_words[w] = title_words.get(w, 0) + 1
 
-        title_bigrams = Counter(_bigrams(title_l))
-        body_bigrams = Counter(_bigrams(body_l))
-        # Exclude title bigram overlap from body
-        for b in title_bigrams:
-            if b in body_bigrams:
-                del body_bigrams[b]
+        body_words: dict[str, int] = {}
+        for w in body_tokens:
+            if w not in title_words:
+                body_words[w] = body_words.get(w, 0) + 1
+
+        title_bigrams: dict[str, int] = {}
+        for a, b in pairwise(title_tokens):
+            bg = f"{a} {b}"
+            title_bigrams[bg] = title_bigrams.get(bg, 0) + 1
+
+        body_bigrams: dict[str, int] = {}
+        for a, b in pairwise(body_tokens):
+            bg = f"{a} {b}"
+            if bg not in title_bigrams:
+                body_bigrams[bg] = body_bigrams.get(bg, 0) + 1
 
         scores: dict[str, float] = {}
+        index_get = self._index.get
 
-        def _add(token: str, weight: float) -> None:
-            for label_id in self._index.get(token, ()):
-                scores[label_id] = scores.get(label_id, 0.0) + weight
+        title_weight = self._TITLE_WEIGHT
+        bigram_weight = self._BIGRAM_WEIGHT
+        bigram_title_weight = bigram_weight * title_weight
 
         # Unigrams — title tokens carry _TITLE_WEIGHT, body tokens carry 1.0.
         for w, count in title_words.items():
-            _add(w, self._TITLE_WEIGHT * count)
+            for label_id in index_get(w, ()):
+                scores[label_id] = scores.get(label_id, 0.0) + title_weight * count
         for w, count in body_words.items():
-            _add(w, 1.0 * count)
+            for label_id in index_get(w, ()):
+                scores[label_id] = scores.get(label_id, 0.0) + float(count)
         # Bigrams (multi-word aliases) — same title boost; base weight 1.5.
         for b, count in title_bigrams.items():
-            _add(b, self._BIGRAM_WEIGHT * self._TITLE_WEIGHT * count)
+            for label_id in index_get(b, ()):
+                scores[label_id] = scores.get(label_id, 0.0) + bigram_title_weight * count
         for b, count in body_bigrams.items():
-            _add(b, self._BIGRAM_WEIGHT * count)
+            for label_id in index_get(b, ()):
+                scores[label_id] = scores.get(label_id, 0.0) + bigram_weight * count
 
         if not scores:
             return ZeroShotResult(label_scores={}, model_version=self.model_version)
@@ -218,10 +230,3 @@ _STOP = frozenset(
         "covers",
     }
 )
-
-
-def _bigrams(text: str) -> list[str]:
-    tokens = [t for t in _WORD_RE.findall(text) if t not in _STOP]
-    # itertools.pairwise yields (t0,t1), (t1,t2), ... so the last token has
-    # no pair (intent: bigrams over consecutive token pairs).
-    return [f"{a} {b}" for a, b in pairwise(tokens)]

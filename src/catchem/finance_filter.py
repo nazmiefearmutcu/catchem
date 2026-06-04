@@ -13,29 +13,100 @@ from .schemas import AwarenessCaptureView
 from .taxonomy import Taxonomy
 
 _FINANCE_KEYWORDS = (
-    "earnings", "revenue", "profit", "loss", "guidance", "ipo", "merger",
-    "acquisition", "buyback", "dividend", "stock", "share", "equity", "bond",
-    "yield", "treasury", "rate", "rates", "fed", "ecb", "boj", "boe", "central bank",
-    "inflation", "cpi", "ppi", "gdp", "unemployment", "jobs", "payrolls",
-    "oil", "brent", "wti", "gold", "silver", "copper", "wheat",
-    "bitcoin", "btc", "ether", "ethereum", "crypto", "stablecoin",
-    "forex", "currency", "dollar", "euro", "yen", "yuan", "pound",
-    "sanctions", "tariff", "trade war", "geopolit", "regulation", "lawsuit",
-    "sec ", "fdic", "occ ", "fca ",
+    "earnings",
+    "revenue",
+    "profit",
+    "loss",
+    "guidance",
+    "ipo",
+    "merger",
+    "acquisition",
+    "buyback",
+    "dividend",
+    "stock",
+    "share",
+    "equity",
+    "bond",
+    "yield",
+    "treasury",
+    "rate",
+    "rates",
+    "fed",
+    "ecb",
+    "boj",
+    "boe",
+    "central bank",
+    "inflation",
+    "cpi",
+    "ppi",
+    "gdp",
+    "unemployment",
+    "jobs",
+    "payrolls",
+    "oil",
+    "brent",
+    "wti",
+    "gold",
+    "silver",
+    "copper",
+    "wheat",
+    "bitcoin",
+    "btc",
+    "ether",
+    "ethereum",
+    "crypto",
+    "stablecoin",
+    "forex",
+    "currency",
+    "dollar",
+    "euro",
+    "yen",
+    "yuan",
+    "pound",
+    "sanctions",
+    "tariff",
+    "trade war",
+    "geopolit",
+    "regulation",
+    "lawsuit",
+    "sec ",
+    "fdic",
+    "occ ",
+    "fca ",
     "$",  # cashtag indicator
 )
 
 _HARD_NEGATIVE_KEYWORDS = (
-    "scoreboard", "touchdown", "goal", "transfer window", "match", "draft pick",
-    "celebrity gossip", "movie review", "film review", "concert review",
-    "recipe", "horoscope", "tarot", "love advice",
+    "scoreboard",
+    "touchdown",
+    "goal",
+    "transfer window",
+    "match",
+    "draft pick",
+    "celebrity gossip",
+    "movie review",
+    "film review",
+    "concert review",
+    "recipe",
+    "horoscope",
+    "tarot",
+    "love advice",
 )
+
+_CASHTAG_RE = re.compile(r"\$[A-Z]{1,6}\b")
+
+# Pre-compiled regex patterns for alphanumeric keywords to reduce evaluation latency
+_COMPILED_KEYWORDS = {
+    kw: re.compile(rf"(?<![a-z0-9]){re.escape(kw)}(?![a-z0-9])")
+    for k in (_FINANCE_KEYWORDS + _HARD_NEGATIVE_KEYWORDS)
+    if (kw := k.strip().lower()) and kw.replace(" ", "").isalnum()
+}
 
 
 @dataclass
 class PrefilterResult:
     keep: bool
-    rule_score: float           # 0..1, prior confidence that this is finance
+    rule_score: float  # 0..1, prior confidence that this is finance
     matched_keywords: tuple[str, ...]
     blocked_keywords: tuple[str, ...]
     domain_prior: float
@@ -69,18 +140,21 @@ class FastPrefilter:
             return k in text
         # Word boundaries on each end. Multi-word keywords still work because
         # whitespace is alnum-adjacent.
-        return re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", text) is not None
+        pattern = _COMPILED_KEYWORDS.get(k)
+        if pattern is None:
+            pattern = re.compile(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])")
+        return pattern.search(text) is not None
 
     def evaluate(self, cap: AwarenessCaptureView) -> PrefilterResult:
         text = self._excerpt(cap)
         domain_prior = self.taxonomy.domain_prior(cap.domain)
         source_prior = self.taxonomy.source_type_prior(cap.source_type)
 
-        matched = tuple(k for k in _FINANCE_KEYWORDS if self._word_match(text, k))
-        blocked = tuple(k for k in _HARD_NEGATIVE_KEYWORDS if self._word_match(text, k))
+        matched = tuple(k for k in _FINANCE_KEYWORDS if FastPrefilter._word_match(text, k))
+        blocked = tuple(k for k in _HARD_NEGATIVE_KEYWORDS if FastPrefilter._word_match(text, k))
 
         # Cashtag detection ($AAPL, $BTC). Independent signal.
-        if re.search(r"\$[A-Z]{1,6}\b", cap.text or ""):
+        if _CASHTAG_RE.search(cap.text or ""):
             matched = (*matched, "cashtag")
 
         # Score: bounded combination of priors + keyword density + cashtags.

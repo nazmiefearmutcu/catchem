@@ -105,10 +105,52 @@ def _parse_point_date_cached(value: int | float | str) -> datetime | None:
             return datetime.fromtimestamp(float(value), tz=UTC)
         except (ValueError, OSError, OverflowError):
             return None
+
+    # Canonical GDELT stamp first without stripping (16 chars, e.g. "20260528T143000Z")
+    if len(value) == 16 and value[8] == "T" and value[15] == "Z":
+        try:
+            return datetime(
+                int(value[0:4]),
+                int(value[4:6]),
+                int(value[6:8]),
+                int(value[9:11]),
+                int(value[11:13]),
+                int(value[13:15]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
+
+    # Fast path for common ISO UTC formats like "2026-01-15T12:30:00Z" (len 20)
+    # or naive "2026-01-15T12:30:00" (len 19) without stripping
+    val_len = len(value)
+    if (
+        (val_len == 20 or val_len == 19)
+        and value[4] == "-"
+        and value[7] == "-"
+        and value[10] == "T"
+        and value[13] == ":"
+        and value[16] == ":"
+    ):
+        if val_len == 19 or (val_len == 20 and value[19] == "Z"):
+            try:
+                return datetime(
+                    int(value[0:4]),
+                    int(value[5:7]),
+                    int(value[8:10]),
+                    int(value[11:13]),
+                    int(value[14:16]),
+                    int(value[17:19]),
+                    tzinfo=UTC,
+                )
+            except ValueError:
+                pass
+
     raw = value.strip()
     if not raw:
         return None
-    # Canonical GDELT stamp first.
+
+    # Redundant check for canonical GDELT stamp after stripping
     if len(raw) == 16 and raw[8] == "T" and raw[15] == "Z":
         try:
             return datetime(
@@ -122,6 +164,7 @@ def _parse_point_date_cached(value: int | float | str) -> datetime | None:
             )
         except ValueError:
             pass
+
     try:
         return datetime.strptime(raw, _GDELT_TS_FORMAT).replace(tzinfo=UTC)
     except ValueError:
@@ -154,22 +197,19 @@ def _coerce_value(value: Any) -> float | None:
     """
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
-        f = float(value)
-    elif isinstance(value, str):
-        s = value.strip()
-        if not s:
-            return None
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        return None
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, str):
         try:
-            f = float(s)
+            f = float(value)
+            return f if math.isfinite(f) else None
         except ValueError:
             return None
-    else:
-        return None
-    # Drop NaN / ±inf — they'd poison mean/min/max.
-    if not math.isfinite(f):
-        return None
-    return f
+    return None
 
 
 def _clean_points(timeline: Any) -> list[tuple[datetime | None, float]]:

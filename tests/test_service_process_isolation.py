@@ -315,3 +315,293 @@ def test_process_isolated_service_non_stub_pool_creation(monkeypatch: pytest.Mon
     finally:
         svc.close()
 
+
+def test_resilient_executor_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    from concurrent.futures import BrokenExecutor
+
+    from catchem.service import ResilientExecutor
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        # Submit a simple job first
+        fut = exec_proxy.submit(lambda x: x * 2, 5)
+        assert fut.result() == 10
+
+        # Now mock the underlying pool's submit to raise BrokenExecutor on the first call,
+        # then return a working future on the second call.
+        original_pool = exec_proxy._pool
+        calls = 0
+
+        def mock_submit(fn, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise BrokenExecutor("Simulated broken executor on submit")
+            return original_pool.submit(fn, *args, **kwargs)
+
+        monkeypatch.setattr(original_pool, "submit", mock_submit)
+
+        # Call submit: it should raise BrokenExecutor, recreate the pool, and succeed on the retry!
+        fut2 = exec_proxy.submit(lambda x: x * 3, 5)
+        assert fut2.result() == 15
+        assert exec_proxy._pool is not original_pool
+    finally:
+        exec_proxy.shutdown()
+
+
+def test_resilient_future_result_recovery() -> None:
+    from concurrent.futures import BrokenExecutor
+
+    from catchem.service import ResilientExecutor, ResilientFuture
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        class BadFuture:
+            def result(self, timeout=None):
+                raise BrokenExecutor("Future execution failed because worker died")
+
+        original_pool = exec_proxy._pool
+        res_fut = ResilientFuture(
+            executor=exec_proxy,
+            pool=original_pool,
+            future=BadFuture(),
+            fn=lambda x: x + 1,
+            args=(10,),
+            kwargs={},
+        )
+        val = res_fut.result()
+        assert val == 11
+        assert exec_proxy._pool is not original_pool
+    finally:
+        exec_proxy.shutdown()
+
+
+def test_resilient_executor_propagates_double_failure() -> None:
+    from concurrent.futures import BrokenExecutor
+
+    from catchem.service import ResilientExecutor
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        def bad_submit(*args, **kwargs):
+            raise BrokenExecutor("Always broken")
+
+        original_recreate = exec_proxy.recreate_pool
+        def mock_recreate(failed_pool=None):
+            original_recreate(failed_pool)
+            if exec_proxy._pool is not None:
+                exec_proxy._pool.submit = bad_submit
+
+        exec_proxy.recreate_pool = mock_recreate
+        exec_proxy._pool.submit = bad_submit
+
+        with pytest.raises(BrokenExecutor):
+            exec_proxy.submit(lambda x: x, 1)
+    finally:
+        exec_proxy.shutdown()
+
+
+def test_resilient_executor_recreate_ignores_stale() -> None:
+    from catchem.service import ResilientExecutor
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        initial_pool = exec_proxy._pool
+
+        # Recreate pool once specifying the initial pool - should succeed
+        exec_proxy.recreate_pool(initial_pool)
+        second_pool = exec_proxy._pool
+        assert second_pool is not initial_pool
+
+        # Recreate pool again specifying the initial pool (which is now stale) - should do nothing!
+        exec_proxy.recreate_pool(initial_pool)
+        assert exec_proxy._pool is second_pool
+
+        # Recreate pool specifying None - should succeed
+        exec_proxy.recreate_pool(None)
+        assert exec_proxy._pool is not second_pool
+    finally:
+        exec_proxy.shutdown()
+
+
+def test_resilient_executor_raises_when_closed() -> None:
+    from catchem.service import ResilientExecutor
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    # Test double shutdown to cover self._pool is None branch
+    exec_proxy.shutdown()
+    exec_proxy.shutdown()
+
+    # Test recreate_pool on closed executor
+    exec_proxy.recreate_pool()
+
+    with pytest.raises(RuntimeError, match="Executor is closed"):
+        exec_proxy.submit(lambda x: x, 1)
+
+
+def test_resilient_future_result_raises_when_executor_closed() -> None:
+    from concurrent.futures import BrokenExecutor
+
+    from catchem.service import ResilientExecutor, ResilientFuture
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        class BadFuture:
+            def result(self, timeout=None):
+                raise BrokenExecutor("die")
+
+        original_pool = exec_proxy._pool
+        
+        # We hook recreate_pool to shutdown the executor during recovery!
+        def mock_recreate(failed_pool=None):
+            exec_proxy.shutdown()
+        exec_proxy.recreate_pool = mock_recreate
+
+        res_fut = ResilientFuture(
+            executor=exec_proxy,
+            pool=original_pool,
+            future=BadFuture(),
+            fn=lambda x: x,
+            args=(1,),
+            kwargs={},
+        )
+        with pytest.raises(RuntimeError, match="Executor is closed"):
+            res_fut.result()
+    finally:
+        exec_proxy.shutdown()
+
+
+def test_resilient_executor_submit_raises_when_executor_closed_midway() -> None:
+    from concurrent.futures import BrokenExecutor
+
+    from catchem.service import ResilientExecutor
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        # Force the first submit to fail
+        original_pool = exec_proxy._pool
+        def bad_submit(*args, **kwargs):
+            raise BrokenExecutor("Always broken")
+        original_pool.submit = bad_submit
+
+        # Shutdown the executor during recovery
+        def mock_recreate(failed_pool=None):
+            exec_proxy.shutdown()
+        exec_proxy.recreate_pool = mock_recreate
+
+        with pytest.raises(RuntimeError, match="Executor is closed"):
+            exec_proxy.submit(lambda x: x, 1)
+    finally:
+        exec_proxy.shutdown()
+
+
+def test_resilient_executor_recreate_shutdown_error() -> None:
+    from catchem.service import ResilientExecutor
+    from catchem.taxonomy import default_taxonomy_path, load_taxonomy
+
+    tax = load_taxonomy(default_taxonomy_path())
+    exec_proxy = ResilientExecutor(
+        use_stubs=True,
+        max_workers=1,
+        zero_shot_model_name="facebook/bart-large-mnli",
+        sentiment_model_name="ProsusAI/finbert",
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model_name="cross-encoder/ms-marco-MiniLM-L6-v2",
+        taxonomy=tax,
+        nice_value=0,
+        memory_limit_mb=None,
+    )
+    try:
+        def bad_shutdown(*args, **kwargs):
+            raise RuntimeError("Shutdown failed")
+        exec_proxy._pool.shutdown = bad_shutdown
+        # Trigger recreate_pool which will call shutdown and swallow the RuntimeError!
+        exec_proxy.recreate_pool()
+    finally:
+        exec_proxy.shutdown()
+
+

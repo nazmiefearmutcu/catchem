@@ -3,9 +3,19 @@ produces one FinancialImpactRecord. The supervisor wraps this for batch/live."""
 
 from __future__ import annotations
 
+import concurrent.futures
 import threading
 from collections.abc import Iterable, Mapping
-from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import BrokenExecutor, Executor
+
+try:
+    from concurrent.futures import BrokenProcessPool
+except ImportError:  # pragma: no cover
+    try:
+        from concurrent.futures.process import BrokenProcessPool
+    except ImportError:
+        BrokenProcessPool = BrokenExecutor
+
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -149,6 +159,137 @@ class FIFOCache:
             self._cache[key] = value
 
 
+# ── Resilient Executor Proxy ────────────────────────────────────────────────
+
+class ResilientFuture:
+    """Wrapper around Future that catches process/executor failures and retries once."""
+
+    def __init__(
+        self,
+        executor: ResilientExecutor,
+        pool: Executor,
+        future: Any,
+        fn: Any,
+        args: Any,
+        kwargs: Any,
+    ) -> None:
+        self._executor = executor
+        self._pool = pool
+        self._future = future
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+
+    def result(self, timeout: float | None = None) -> Any:
+        try:
+            return self._future.result(timeout=timeout)
+        except (BrokenExecutor, BrokenProcessPool) as exc:
+            logger.warning("Future.result raised BrokenExecutor, attempting recreation and retry.")
+            self._executor.recreate_pool(self._pool)
+            with self._executor._lock:
+                if self._executor._is_closed or self._executor._pool is None:
+                    raise RuntimeError("Executor is closed") from exc
+                pool = self._executor._pool
+            self._future = pool.submit(self._fn, *self._args, **self._kwargs)
+            return self._future.result(timeout=timeout)
+
+
+class ResilientExecutor:
+    """Executor proxy that automatically recreates underlying pool on BrokenExecutor."""
+
+    def __init__(
+        self,
+        use_stubs: bool,
+        max_workers: int,
+        zero_shot_model_name: str,
+        sentiment_model_name: str,
+        embedding_model_name: str,
+        reranker_model_name: str,
+        taxonomy: Taxonomy,
+        nice_value: int,
+        memory_limit_mb: int | None,
+    ) -> None:
+        self.use_stubs = use_stubs
+        self.max_workers = max_workers
+        self.zero_shot_model_name = zero_shot_model_name
+        self.sentiment_model_name = sentiment_model_name
+        self.embedding_model_name = embedding_model_name
+        self.reranker_model_name = reranker_model_name
+        self.taxonomy = taxonomy
+        self.nice_value = nice_value
+        self.memory_limit_mb = memory_limit_mb
+
+        self._lock = threading.Lock()
+        self._pool: Executor | None = None
+        self._is_closed = False
+
+        self.recreate_pool()
+
+    def recreate_pool(self, failed_pool: Executor | None = None) -> None:
+        with self._lock:
+            if self._is_closed:
+                return
+            if failed_pool is not None and self._pool is not failed_pool:
+                # Already recreated by another thread
+                return
+
+            if self._pool is not None:
+                logger.warning("Worker pool broken or recreating. Shutting down old pool.")
+                try:
+                    self._pool.shutdown(wait=False)
+                except Exception:
+                    pass
+
+            initargs = (
+                self.zero_shot_model_name,
+                self.sentiment_model_name,
+                self.embedding_model_name,
+                self.reranker_model_name,
+                self.use_stubs,
+                self.taxonomy,
+                self.nice_value,
+                self.memory_limit_mb,
+            )
+            if self.use_stubs:
+                self._pool = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.max_workers,
+                    initializer=_init_worker,
+                    initargs=initargs,
+                )
+            else:
+                self._pool = concurrent.futures.ProcessPoolExecutor(
+                    max_workers=self.max_workers,
+                    initializer=_init_worker,
+                    initargs=initargs,
+                )
+
+    def submit(self, fn: Any, *args: Any, **kwargs: Any) -> ResilientFuture:
+        with self._lock:
+            if self._is_closed or self._pool is None:
+                raise RuntimeError("Executor is closed")
+            pool = self._pool
+
+        try:
+            fut = pool.submit(fn, *args, **kwargs)
+        except (BrokenExecutor, BrokenProcessPool) as exc:
+            logger.warning("Failed to submit task due to broken executor. Recreating pool and retrying submit.")
+            self.recreate_pool(pool)
+            with self._lock:
+                if self._is_closed or self._pool is None:
+                    raise RuntimeError("Executor is closed") from exc
+                pool = self._pool
+            fut = pool.submit(fn, *args, **kwargs)
+
+        return ResilientFuture(self, pool, fut, fn, args, kwargs)
+
+    def shutdown(self, wait: bool = True) -> None:
+        with self._lock:
+            self._is_closed = True
+            if self._pool is not None:
+                self._pool.shutdown(wait=wait)
+                self._pool = None
+
+
 # ── Process Isolated Delegates ───────────────────────────────────────────────
 
 class ProcessIsolatedZeroShot:
@@ -285,36 +426,17 @@ class CatchemService:
         reranker_ver = "stub-reranker/v1" if use_stubs else f"hf:{settings.models.reranker}"
 
         if self.use_isolation:
-            if use_stubs:
-                self._pool = ThreadPoolExecutor(
-                    max_workers=settings.models.isolation_processes,
-                    initializer=_init_worker,
-                    initargs=(
-                        settings.models.zero_shot,
-                        settings.models.sentiment_default,
-                        settings.models.embedding,
-                        settings.models.reranker,
-                        use_stubs,
-                        taxonomy,
-                        settings.models.isolation_nice,
-                        settings.models.isolation_memory_limit_mb,
-                    ),
-                )
-            else:
-                self._pool = ProcessPoolExecutor(
-                    max_workers=settings.models.isolation_processes,
-                    initializer=_init_worker,
-                    initargs=(
-                        settings.models.zero_shot,
-                        settings.models.sentiment_default,
-                        settings.models.embedding,
-                        settings.models.reranker,
-                        use_stubs,
-                        taxonomy,
-                        settings.models.isolation_nice,
-                        settings.models.isolation_memory_limit_mb,
-                    ),
-                )
+            self._pool = ResilientExecutor(
+                use_stubs=use_stubs,
+                max_workers=settings.models.isolation_processes,
+                zero_shot_model_name=settings.models.zero_shot,
+                sentiment_model_name=settings.models.sentiment_default,
+                embedding_model_name=settings.models.embedding,
+                reranker_model_name=settings.models.reranker,
+                taxonomy=taxonomy,
+                nice_value=settings.models.isolation_nice,
+                memory_limit_mb=settings.models.isolation_memory_limit_mb,
+            )
             self.zero_shot: ZeroShot = ProcessIsolatedZeroShot(
                 self._pool, taxonomy, zero_shot_ver, settings.models.cache_maxsize
             )

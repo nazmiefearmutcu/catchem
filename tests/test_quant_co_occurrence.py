@@ -74,10 +74,7 @@ def test_records_with_no_assets_or_reasons_yield_no_cells() -> None:
 
 def test_uniform_records_have_neutral_lift_of_one() -> None:
     # 5 records, all (equities, earnings). Only one cell exists, so lift = 1.
-    records = [
-        _rec(f"c{i}", assets=["equities"], reasons=["earnings"])
-        for i in range(5)
-    ]
+    records = [_rec(f"c{i}", assets=["equities"], reasons=["earnings"]) for i in range(5)]
     report = compute_co_occurrence(records)
     assert len(report.asset_reason_cells) == 1
     cell = report.asset_reason_cells[0]
@@ -93,10 +90,7 @@ def test_disjoint_asset_reason_combos_have_max_lift() -> None:
     # column has total 1 in a 10x10 grid => an exclusively-coupled pair has
     # lift = (count*total)/(row*col) = (1*10)/(1*1) = 10. So every diagonal
     # cell is maximally enriched (no off-diagonal noise to dilute it).
-    records = [
-        _rec(f"c{i}", assets=[f"asset_{i}"], reasons=[f"reason_{i}"])
-        for i in range(10)
-    ]
+    records = [_rec(f"c{i}", assets=[f"asset_{i}"], reasons=[f"reason_{i}"]) for i in range(10)]
     report = compute_co_occurrence(records)
     assert len(report.asset_reason_cells) == 10
     for cell in report.asset_reason_cells:
@@ -121,9 +115,7 @@ def test_over_represented_pair_has_lift_above_one() -> None:
     # lift(crypto, m_and_a)    = (2 * 10) / (3 * 3) ~= 2.222  => most enriched
     records: list[dict[str, Any]] = []
     for i in range(6):
-        records.append(
-            _rec(f"a{i}", assets=["equities"], reasons=["earnings"])
-        )
+        records.append(_rec(f"a{i}", assets=["equities"], reasons=["earnings"]))
     records.append(_rec("b1", assets=["equities"], reasons=["m_and_a"]))
     records.append(_rec("b2", assets=["crypto"], reasons=["earnings"]))
     for i in range(2):
@@ -161,21 +153,13 @@ def test_cells_sorted_by_lift_desc_then_count_desc() -> None:
     #   (bonds, supply)       : 2 records   => lift = 2 * 12 / (2 * 2) = 6
     records: list[dict[str, Any]] = []
     for i in range(3):
-        records.append(
-            _rec(f"a{i}", assets=["equities"], reasons=["earnings"])
-        )
+        records.append(_rec(f"a{i}", assets=["equities"], reasons=["earnings"]))
     for i in range(3):
-        records.append(
-            _rec(f"b{i}", assets=["crypto"], reasons=["regulation"])
-        )
+        records.append(_rec(f"b{i}", assets=["crypto"], reasons=["regulation"]))
     for i in range(4):
-        records.append(
-            _rec(f"c{i}", assets=["fx"], reasons=["central_bank"])
-        )
+        records.append(_rec(f"c{i}", assets=["fx"], reasons=["central_bank"]))
     for i in range(2):
-        records.append(
-            _rec(f"d{i}", assets=["bonds"], reasons=["supply"])
-        )
+        records.append(_rec(f"d{i}", assets=["bonds"], reasons=["supply"]))
 
     report = compute_co_occurrence(records)
     lifts = [round(c.lift, 6) for c in report.asset_reason_cells]
@@ -237,10 +221,7 @@ def test_three_records_with_same_pair_yield_edge_weight_three() -> None:
 
 
 def test_edge_sample_capture_ids_capped_at_three() -> None:
-    records = [
-        _rec(f"cap_{i}", symbols=["AAPL", "MSFT"])
-        for i in range(7)
-    ]
+    records = [_rec(f"cap_{i}", symbols=["AAPL", "MSFT"]) for i in range(7)]
     report = compute_co_occurrence(records)
     edge = report.strong_edges[0]
     assert edge.weight == 7
@@ -252,8 +233,8 @@ def test_edge_sample_capture_ids_capped_at_three() -> None:
 def test_min_edge_weight_excludes_singleton_pairs() -> None:
     records = [
         _rec("c1", symbols=["AAPL", "MSFT"]),  # weight 1, dropped by default
-        _rec("c2", symbols=["NVDA", "AMD"]),   # weight 1, dropped by default
-        _rec("c3", symbols=["NVDA", "AMD"]),   # bumps NVDA-AMD to weight 2
+        _rec("c2", symbols=["NVDA", "AMD"]),  # weight 1, dropped by default
+        _rec("c3", symbols=["NVDA", "AMD"]),  # bumps NVDA-AMD to weight 2
     ]
     report = compute_co_occurrence(records)
     assert len(report.strong_edges) == 1
@@ -301,10 +282,7 @@ def test_record_with_three_symbols_emits_three_edges() -> None:
 
 
 def test_single_reason_asset_has_herfindahl_one() -> None:
-    records = [
-        _rec(f"c{i}", assets=["equities"], reasons=["earnings"])
-        for i in range(4)
-    ]
+    records = [_rec(f"c{i}", assets=["equities"], reasons=["earnings"]) for i in range(4)]
     report = compute_co_occurrence(records)
     assert len(report.asset_concentration) == 1
     conc = report.asset_concentration[0]
@@ -338,10 +316,7 @@ def test_herfindahl_in_unit_interval_for_mixed_reasons() -> None:
 def test_top_reasons_capped_at_five() -> None:
     # One asset with 7 distinct reasons, equal weight => ties broken alpha.
     reasons = [f"r{i}" for i in range(7)]
-    records = [
-        _rec(f"c{i}", assets=["equities"], reasons=[reasons[i]])
-        for i in range(7)
-    ]
+    records = [_rec(f"c{i}", assets=["equities"], reasons=[reasons[i]]) for i in range(7)]
     report = compute_co_occurrence(records)
     conc = report.asset_concentration[0]
     assert conc.reason_count == 7
@@ -387,28 +362,24 @@ def test_asset_without_any_reason_gets_neutral_concentration() -> None:
 
 def test_summary_distinct_counters_are_correct() -> None:
     records = [
-        _rec("c1", assets=["equities", "crypto"], reasons=["earnings"],
-             symbols=["AAPL", "MSFT"]),
-        _rec("c2", assets=["equities"], reasons=["m_and_a", "earnings"],
-             symbols=["aapl", "GOOG"]),  # lowercase aapl should fold into AAPL
+        _rec("c1", assets=["equities", "crypto"], reasons=["earnings"], symbols=["AAPL", "MSFT"]),
+        _rec(
+            "c2", assets=["equities"], reasons=["m_and_a", "earnings"], symbols=["aapl", "GOOG"]
+        ),  # lowercase aapl should fold into AAPL
     ]
     report = compute_co_occurrence(records)
     assert report.total_records == 2
-    assert report.distinct_assets == 2     # equities, crypto
-    assert report.distinct_reasons == 2    # earnings, m_and_a
-    assert report.distinct_symbols == 3    # AAPL, MSFT, GOOG (case folded)
+    assert report.distinct_assets == 2  # equities, crypto
+    assert report.distinct_reasons == 2  # earnings, m_and_a
+    assert report.distinct_symbols == 3  # AAPL, MSFT, GOOG (case folded)
 
 
 def test_report_is_deterministic_for_same_input() -> None:
     records = [
-        _rec("c1", assets=["equities"], reasons=["earnings"],
-             symbols=["AAPL", "MSFT"]),
-        _rec("c2", assets=["equities"], reasons=["m_and_a"],
-             symbols=["AAPL", "MSFT"]),
-        _rec("c3", assets=["crypto"], reasons=["regulation"],
-             symbols=["BTC", "ETH"]),
-        _rec("c4", assets=["crypto"], reasons=["regulation"],
-             symbols=["BTC", "ETH"]),
+        _rec("c1", assets=["equities"], reasons=["earnings"], symbols=["AAPL", "MSFT"]),
+        _rec("c2", assets=["equities"], reasons=["m_and_a"], symbols=["AAPL", "MSFT"]),
+        _rec("c3", assets=["crypto"], reasons=["regulation"], symbols=["BTC", "ETH"]),
+        _rec("c4", assets=["crypto"], reasons=["regulation"], symbols=["BTC", "ETH"]),
     ]
     a = compute_co_occurrence(records)
     b = compute_co_occurrence(records)
@@ -421,14 +392,15 @@ def test_report_is_deterministic_for_same_input() -> None:
 
 def test_top_n_caps_apply() -> None:
     # 12 disjoint (asset, reason) records => 12 cells of lift=1 each.
-    records = [
-        _rec(f"c{i}", assets=[f"a{i}"], reasons=[f"r{i}"])
-        for i in range(12)
-    ]
+    records = [_rec(f"c{i}", assets=[f"a{i}"], reasons=[f"r{i}"]) for i in range(12)]
     # And 6 distinct symbol-pair edges, each repeated twice for weight 2.
     pairs = [
-        ("AA", "BB"), ("CC", "DD"), ("EE", "FF"),
-        ("GG", "HH"), ("II", "JJ"), ("KK", "LL"),
+        ("AA", "BB"),
+        ("CC", "DD"),
+        ("EE", "FF"),
+        ("GG", "HH"),
+        ("II", "JJ"),
+        ("KK", "LL"),
     ]
     for idx, (s1, s2) in enumerate(pairs):
         records.append(_rec(f"e{idx}a", symbols=[s1, s2]))
@@ -486,9 +458,7 @@ def test_as_iter_passes_collections_through() -> None:
 def test_clean_set_skips_none_and_blanks() -> None:
     from catchem.quant.co_occurrence import _clean_set  # type: ignore[attr-defined]
 
-    assert _clean_set(["EQUITY", None, "  ", " FX "]) == frozenset(
-        {"EQUITY", "FX"}
-    )
+    assert _clean_set(["EQUITY", None, "  ", " FX "]) == frozenset({"EQUITY", "FX"})
 
 
 def test_relevance_none_when_missing_or_unparseable() -> None:
@@ -637,6 +607,7 @@ def test_hhi_clamped_greater_than_one(monkeypatch) -> None:
     import catchem.quant.co_occurrence as co_occ
 
     real_sum = builtins.sum
+
     def mock_sum(iterable, *args, **kwargs):
         if isinstance(iterable, types.GeneratorType) and "co_occurrence.py" in iterable.gi_code.co_filename:
             return 1.5
@@ -656,6 +627,7 @@ def test_hhi_clamped_less_than_zero(monkeypatch) -> None:
     import catchem.quant.co_occurrence as co_occ
 
     real_sum = builtins.sum
+
     def mock_sum(iterable, *args, **kwargs):
         if isinstance(iterable, types.GeneratorType) and "co_occurrence.py" in iterable.gi_code.co_filename:
             return -0.5
@@ -668,5 +640,9 @@ def test_hhi_clamped_less_than_zero(monkeypatch) -> None:
     assert conc.herfindahl_index == 0.0
 
 
+def test_clean_symbols_edge_cases() -> None:
+    from catchem.quant.co_occurrence import _clean_symbols  # type: ignore[attr-defined]
 
-
+    assert _clean_symbols(None) == frozenset()
+    assert _clean_symbols([]) == frozenset()
+    assert _clean_symbols(["AAPL", None, "  ", "msft"]) == frozenset({"AAPL", "MSFT"})

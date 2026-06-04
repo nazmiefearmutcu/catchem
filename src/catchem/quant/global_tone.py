@@ -32,6 +32,8 @@ be, fail-soft everywhere else, stdlib-only for the math.
 
 from __future__ import annotations
 
+import functools
+import math
 import statistics
 from datetime import UTC, datetime
 from typing import Any
@@ -88,20 +90,38 @@ def _parse_point_date(value: Any) -> datetime | None:
     (int/float seconds). Returns ``None`` for anything unparseable so the
     caller can drop the point without exception handling.
     """
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
+    if isinstance(value, (int, float, str)):
+        return _parse_point_date_cached(value)
+    return None
+
+
+@functools.lru_cache(maxsize=2048)
+def _parse_point_date_cached(value: int | float | str) -> datetime | None:
     # Epoch seconds (int or float).
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    if isinstance(value, (int, float)):
         try:
             return datetime.fromtimestamp(float(value), tz=UTC)
         except (ValueError, OSError, OverflowError):
             return None
-    if not isinstance(value, str):
-        return None
     raw = value.strip()
     if not raw:
         return None
     # Canonical GDELT stamp first.
+    if len(raw) == 16 and raw[8] == "T" and raw[15] == "Z":
+        try:
+            return datetime(
+                int(raw[0:4]),
+                int(raw[4:6]),
+                int(raw[6:8]),
+                int(raw[9:11]),
+                int(raw[11:13]),
+                int(raw[13:15]),
+                tzinfo=UTC,
+            )
+        except ValueError:
+            pass
     try:
         return datetime.strptime(raw, _GDELT_TS_FORMAT).replace(tzinfo=UTC)
     except ValueError:
@@ -119,7 +139,9 @@ def _parse_point_date(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        return parsed.replace(tzinfo=UTC)
+    if parsed.tzinfo == UTC:
+        return parsed
     return parsed.astimezone(UTC)
 
 
@@ -145,7 +167,7 @@ def _coerce_value(value: Any) -> float | None:
     else:
         return None
     # Drop NaN / ±inf — they'd poison mean/min/max.
-    if f != f or f in (float("inf"), float("-inf")):
+    if not math.isfinite(f):
         return None
     return f
 
@@ -304,13 +326,10 @@ def _least_squares_slope(values: list[float]) -> float:
     n = len(values)
     if n < 2:
         return 0.0
-    xs = list(range(n))
     mean_x = (n - 1) / 2.0
     mean_y = statistics.fmean(values)
-    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, values, strict=True))
-    den = sum((x - mean_x) ** 2 for x in xs)
-    if den == 0:
-        return 0.0
+    num = sum((x - mean_x) * (y - mean_y) for x, y in enumerate(values))
+    den = n * (n * n - 1) / 12.0
     return num / den
 
 
@@ -439,11 +458,7 @@ async def compute_global_tone(
             except Exception:
                 pass
 
-    latests = [
-        s["latest_tone"]
-        for s in by_theme.values()
-        if s.get("latest_tone") is not None
-    ]
+    latests = [s["latest_tone"] for s in by_theme.values() if s.get("latest_tone") is not None]
     trends = [
         s["tone_trend"]
         for s in by_theme.values()

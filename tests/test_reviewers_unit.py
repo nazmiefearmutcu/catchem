@@ -403,9 +403,7 @@ class TestBuildUserPrompt:
             assert rid in prompt
 
     def test_asset_ids_sorted_in_block(self, taxonomy):
-        prompt = build_user_prompt(
-            taxonomy=taxonomy, title="t", body="b", domain="d", url="u"
-        )
+        prompt = build_user_prompt(taxonomy=taxonomy, title="t", body="b", domain="d", url="u")
         expected = ", ".join(sorted(taxonomy.asset_class_ids))
         assert expected in prompt
 
@@ -428,9 +426,7 @@ class TestBuildUserPrompt:
         assert JSON_SCHEMA_HINT in prompt
 
     def test_none_fields_get_placeholders(self, taxonomy):
-        prompt = build_user_prompt(
-            taxonomy=taxonomy, title=None, body="body text", domain=None, url=None
-        )
+        prompt = build_user_prompt(taxonomy=taxonomy, title=None, body="body text", domain=None, url=None)
         assert "title: (untitled)" in prompt
         assert "domain: (unknown)" in prompt
         assert "url: (unknown)" in prompt
@@ -441,17 +437,13 @@ class TestBuildUserPrompt:
 
     def test_body_clipped_to_6000_chars(self, taxonomy):
         long_body = "x" * 10_000
-        prompt = build_user_prompt(
-            taxonomy=taxonomy, title="t", body=long_body, domain="d", url="u"
-        )
+        prompt = build_user_prompt(taxonomy=taxonomy, title="t", body=long_body, domain="d", url="u")
         # The 6KB clip keeps token cost bounded; the 6001st 'x' run must be gone.
         assert "x" * 6000 in prompt
         assert "x" * 6001 not in prompt
 
     def test_short_body_not_truncated(self, taxonomy):
-        prompt = build_user_prompt(
-            taxonomy=taxonomy, title="t", body="short body", domain="d", url="u"
-        )
+        prompt = build_user_prompt(taxonomy=taxonomy, title="t", body="short body", domain="d", url="u")
         assert "short body" in prompt
 
     def test_prompt_is_str(self, taxonomy):
@@ -462,5 +454,21 @@ class TestBuildUserPrompt:
 class TestReviewerProtocol:
     def test_protocol_method_is_callable(self):
         from catchem.reviewers.base import Reviewer
+
         assert Reviewer.review(None, None) is None
 
+
+def test_deepseek_private_helpers() -> None:
+    from catchem.reviewers.deepseek import _as_str_list, _clean_text
+
+    # _clean_text empty/None case
+    assert _clean_text("") == ""
+    assert _clean_text(None) == ""
+
+    # _as_str_list limit break and type/empty filtering
+    val = ["a", "b", 42, 3.14, None, "", "c", {}, []]
+    assert _as_str_list(val, max_items=2) == ["a", "b"]
+    assert _as_str_list(val, max_items=4) == ["a", "b", "42", "3.14"]
+    assert _as_str_list(val) == ["a", "b", "42", "3.14", "c"]
+    assert _as_str_list(None) == []
+    assert _as_str_list("not a list") == []

@@ -15,7 +15,11 @@ def test_finance_capture_keeps(prefilter, synth_capture) -> None:
     res = prefilter.evaluate(synth_capture())
     assert res.keep is True
     assert res.rule_score >= 0.3
-    assert "fed" in {k.lower() for k in res.matched_keywords} or "rate" in res.matched_keywords or "rates" in res.matched_keywords
+    assert (
+        "fed" in {k.lower() for k in res.matched_keywords}
+        or "rate" in res.matched_keywords
+        or "rates" in res.matched_keywords
+    )
 
 
 def test_obvious_sports_is_rejected(prefilter, synth_non_finance_capture) -> None:
@@ -67,6 +71,12 @@ def test_word_match_multiword_keyword() -> None:
     """Multi-word alnum phrases still match (whitespace is alnum-adjacent)."""
     assert FastPrefilter._word_match("the central bank acted", "central bank") is True
     assert FastPrefilter._word_match("a central role", "central bank") is False
+
+
+def test_word_match_fallback_compilation() -> None:
+    """An alphanumeric keyword not in precompiled cache falls back to on-the-fly compilation."""
+    assert FastPrefilter._word_match("apple tree", "apple") is True
+    assert FastPrefilter._word_match("pineapple tree", "apple") is False
 
 
 # ---------------------------------------------------------------------------
@@ -227,13 +237,19 @@ def _bare_capture(title: str, text: str, *, domain: str = "nowhere.example.com")
     from catchem.schemas import AwarenessCaptureView
 
     return AwarenessCaptureView(
-        capture_id="c", doc_id="d",
-        title=title, text=text,
-        domain=domain, url=f"https://{domain}/a",
-        source_type="rss", discovery_channel=f"rss:{domain}",
+        capture_id="c",
+        doc_id="d",
+        title=title,
+        text=text,
+        domain=domain,
+        url=f"https://{domain}/a",
+        source_type="rss",
+        discovery_channel=f"rss:{domain}",
         language="en",
-        fetch_ts=datetime.now(UTC), observed_ts=datetime.now(UTC),
-        content_hash="h", robots_decision="not_applicable",
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
+        content_hash="h",
+        robots_decision="not_applicable",
     )
 
 
@@ -263,13 +279,19 @@ def test_excerpt_is_lowercased_and_joined() -> None:
     from catchem.schemas import AwarenessCaptureView
 
     cap = AwarenessCaptureView(
-        capture_id="c", doc_id="d",
-        title="FED RAISES RATES", text="Inflation Persists.",
-        domain="reuters.com", url="https://reuters.com/a",
-        source_type="rss", discovery_channel="rss:reuters.com",
+        capture_id="c",
+        doc_id="d",
+        title="FED RAISES RATES",
+        text="Inflation Persists.",
+        domain="reuters.com",
+        url="https://reuters.com/a",
+        source_type="rss",
+        discovery_channel="rss:reuters.com",
         language="en",
-        fetch_ts=datetime.now(UTC), observed_ts=datetime.now(UTC),
-        content_hash="h", robots_decision="not_applicable",
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
+        content_hash="h",
+        robots_decision="not_applicable",
     )
     excerpt = FastPrefilter._excerpt(cap)
     assert excerpt == "fed raises rates\ninflation persists."
@@ -283,13 +305,19 @@ def test_excerpt_truncates_body_to_max_chars() -> None:
 
     long_body = "a" * 2000
     cap = AwarenessCaptureView(
-        capture_id="c", doc_id="d",
-        title="t", text=long_body,
-        domain="reuters.com", url="https://reuters.com/a",
-        source_type="rss", discovery_channel="rss:reuters.com",
+        capture_id="c",
+        doc_id="d",
+        title="t",
+        text=long_body,
+        domain="reuters.com",
+        url="https://reuters.com/a",
+        source_type="rss",
+        discovery_channel="rss:reuters.com",
         language="en",
-        fetch_ts=datetime.now(UTC), observed_ts=datetime.now(UTC),
-        content_hash="h", robots_decision="not_applicable",
+        fetch_ts=datetime.now(UTC),
+        observed_ts=datetime.now(UTC),
+        content_hash="h",
+        robots_decision="not_applicable",
     )
     excerpt = FastPrefilter._excerpt(cap, max_chars=50)
     # "t" + "\n" + 50 'a's

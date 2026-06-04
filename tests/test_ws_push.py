@@ -940,3 +940,97 @@ async def test_connect_and_read_httpx_ws_oversized_message(monkeypatch: pytest.M
     chan._stop.clear()
     with pytest.raises(ValueError, match="exceeds limit"):
         await chan._connect_and_read(spec, st)
+
+
+@pytest.mark.asyncio
+async def test_ws_push_concurrency_semaphore(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Test that the shared semaphore restricts concurrent thread-pool ingestion tasks to 4.
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    active_count = 0
+    max_active_observed = 0
+
+    async def mock_to_thread(func, item):
+        nonlocal active_count, max_active_observed
+        active_count += 1
+        max_active_observed = max(max_active_observed, active_count)
+        await asyncio.sleep(0.01)
+        active_count -= 1
+
+    monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
+
+    # Spawn 6 concurrent handles to the same channel
+    frames = [
+        f'{{"title": "Title {i}", "url": "https://a.com/{i}"}}'
+        for i in range(1, 7)
+    ]
+
+    # Run them concurrently via gather
+    await asyncio.gather(*(chan._handle_frame(spec, st, frame) for frame in frames))
+
+    # The maximum active to_thread tasks should be capped at 4 by the semaphore
+    assert max_active_observed <= 4
+    # All of them should eventually finish
+    assert st.ingested == 6
+
+
+@pytest.mark.asyncio
+async def test_ws_push_stop_awaits_in_flight_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Test that stop() awaits any in-flight ingestion tasks to avoid database access after stop.
+    spec = WsSourceSpec("s", "wss://s/ws")
+    chan = _make_channel(sources=[spec])
+    st = chan._states[spec.name]
+
+    ingest_started = asyncio.Event()
+    ingest_finish = asyncio.Event()
+    ingest_completed = False
+
+    async def mock_to_thread(func, item):
+        nonlocal ingest_completed
+        ingest_started.set()
+        await ingest_finish.wait()
+        ingest_completed = True
+
+    monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
+
+    # Spawn ingestion task via handle_frame
+    frame = '{"title": "Title", "url": "https://a.com/1"}'
+
+    # We run _handle_frame as a task
+    handle_task = asyncio.create_task(chan._handle_frame(spec, st, frame))
+
+    # Wait until it enters mock_to_thread
+    await ingest_started.wait()
+
+    # Verify it is tracked in self._ingest_tasks
+    assert len(chan._ingest_tasks) == 1
+
+    # Now simulate shutdown: stop() is called
+    # To simulate stop() waiting, we launch stop() in a task
+    # Fake that there is an active task in self._tasks so stop() doesn't return early
+    dummy_task = asyncio.create_task(asyncio.sleep(0))
+    chan._tasks = [dummy_task]
+
+    stop_task = asyncio.create_task(chan.stop())
+
+    # Give stop_task a moment to run up to the gather/await
+    await asyncio.sleep(0.01)
+
+    # Ingestion should not be completed yet because ingest_finish event is not set
+    assert not ingest_completed
+
+    # Now trigger finish of the ingestion
+    ingest_finish.set()
+
+    # Await the stop task
+    await stop_task
+
+    # Ingestion should now be fully completed
+    assert ingest_completed
+    assert len(chan._ingest_tasks) == 0
+
+    # Await handle_task to clean up
+    await handle_task
+

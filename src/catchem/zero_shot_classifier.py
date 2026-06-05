@@ -32,6 +32,7 @@ class ZeroShotResult:
 
 class ZeroShot(Protocol):
     def classify(self, cap: AwarenessCaptureView) -> ZeroShotResult: ...
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[ZeroShotResult]: ...
 
 
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9'+\-]+")
@@ -135,6 +136,9 @@ class ZeroShotStub:
             normalized[k] = float(1.0 / (1.0 + math.exp(-(raw - 1.0))))
         return ZeroShotResult(label_scores=normalized, model_version=self.model_version)
 
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[ZeroShotResult]:
+        return [self.classify(cap) for cap in caps]
+
 
 class ZeroShotModel:
     """Wraps transformers pipeline("zero-shot-classification"). Lazy import."""
@@ -165,6 +169,34 @@ class ZeroShotModel:
         for lid, hyp in self._candidate_hypotheses:
             scores[lid] = scores_by_hyp.get(hyp, 0.0)
         return ZeroShotResult(label_scores=scores, model_version=self.model_version)
+
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[ZeroShotResult]:
+        texts = [(cap.title or "") + "\n" + (cap.text or "")[:1500] for cap in caps]
+        non_empty_indices = []
+        non_empty_texts = []
+        for idx, text in enumerate(texts):
+            if text.strip():
+                non_empty_indices.append(idx)
+                non_empty_texts.append(text)
+        
+        scores_list: list[ZeroShotResult | None] = [None] * len(caps)
+        for idx in range(len(caps)):
+            if idx not in non_empty_indices:
+                scores_list[idx] = ZeroShotResult(label_scores={}, model_version=self.model_version)
+                
+        if non_empty_texts:
+            hyps = [h for _, h in self._candidate_hypotheses]
+            outs = self._pipe(non_empty_texts, candidate_labels=hyps, multi_label=True)
+            if isinstance(outs, dict):
+                outs = [outs]
+            for idx, out in zip(non_empty_indices, outs, strict=True):
+                scores_by_hyp = {lbl: float(s) for lbl, s in zip(out["labels"], out["scores"], strict=True)}
+                scores = {}
+                for lid, hyp in self._candidate_hypotheses:
+                    scores[lid] = scores_by_hyp.get(hyp, 0.0)
+                scores_list[idx] = ZeroShotResult(label_scores=scores, model_version=self.model_version)
+                
+        return [s for s in scores_list if s is not None]
 
 
 def make_zero_shot(taxonomy: Taxonomy, model_name: str, use_stub: bool) -> ZeroShot:

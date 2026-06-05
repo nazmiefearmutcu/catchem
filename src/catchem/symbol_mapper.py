@@ -257,32 +257,34 @@ class SymbolMapper:
                 seen.add(sym)
                 out.append(SymbolMatch(text=alias_lc, symbol=sym, score=1.0, source="alias_exact"))
         # Fuzzy fallback for the title (top-3 only)
-        if len(out) < 3 and len(text) < 400:
-            extracted = process.extract(text, self._alias_keys, scorer=fuzz.partial_ratio, limit=3)
-            for alias, score, _ in extracted:
-                if len(alias.strip()) < 5:
-                    continue
-                if score / 100.0 < min_fuzzy:
-                    continue
-                sym = self._aliases[alias]
-                if sym in seen:
-                    continue
-                # Reject ONLY the substring-in-a-longer-word false positive,
-                # without killing genuine spelling-drift hits. fuzz.partial_ratio
-                # returns exactly 100 when the alias is a contiguous substring of
-                # the text — that's either (a) a real word-bounded mention (then
-                # the alias_exact pass already matched it and `sym in seen`
-                # skipped us above) or (b) the alias buried inside a longer word
-                # (Brentwood→"Brent", Disneyland→"Disney"), which we must drop.
-                # So apply the word-boundary check ONLY at score==100; a sub-100
-                # fuzzy score is real drift (Microsft→MSFT, Goldmann→GS) and the
-                # verbatim alias won't appear token-bounded, so requiring it
-                # there would (and previously did) make the whole fuzzy path
-                # dead. See round-5 regression finding.
-                if score >= 100.0 and not self._alias_exact_patterns[alias.lower()].search(lc):
-                    continue
-                seen.add(sym)
-                out.append(SymbolMatch(text=alias, symbol=sym, score=score / 100.0, source="alias_fuzzy"))
+        if len(out) < 3:
+            title = text.split("\n")[0] if "\n" in text else text
+            if len(title) < 400:
+                extracted = process.extract(title, self._alias_keys, scorer=fuzz.partial_ratio, limit=3)
+                for alias, score, _ in extracted:
+                    if len(alias.strip()) < 5:
+                        continue
+                    if score / 100.0 < min_fuzzy:
+                        continue
+                    sym = self._aliases[alias]
+                    if sym in seen:
+                        continue
+                    # Reject ONLY the substring-in-a-longer-word false positive,
+                    # without killing genuine spelling-drift hits. fuzz.partial_ratio
+                    # returns exactly 100 when the alias is a contiguous substring of
+                    # the text — that's either (a) a real word-bounded mention (then
+                    # the alias_exact pass already matched it and `sym in seen`
+                    # skipped us above) or (b) the alias buried inside a longer word
+                    # (Brentwood→"Brent", Disneyland→"Disney"), which we must drop.
+                    # So apply the word-boundary check ONLY at score==100; a sub-100
+                    # fuzzy score is real drift (Microsft→MSFT, Goldmann→GS) and the
+                    # verbatim alias won't appear token-bounded, so requiring it
+                    # there would (and previously did) make the whole fuzzy path
+                    # dead. See round-5 regression finding.
+                    if score >= 100.0 and not self._alias_exact_patterns[alias.lower()].search(title.lower()):
+                        continue
+                    seen.add(sym)
+                    out.append(SymbolMatch(text=alias, symbol=sym, score=score / 100.0, source="alias_fuzzy"))
         return out
 
     # ── loaders ──────────────────────────────────────────────────────────────

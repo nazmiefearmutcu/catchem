@@ -629,6 +629,141 @@ class Storage:
 
         return not existed
 
+    def insert_records(self, recs: list[FinancialImpactRecord]) -> list[bool]:
+        """Insert or replace multiple records in a single transaction.
+
+        Returns a list of booleans indicating for each record whether the capture_id
+        was new to the SQLite truth store.
+        """
+        if not recs:
+            return []
+
+        results: list[bool] = []
+        with self._lock, self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for rec in recs:
+                existed = (
+                    conn.execute(
+                        "SELECT 1 FROM records WHERE capture_id = ?",
+                        (rec.capture_id,),
+                    ).fetchone()
+                    is not None
+                )
+                results.append(not existed)
+
+                conn.execute(
+                    """
+                    INSERT INTO records (
+                        capture_id, doc_id, title, text_excerpt, domain, language,
+                        is_finance_relevant, finance_relevance_score,
+                        asset_classes_json, impact_reason_codes_json,
+                        candidate_symbols_json, candidate_entities_json,
+                        impact_horizons_json,
+                        sentiment_label, sentiment_score,
+                        evidence_json, reason_text, component_scores_json,
+                        diagnostic_enabled, diagnostic_json,
+                        processing_mode, model_versions_json,
+                        published_ts, created_at, url
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(capture_id) DO UPDATE SET
+                        doc_id=excluded.doc_id,
+                        title=excluded.title,
+                        text_excerpt=excluded.text_excerpt,
+                        domain=excluded.domain,
+                        language=excluded.language,
+                        is_finance_relevant=excluded.is_finance_relevant,
+                        finance_relevance_score=excluded.finance_relevance_score,
+                        asset_classes_json=excluded.asset_classes_json,
+                        impact_reason_codes_json=excluded.impact_reason_codes_json,
+                        candidate_symbols_json=excluded.candidate_symbols_json,
+                        candidate_entities_json=excluded.candidate_entities_json,
+                        impact_horizons_json=excluded.impact_horizons_json,
+                        sentiment_label=excluded.sentiment_label,
+                        sentiment_score=excluded.sentiment_score,
+                        evidence_json=excluded.evidence_json,
+                        reason_text=excluded.reason_text,
+                        component_scores_json=excluded.component_scores_json,
+                        diagnostic_enabled=excluded.diagnostic_enabled,
+                        diagnostic_json=excluded.diagnostic_json,
+                        processing_mode=excluded.processing_mode,
+                        model_versions_json=excluded.model_versions_json,
+                        published_ts=excluded.published_ts,
+                        created_at=excluded.created_at,
+                        url=excluded.url
+                    """,
+                    (
+                        rec.capture_id,
+                        rec.doc_id,
+                        rec.title,
+                        rec.text_excerpt,
+                        rec.domain,
+                        rec.language,
+                        int(rec.is_finance_relevant),
+                        float(rec.finance_relevance_score),
+                        json.dumps(rec.asset_classes),
+                        json.dumps(rec.impact_reason_codes),
+                        json.dumps(rec.candidate_symbols),
+                        json.dumps(rec.candidate_entities),
+                        json.dumps(rec.impact_horizons),
+                        rec.sentiment_label.value if rec.sentiment_label else None,
+                        rec.sentiment_score,
+                        json.dumps(rec.evidence_sentences),
+                        rec.reason_text,
+                        json.dumps(rec.component_scores),
+                        int(rec.diagnostic_multimodal_enabled),
+                        json.dumps(rec.diagnostic_multimodal_result)
+                        if rec.diagnostic_multimodal_result
+                        else None,
+                        rec.processing_mode.value,
+                        json.dumps(rec.model_versions),
+                        rec.published_ts.isoformat() if rec.published_ts else None,
+                        rec.created_at.isoformat(),
+                        rec.url,
+                    ),
+                )
+                # inverted index
+                conn.execute("DELETE FROM record_labels WHERE capture_id=?", (rec.capture_id,))
+                tuples: list[tuple[str, str, str]] = []
+                for v in rec.asset_classes:
+                    tuples.append((rec.capture_id, "asset_class", v))
+                for v in rec.impact_reason_codes:
+                    tuples.append((rec.capture_id, "reason_code", v))
+                for v in rec.candidate_symbols:
+                    tuples.append((rec.capture_id, "symbol", v))
+                for v in rec.candidate_entities:
+                    tuples.append((rec.capture_id, "entity", v))
+                for v in rec.impact_horizons:
+                    tuples.append((rec.capture_id, "horizon", v))
+                if tuples:
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO record_labels (capture_id, kind, value) VALUES (?,?,?)",
+                        tuples,
+                    )
+
+                for component, ver in rec.model_versions.items():
+                    conn.execute(
+                        """INSERT OR REPLACE INTO model_versions (component, version, updated_at)
+                           VALUES (?, ?, ?)""",
+                        (component, ver, datetime.now(UTC).isoformat()),
+                    )
+
+                self._pending_rows.append(_record_to_row(rec))
+
+        # Perform the parquet flush check outside the SQLite transaction and lock if threshold met
+        rows_to_flush = []
+        parquet_seq = 0
+        with self._lock:
+            if len(self._pending_rows) >= self.rotate_parquet_records:
+                rows_to_flush = list(self._pending_rows)
+                self._pending_rows.clear()
+                self._parquet_seq += 1
+                parquet_seq = self._parquet_seq
+
+        if rows_to_flush:
+            self._write_parquet(rows_to_flush, parquet_seq)
+
+        return results
+
     def flush(self) -> None:
         rows_to_flush = []
         parquet_seq = 0

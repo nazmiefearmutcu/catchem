@@ -3265,17 +3265,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if len(matched_records) >= limit:
                     break
 
-        # 2. Symbols: top mentions over the same recent corpus.
-        sym_counter: Counter[str] = Counter()
-        for r in records_raw:
-            for s in r.get("candidate_symbols", []):
-                sym_counter[s] += 1
+        # 2. Symbols: top matching mentions over the database (with fallback for mocks).
         matched_symbols: list[dict[str, Any]] = []
-        for sym, count in sym_counter.most_common(100):
-            if q_lower in sym.lower():
-                matched_symbols.append({"symbol": sym, "count": int(count)})
-                if len(matched_symbols) >= limit:
-                    break
+        try:
+            with sup.storage._connection() as conn:
+                rows = conn.execute(
+                    """SELECT value, COUNT(*) as cnt
+                       FROM record_labels
+                       WHERE kind = 'symbol' AND LOWER(value) LIKE ?
+                       GROUP BY value
+                       ORDER BY cnt DESC
+                       LIMIT ?""",
+                    (f"%{q_lower}%", limit),
+                ).fetchall()
+            if isinstance(rows, list) and len(rows) > 0:
+                for r in rows:
+                    matched_symbols.append({"symbol": r["value"], "count": int(r["cnt"])})
+        except Exception:
+            pass
+
+        if not matched_symbols:
+            sym_counter: Counter[str] = Counter()
+            for r in records_raw:
+                if isinstance(r, dict):
+                    for s in r.get("candidate_symbols", []):
+                        sym_counter[s] += 1
+            for sym, count in sym_counter.most_common(100):
+                if q_lower in sym.lower():
+                    matched_symbols.append({"symbol": sym, "count": int(count)})
+                    if len(matched_symbols) >= limit:
+                        break
 
         # 3. Clusters: cluster_id prefix or any dominant_symbol substring.
         matched_clusters: list[dict[str, Any]] = []
@@ -4082,13 +4101,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ui/top-symbols", response_model=UiTopSymbolsResponse)
     def ui_top_symbols(limit: int = Query(20, ge=1, le=100)) -> UiTopSymbolsResponse:
         sup = _get_supervisor()
-        rows = sup.storage.recent_records(limit=500, relevant_only=True)
-        c = Counter()
-        for r in rows:
-            for s in r.get("candidate_symbols", []):
-                c[s] += 1
+        with sup.storage._connection() as conn:
+            rows = conn.execute(
+                """SELECT value, COUNT(*) as cnt
+                   FROM record_labels
+                   WHERE kind = 'symbol'
+                   GROUP BY value
+                   ORDER BY cnt DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
         return UiTopSymbolsResponse(
-            items=[TopSymbolEntry(symbol=k, count=n) for k, n in c.most_common(limit)]
+            items=[TopSymbolEntry(symbol=r["value"], count=r["cnt"]) for r in rows]
         )
 
     @app.get("/ui/top-reasons", response_model=UiTopReasonsResponse)

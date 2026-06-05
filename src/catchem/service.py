@@ -312,6 +312,26 @@ class ProcessIsolatedZeroShot:
         self._cache.set(key, res)
         return res
 
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[ZeroShotResult]:
+        futures = []
+        results = [None] * len(caps)
+        indices_to_compute = []
+
+        for idx, cap in enumerate(caps):
+            val = self._cache.get(cap.capture_id)
+            if val is not None:
+                results[idx] = val
+            else:
+                indices_to_compute.append(idx)
+                futures.append(self._pool.submit(_worker_classify_zero_shot, cap))
+
+        for idx, fut in zip(indices_to_compute, futures, strict=True):
+            res = fut.result()
+            results[idx] = res
+            self._cache.set(caps[idx].capture_id, res)
+
+        return [r for r in results if r is not None]
+
 
 class ProcessIsolatedSentiment:
     def __init__(self, pool: Executor, model_version: str, cache_maxsize: int = 256) -> None:
@@ -331,6 +351,26 @@ class ProcessIsolatedSentiment:
         res = self._pool.submit(_worker_classify_sentiment, cap).result()
         self._cache.set(key, res)
         return res
+
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[SentimentResult]:
+        futures = []
+        results = [None] * len(caps)
+        indices_to_compute = []
+
+        for idx, cap in enumerate(caps):
+            val = self._cache.get(cap.capture_id)
+            if val is not None:
+                results[idx] = val
+            else:
+                indices_to_compute.append(idx)
+                futures.append(self._pool.submit(_worker_classify_sentiment, cap))
+
+        for idx, fut in zip(indices_to_compute, futures, strict=True):
+            res = fut.result()
+            results[idx] = res
+            self._cache.set(caps[idx].capture_id, res)
+
+        return [r for r in results if r is not None]
 
 
 class ProcessIsolatedEmbedder:
@@ -514,6 +554,161 @@ class CatchemService:
             "scoring": "rule:v1",
         }
 
+    # ── batch-capture pipeline ──────────────────────────────────────────────
+    def process_batch(self, caps: list[AwarenessCaptureView]) -> list[FinancialImpactRecord]:
+        if not caps:
+            return []
+
+        try:
+            is_patched = (self.process.__func__ is not CatchemService.process)
+        except AttributeError:
+            is_patched = True
+
+        if is_patched:
+            return [self.process(cap) for cap in caps]
+
+        # Step 1: Evaluate prefilters
+        pres = [self.prefilter.evaluate(cap) for cap in caps]
+
+        # Step 2: Zero Shot Classifications (batched if supported)
+        if hasattr(self.zero_shot, "classify_batch"):
+            zs_results = self.zero_shot.classify_batch(caps)
+        else:
+            zs_results = [self.zero_shot.classify(cap) for cap in caps]
+
+        # Step 3: Sentiment Classifications (batched if supported)
+        if hasattr(self.sentiment, "classify_batch"):
+            sent_results = self.sentiment.classify_batch(caps)
+        else:
+            sent_results = [self.sentiment.classify(cap) for cap in caps]
+
+        # Step 4: Vector Embeddings (batched if supported)
+        if self.vector_index is not None:
+            try:
+                embed_texts = [(cap.title or "") + "\n" + (cap.text or "")[:1500] for cap in caps]
+                if hasattr(self.embedder, "encode_many"):
+                    vecs = self.embedder.encode_many(embed_texts)
+                else:
+                    vecs = [self.embedder.encode(t) for t in embed_texts]
+                for cap, vec in zip(caps, vecs, strict=True):
+                    self.vector_index.save(cap.capture_id, vec)
+            except Exception as exc:
+                logger.warning("embedding_save_failed", err=str(exc))
+
+        # Step 5: Element-wise pipeline for the remaining non-heavy components
+        records = []
+        for cap, pre, zs, sent in zip(caps, pres, zs_results, sent_results, strict=True):
+            clean_text = clean_boilerplate_text(cap.text or "")
+            ents = self.entity_linker.extract(cap.title, clean_text)
+
+            # Symbol mapping over title (title is more discriminative)
+            symbol_matches = self.symbol_mapper.map_text((cap.title or "") + "\n" + clean_text[:2000])
+            candidate_symbols = [m.symbol for m in symbol_matches]
+            candidate_entities = ents.unique_texts()
+
+            # Light reranking only when there are >1 symbol candidates
+            if len(candidate_symbols) > 1:
+                ranked = self.reranker.rank(cap.title or "", candidate_symbols)
+                candidate_symbols = [c for c, _ in ranked]
+
+            ac_scores = {k: v for k, v in zs.label_scores.items() if k in self.taxonomy.asset_class_ids}
+            rc_scores = {k: v for k, v in zs.label_scores.items() if k in self.taxonomy.reason_code_ids}
+            neg_scores = {k: v for k, v in zs.label_scores.items() if k in self.taxonomy.negative_class_ids}
+
+            if "equities" in self.taxonomy.asset_class_ids:
+                has_equity_hit = any(h.kind == "cashtag" for h in ents.hits) or any(
+                    h.kind == "ticker" and _looks_like_equity_ticker(h.text)
+                    for h in ents.hits
+                )
+                if has_equity_hit:
+                    ac_scores["equities"] = max(ac_scores.get("equities", 0.0), 0.6)
+
+            finance_hit_kinds = {"cashtag", "ticker", "currency", "central_bank", "index", "commodity", "crypto"}
+            finance_hits = sum(1 for h in ents.hits if h.kind in finance_hit_kinds)
+            density = estimate_entity_density(num_hits=finance_hits, text_length=len(cap.text or ""))
+            non_neutral = sent.score if sent.label in (SentimentLabel.POSITIVE, SentimentLabel.NEGATIVE) else 0.0
+
+            scoring_outputs = score(
+                ScoringInputs(
+                    prefilter_rule_score=pre.rule_score,
+                    domain_prior=pre.domain_prior,
+                    source_type_prior=pre.source_type_prior,
+                    asset_class_scores=ac_scores,
+                    reason_code_scores=rc_scores,
+                    negative_class_scores=neg_scores,
+                    sentiment_confidence=non_neutral,
+                    entity_density=density,
+                ),
+                taxonomy=self.taxonomy,
+            )
+
+            # Horizons
+            impact_horizons = _horizons_from_reasons(scoring_outputs.reason_codes_passed)
+
+            # Evidence
+            label_terms = (
+                list(scoring_outputs.asset_classes_passed)
+                + list(scoring_outputs.reason_codes_passed)
+            )
+            entity_terms = candidate_entities[:8]
+            evidence = extract_evidence(cap, label_terms, entity_terms, top_k=self.taxonomy.threshold("evidence_top_k", 3))
+
+            reason_text = build_reason_text(
+                scoring_outputs.asset_classes_passed,
+                scoring_outputs.reason_codes_passed,
+                sent.label.value if sent.label != SentimentLabel.UNKNOWN else None,
+            )
+
+            # Diagnostic (research mode only)
+            diag_payload = None
+            if self._diagnostic_adapter is not None:
+                diag_payload = self._diagnostic_adapter.diagnostic_payload(
+                    capture_id=cap.capture_id, text=cap.text
+                )
+
+            # Component scores from zero-shot too (keep top-3 per group for transparency)
+            comp = dict(scoring_outputs.component_scores)
+            for k, v in sorted(ac_scores.items(), key=lambda kv: -kv[1])[:3]:
+                comp[f"ac_{k}"] = float(v)
+            for k, v in sorted(rc_scores.items(), key=lambda kv: -kv[1])[:3]:
+                comp[f"rc_{k}"] = float(v)
+            if neg_scores:
+                comp["neg_max"] = float(max(neg_scores.values()))
+
+            text_excerpt = (cap.text or "")[: self.settings.replay.text_excerpt_chars] or (cap.title or "(no body)")
+
+            records.append(
+                FinancialImpactRecord(
+                    capture_id=cap.capture_id,
+                    doc_id=cap.doc_id,
+                    title=cap.title,
+                    text_excerpt=text_excerpt,
+                    published_ts=cap.published_ts,
+                    domain=cap.domain,
+                    language=cap.language,
+                    url=cap.url,
+                    is_finance_relevant=bool(scoring_outputs.is_finance_relevant and pre.keep),
+                    finance_relevance_score=float(scoring_outputs.finance_relevance_score),
+                    asset_classes=list(scoring_outputs.asset_classes_passed),
+                    impact_reason_codes=list(scoring_outputs.reason_codes_passed),
+                    candidate_symbols=candidate_symbols[:8],
+                    candidate_entities=candidate_entities[:12],
+                    impact_horizons=impact_horizons,
+                    sentiment_label=sent.label,
+                    sentiment_score=float(sent.score),
+                    evidence_sentences=evidence,
+                    reason_text=reason_text,
+                    component_scores=comp,
+                    diagnostic_multimodal_enabled=self.diagnostic_enabled,
+                    diagnostic_multimodal_result=diag_payload,
+                    processing_mode=_MODE_MAP[self.settings.mode],
+                    model_versions=dict(self.model_versions),
+                    created_at=datetime.now(UTC),
+                )
+            )
+
+        return records
+
     # ── single-capture pipeline ─────────────────────────────────────────────
     def process(self, cap: AwarenessCaptureView) -> FinancialImpactRecord:
         # Stage A
@@ -527,7 +722,7 @@ class CatchemService:
         ents = self.entity_linker.extract(cap.title, clean_text)
 
         # Symbol mapping over title (title is more discriminative)
-        symbol_matches = self.symbol_mapper.map_text((cap.title or "") + "\n" + clean_text[:600])
+        symbol_matches = self.symbol_mapper.map_text((cap.title or "") + "\n" + clean_text[:2000])
         candidate_symbols = [m.symbol for m in symbol_matches]
         candidate_entities = ents.unique_texts()
 

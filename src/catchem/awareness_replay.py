@@ -16,6 +16,16 @@ from .storage import Storage
 logger = get_logger("catchem.awareness_replay")
 
 
+class BatchPartialFailure(Exception):
+    """Raised when batch processing partially fails and runs item-by-item fallback."""
+
+    def __init__(self, processed: int, failed: int, skipped: int) -> None:
+        super().__init__(f"Batch partial failure: processed={processed}, failed={failed}, skipped={skipped}")
+        self.processed = processed
+        self.failed = failed
+        self.skipped = skipped
+
+
 class ReplayRunner:
     """Replay finalized Awareness JSONL into a callback. Persists per-file offsets."""
 
@@ -71,6 +81,104 @@ class ReplayRunner:
                     self.storage.save_offset(offset)
                     self.storage.checkpoint()
                     return {"processed": processed, "skipped": skipped, "failed": failed}
+
+            # End of file — persist final offset.
+            self.storage.save_offset(offset)
+            self.storage.checkpoint()
+        return {"processed": processed, "skipped": skipped, "failed": failed}
+
+    def run_once_batch(
+        self,
+        handle_batch: Callable[[list[AwarenessCaptureView]], None],
+        max_records: int | None = None,
+        batch_size: int = 32,
+    ) -> dict[str, int]:
+        """Process one pass over all finalized files in batches. Returns counters."""
+        processed = 0
+        skipped = 0
+        failed = 0
+        batch_size = max(1, int(batch_size))
+
+        for path in self.files():
+            offset = self.storage.get_offset(str(path))
+            last_persist = time.monotonic()
+            batch = []
+            offsets_in_batch = []
+
+            for line_idx, cap in iter_captures(path, start_offset=offset.line_offset):
+                limit = batch_size
+                if max_records is not None:
+                    remaining = max_records - processed
+                    if remaining <= 0:
+                        break
+                    limit = min(batch_size, remaining)
+
+                batch.append(cap)
+                offsets_in_batch.append(
+                    ReplayOffset(
+                        source_path=str(path),
+                        line_offset=line_idx,
+                        last_capture_id=cap.capture_id,
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+
+                if len(batch) >= limit:
+                    try:
+                        handle_batch(batch)
+                        processed += len(batch)
+                    except BatchPartialFailure as bpf:
+                        processed += bpf.processed
+                        failed += bpf.failed
+                        skipped += bpf.skipped
+                    except Exception as exc:
+                        logger.exception("batch_handler_error", err=str(exc))
+                        failed += len(batch)
+                        skipped += len(batch)
+
+                    offset = offsets_in_batch[-1]
+                    batch = []
+                    offsets_in_batch = []
+
+                    if (time.monotonic() - last_persist) >= self.offset_persist_seconds:
+                        self.storage.save_offset(offset)
+                        last_persist = time.monotonic()
+
+                    if max_records and processed >= max_records:
+                        self.storage.save_offset(offset)
+                        self.storage.checkpoint()
+                        return {"processed": processed, "skipped": skipped, "failed": failed}
+
+            if batch:
+                if max_records is not None:
+                    remaining = max_records - processed
+                    if remaining > 0:
+                        allowed_batch = batch[:remaining]
+                        try:
+                            handle_batch(allowed_batch)
+                            processed += len(allowed_batch)
+                        except BatchPartialFailure as bpf:
+                            processed += bpf.processed
+                            failed += bpf.failed
+                            skipped += bpf.skipped
+                        except Exception as exc:
+                            logger.exception("batch_handler_error", err=str(exc))
+                            failed += len(allowed_batch)
+                            skipped += len(allowed_batch)
+                        offset = offsets_in_batch[len(allowed_batch) - 1]
+                else:
+                    try:
+                        handle_batch(batch)
+                        processed += len(batch)
+                    except BatchPartialFailure as bpf:
+                        processed += bpf.processed
+                        failed += bpf.failed
+                        skipped += bpf.skipped
+                    except Exception as exc:
+                        logger.exception("batch_handler_error", err=str(exc))
+                        failed += len(batch)
+                        skipped += len(batch)
+                    offset = offsets_in_batch[-1]
 
             # End of file — persist final offset.
             self.storage.save_offset(offset)

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .awareness_reader import discover_awareness_jsonl_root
-from .awareness_replay import ReplayRunner
+from .awareness_replay import BatchPartialFailure, ReplayRunner
 from .embeddings import VectorIndex
 from .logging import configure_logging, get_logger
 from .reviewers import (
@@ -137,6 +137,54 @@ class Supervisor:
         self._maybe_schedule_second_opinion(cap, rec)
         self._maybe_dispatch_webhook(rec)
         return rec
+
+    def process_captures_batch(self, caps: list[AwarenessCaptureView], force_sync: bool = False) -> list[Any]:
+        if not caps:
+            return []
+
+        if self.settings.live.ingestion_queue_enabled and not force_sync:
+            results: list[Any] = []
+            for cap in caps:
+                try:
+                    payload_json = cap.model_dump_json()
+                    self.storage.enqueue_capture(cap.capture_id, payload_json)
+                    logger.info("capture_enqueued", capture_id=cap.capture_id)
+                    results.append(True)
+                except Exception as exc:
+                    logger.error("capture_enqueue_failed", capture_id=cap.capture_id, error=str(exc))
+                    logger.info("capture_sync_fallback", capture_id=cap.capture_id)
+                    try:
+                        rec = self.process_capture(cap, force_sync=True)
+                        results.append(rec or True)
+                    except Exception as fallback_exc:
+                        logger.error("capture_sync_fallback_failed", capture_id=cap.capture_id, error=str(fallback_exc))
+                        results.append(False)
+            return results
+
+        # Synchronous batch processing
+        try:
+            recs = self.service.process_batch(caps)
+            new_list = self.storage.insert_records(recs)
+            for cap, rec, was_inserted in zip(caps, recs, new_list, strict=True):
+                self._maybe_schedule_second_opinion(cap, rec)
+                if was_inserted:
+                    self._maybe_dispatch_webhook(rec)
+            return list(recs)
+        except Exception as exc:
+            logger.warning("batch_processing_failed_falling_back_to_item_by_item", error=str(exc))
+            results = []
+            for cap in caps:
+                try:
+                    rec = self.process_capture(cap, force_sync=True)
+                    results.append(rec or True)
+                except Exception as cap_exc:
+                    logger.error("item_by_item_fallback_failed", capture_id=cap.capture_id, error=str(cap_exc))
+                    try:
+                        self.storage.record_failure(cap.capture_id, str(cap_exc), cap.model_dump_json()[:2000])
+                    except Exception:
+                        pass
+                    results.append(False)
+            return results
 
     def _queue_worker_loop(self) -> None:
         """Background thread loop draining the persistent queue."""
@@ -292,20 +340,41 @@ class Supervisor:
         inserted = 0
         replaced = 0
 
-        def handle(cap: AwarenessCaptureView) -> None:
+        def handle_batch(batch: list[AwarenessCaptureView]) -> None:
             nonlocal inserted, replaced
-            rec = self.service.process(cap)
-            was_inserted = self.storage.insert_record(rec)
-            self._maybe_schedule_second_opinion(cap, rec)
-            # Webhook only on freshly-inserted records — replaying the
-            # same JSONL shouldn't spam the channel with duplicate alerts.
-            if was_inserted:
-                self._maybe_dispatch_webhook(rec)
-                inserted += 1
-            else:
-                replaced += 1
+            try:
+                recs = self.service.process_batch(batch)
+                new_list = self.storage.insert_records(recs)
+                for cap, rec, was_inserted in zip(batch, recs, new_list, strict=True):
+                    self._maybe_schedule_second_opinion(cap, rec)
+                    if was_inserted:
+                        self._maybe_dispatch_webhook(rec)
+                        inserted += 1
+                    else:
+                        replaced += 1
+            except Exception as exc:
+                logger.warning("batch_replay_failed_falling_back_to_item_by_item", error=str(exc))
+                batch_failed = 0
+                batch_processed = 0
+                for cap in batch:
+                    try:
+                        rec = self.service.process(cap)
+                        was_inserted = self.storage.insert_record(rec)
+                        self._maybe_schedule_second_opinion(cap, rec)
+                        if was_inserted:
+                            self._maybe_dispatch_webhook(rec)
+                            inserted += 1
+                        else:
+                            replaced += 1
+                        batch_processed += 1
+                    except Exception as item_exc:
+                        logger.exception("item_by_item_replay_fallback_failed", capture_id=cap.capture_id, err=str(item_exc))
+                        self.storage.record_failure(cap.capture_id, str(item_exc), cap.text[:2000] if cap.text else "")
+                        batch_failed += 1
+                if batch_failed > 0:
+                    raise BatchPartialFailure(processed=batch_processed, failed=batch_failed, skipped=batch_failed)
 
-        counts = runner.run_once(handle, max_records=max_records)
+        counts = runner.run_once_batch(handle_batch, max_records=max_records, batch_size=self.settings.replay.batch_size)
         self.storage.flush()
         records_after = self.storage.count_records()
         dlq_after = self.storage.dlq_count()

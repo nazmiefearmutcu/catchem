@@ -21,6 +21,7 @@ class SentimentResult:
 
 class SentimentClassifier(Protocol):
     def classify(self, cap: AwarenessCaptureView) -> SentimentResult: ...
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[SentimentResult]: ...
 
 
 _POS_TERMS = (
@@ -78,6 +79,9 @@ class SentimentStub:
             return SentimentResult(label=SentimentLabel.NEGATIVE, score=score, model_version="stub-sentiment/v1")
         return SentimentResult(label=SentimentLabel.NEUTRAL, score=0.55, model_version="stub-sentiment/v1")
 
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[SentimentResult]:
+        return [self.classify(cap) for cap in caps]
+
 
 class SentimentModel:
     """Wraps a HF text-classification pipeline."""
@@ -112,6 +116,45 @@ class SentimentModel:
         if "neg" in lbl_raw:
             return SentimentResult(label=SentimentLabel.NEGATIVE, score=score, model_version=self.model_version)
         return SentimentResult(label=SentimentLabel.NEUTRAL, score=score, model_version=self.model_version)
+
+    def classify_batch(self, caps: list[AwarenessCaptureView]) -> list[SentimentResult]:
+        texts = [(cap.title or "") + "\n" + (cap.text or "")[:1500] for cap in caps]
+        results = [None] * len(caps)
+        
+        non_empty_indices = []
+        non_empty_texts = []
+        for idx, text in enumerate(texts):
+            if text.strip():
+                non_empty_indices.append(idx)
+                non_empty_texts.append(text)
+            else:
+                results[idx] = SentimentResult(label=SentimentLabel.UNKNOWN, score=0.0, model_version=self.model_version)
+                
+        if non_empty_texts:
+            outs = self._pipe(non_empty_texts, truncation=True)
+            if isinstance(outs, dict):
+                outs = [outs]
+            for idx, out in zip(non_empty_indices, outs, strict=True):
+                if not out:
+                    results[idx] = SentimentResult(label=SentimentLabel.NEUTRAL, score=0.5, model_version=self.model_version)
+                    continue
+                scored = out
+                if isinstance(scored, list):
+                    scored = sorted(scored, key=lambda x: x["score"], reverse=True)
+                    top = scored[0]
+                else:
+                    top = scored
+                lbl_raw = str(top.get("label", "")).lower()
+                score = float(top.get("score", 0.5))
+                if "pos" in lbl_raw:
+                    res_label = SentimentLabel.POSITIVE
+                elif "neg" in lbl_raw:
+                    res_label = SentimentLabel.NEGATIVE
+                else:
+                    res_label = SentimentLabel.NEUTRAL
+                results[idx] = SentimentResult(label=res_label, score=score, model_version=self.model_version)
+                
+        return [r for r in results if r is not None]
 
 
 def make_sentiment(model_name: str, use_stub: bool) -> SentimentClassifier:

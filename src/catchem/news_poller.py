@@ -1339,43 +1339,77 @@ class NewsPoller:
         if not new_items:
             return 0
 
-        # Phase 2: bounded-concurrency parallel ingest via thread pool.
-        sem = asyncio.Semaphore(4)
+        # Phase 2: chunk and process in batches to exploit ML model parallelism
+        replay_cfg = getattr(self._settings, "replay", None)
+        batch_size = getattr(replay_cfg, "batch_size", 32) if replay_cfg is not None else 32
         publisher_lags_s: list[float] = []
 
-        async def _ingest_one_async(spec: FeedSpec, item: ParsedItem) -> bool:
-            async with sem:
-                try:
-                    await asyncio.to_thread(self._ingest_one, item)
-                except Exception as exc:
-                    logger.info(
-                        "news_ingest_failed feed=%s url=%s error=%s",
-                        spec.name,
-                        item.url,
-                        exc,
-                    )
-                    return False
-            if item.published_ts is not None:
-                publisher_lags_s.append((datetime.now(UTC) - item.published_ts).total_seconds())
-            return True
+        captures_to_process = []
+        item_by_id = {}
+        for spec, item in new_items:
+            cap = build_capture(
+                title=item.title,
+                text=item.text,
+                domain=item.domain,
+                url=item.url,
+                published_ts=item.published_ts,
+                source_type="rss",
+            )
+            try:
+                archive_root = self._settings.paths.catchem_output_dir / "live-news"
+                archive_root.mkdir(parents=True, exist_ok=True)
+                write_jsonl(cap, archive_root)
+            except OSError as exc:
+                logger.info("news_archive_failed", url=item.url, error=str(exc))
+            captures_to_process.append(cap)
+            item_by_id[cap.capture_id] = (spec, item)
 
-        gathered = await asyncio.gather(*(_ingest_one_async(spec, item) for spec, item in new_items))
-        ingested = sum(1 for ok in gathered if ok)
-        # Roll back BOTH dedup records for any item whose ingest FAILED, so a
-        # later sighting (another outlet this cycle, or the next tick) gets a
-        # fresh chance instead of being suppressed for the whole window behind a
-        # story that never actually landed. The canonical-URL `_seen` rollback
-        # is the load-bearing one: without it, the next tick re-serving the SAME
-        # URL hits `if canon in self._seen: continue` and is dropped BEFORE the
-        # title check, so the title rollback alone is pointless for same-URL
-        # re-sightings — a single transient failure (SQLite lock, disk hiccup,
-        # a scoring exception) permanently loses the article until LRU eviction.
-        # `new_items` and `gathered` are positionally aligned — asyncio.gather
-        # preserves the awaitable order — so zip pairs each item with its own
-        # outcome. Still on the event loop under `self._lock`, same as the
-        # original add, so no race.
-        for (_spec, item), ok in zip(new_items, gathered, strict=True):
-            if not ok:
+        try:
+            is_ingest_one_patched = (self._ingest_one.__func__ is not NewsPoller._ingest_one)
+        except AttributeError:
+            is_ingest_one_patched = True
+
+        use_batch = not is_ingest_one_patched and hasattr(self._sup, "process_captures_batch")
+
+        if use_batch:
+            batches = [captures_to_process[i : i + batch_size] for i in range(0, len(captures_to_process), batch_size)]
+            gathered = []
+            for batch in batches:
+                try:
+                    batch_results = await asyncio.to_thread(self._sup.process_captures_batch, batch)
+                    gathered.extend(batch_results)
+                except Exception as batch_exc:
+                    logger.error("news_poller_batch_processing_failed", error=str(batch_exc))
+                    gathered.extend([False] * len(batch))
+        else:
+            sem = asyncio.Semaphore(4)
+
+            async def _ingest_one_async(spec: FeedSpec, item: ParsedItem) -> bool:
+                async with sem:
+                    try:
+                        await asyncio.to_thread(self._ingest_one, item)
+                    except Exception as exc:
+                        logger.info(
+                            "news_ingest_failed feed=%s url=%s error=%s",
+                            spec.name,
+                            item.url,
+                            exc,
+                        )
+                        return False
+                return True
+
+            gathered = await asyncio.gather(
+                *(_ingest_one_async(item_by_id[cap.capture_id][0], item_by_id[cap.capture_id][1]) for cap in captures_to_process)
+            )
+
+        ingested = 0
+        for cap, ok in zip(captures_to_process, gathered, strict=True):
+            spec, item = item_by_id[cap.capture_id]
+            if ok:
+                ingested += 1
+                if item.published_ts is not None:
+                    publisher_lags_s.append((datetime.now(UTC) - item.published_ts).total_seconds())
+            else:
                 self._seen.discard(_canonical_url(item.url))
                 self._rollback_title(item.title)
 

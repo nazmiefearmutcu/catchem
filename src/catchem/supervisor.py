@@ -372,7 +372,7 @@ class Supervisor:
                         self.storage.record_failure(cap.capture_id, str(item_exc), cap.text[:2000] if cap.text else "")
                         batch_failed += 1
                 if batch_failed > 0:
-                    raise BatchPartialFailure(processed=batch_processed, failed=batch_failed, skipped=batch_failed)
+                    raise BatchPartialFailure(processed=batch_processed, failed=batch_failed, skipped=batch_failed) from exc
 
         counts = runner.run_once_batch(handle_batch, max_records=max_records, batch_size=self.settings.replay.batch_size)
         self.storage.flush()

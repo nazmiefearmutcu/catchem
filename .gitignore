@@ -70,3 +70,4 @@ videos/
 .playwright-cli/
 .ralph/
 cache/
+.agents/
